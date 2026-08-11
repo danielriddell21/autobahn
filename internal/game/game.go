@@ -9,7 +9,6 @@ package game
 import (
 	"fmt"
 	"image"
-	"image/color"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 
@@ -71,11 +70,14 @@ type Game struct {
 	shader    rl.Shader
 	hasShader bool
 
-	camMode  CameraMode
-	cam      rl.Camera3D
-	camPos   mathx.Vec
-	aiCam    rl.Camera3D
-	aiTarget rl.RenderTexture2D
+	camMode CameraMode
+	// overheadHeight is the altitude of the overhead camera, in metres. The
+	// media tool raises it to take in a whole district.
+	overheadHeight float32
+	cam            rl.Camera3D
+	camPos         mathx.Vec
+	aiCam          rl.Camera3D
+	aiTarget       rl.RenderTexture2D
 
 	scanner   *vision.Scanner
 	visionCam vision.Camera
@@ -83,6 +85,7 @@ type Game struct {
 	dets      []vision.Detection
 
 	auto       bool
+	showHUD    bool
 	showPanel  bool
 	showLabels bool
 	showHelp   bool
@@ -148,7 +151,8 @@ func New(opts Options) *Game {
 	g := &Game{
 		opts:  opts,
 		world: sim.NewWorld(sim.Config{Seed: opts.Seed, Traffic: opts.Traffic}),
-		auto:  opts.Autopilot, showPanel: opts.ShowPanel, showLabels: true,
+		auto:  opts.Autopilot, showPanel: opts.ShowPanel,
+		showHUD: true, showLabels: true, overheadHeight: 34,
 		scanner:   vision.NewScanner(),
 		visionCam: vision.DefaultCamera(opts.CamWidth, opts.CamHeight),
 	}
@@ -279,7 +283,9 @@ func (g *Game) Step(dt float32) {
 	rl.BeginDrawing()
 	rl.ClearBackground(colSky)
 	g.drawWorld(g.cam, g.camMode != CameraBonnet)
-	g.drawHUD()
+	if g.showHUD {
+		g.drawHUD()
+	}
 	rl.EndDrawing()
 	g.capture()
 }
@@ -289,20 +295,69 @@ func (g *Game) capture() {
 	if g.recorder == nil || g.recorder.Done() {
 		return
 	}
+	if img := g.Snapshot(); img != nil {
+		g.recorder.Add(img)
+	}
+}
+
+// Snapshot returns the frame currently on screen, HUD and all. It is what the
+// recorder captures and what the media tool tiles into contact sheets.
+func (g *Game) Snapshot() image.Image {
 	shot := rl.LoadImageFromScreen()
 	if shot == nil {
-		return
+		return nil
 	}
-	px := rl.LoadImageColors(shot)
-	img := image.NewRGBA(image.Rect(0, 0, int(shot.Width), int(shot.Height)))
-	for i, c := range px[:min(len(px), int(shot.Width)*int(shot.Height))] {
-		img.Set(i%int(shot.Width), i/int(shot.Width),
-			color.RGBA{R: c.R, G: c.G, B: c.B, A: 255})
-	}
-	rl.UnloadImageColors(px)
-	rl.UnloadImage(shot)
-	g.recorder.Add(img)
+	defer rl.UnloadImage(shot)
+	return toRGBA(shot)
 }
+
+// CameraImage returns the AI camera's annotated view: the exact image the
+// scanner reads, boxes included. It is only refreshed on a perception tick, so
+// consecutive calls within one tick return the same picture.
+func (g *Game) CameraImage() image.Image {
+	shot := rl.LoadImageFromTexture(g.aiTarget.Texture)
+	if shot == nil {
+		return nil
+	}
+	defer rl.UnloadImage(shot)
+	// A render target is stored bottom-up, so flip it to what the camera saw.
+	rl.ImageFlipVertical(shot)
+	return toRGBA(shot)
+}
+
+func toRGBA(src *rl.Image) *image.RGBA {
+	w, h := int(src.Width), int(src.Height)
+	px := rl.LoadImageColors(src)
+	defer rl.UnloadImageColors(px)
+
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for i, c := range px[:min(len(px), w*h)] {
+		// Writing the pixel slice directly avoids Set's bounds check per pixel.
+		o := i * 4
+		img.Pix[o], img.Pix[o+1], img.Pix[o+2], img.Pix[o+3] = c.R, c.G, c.B, 255
+	}
+	return img
+}
+
+// CameraMode returns the viewpoint currently in use.
+func (g *Game) CameraMode() CameraMode { return g.camMode }
+
+// SetCameraMode selects the viewpoint.
+func (g *Game) SetCameraMode(m CameraMode) { g.camMode = m % numCameraModes }
+
+// ShowPanel turns the AI camera panel on or off.
+func (g *Game) ShowPanel(on bool) { g.showPanel = on }
+
+// ShowHUD turns the whole overlay on or off, for media that wants the world
+// on its own.
+func (g *Game) ShowHUD(on bool) { g.showHUD = on }
+
+// SetOverheadHeight sets the altitude of the overhead camera in metres.
+func (g *Game) SetOverheadHeight(m float32) { g.overheadHeight = max(m, 8) }
+
+// Driver exposes the autopilot controller, so a caller can gate on what it is
+// currently doing.
+func (g *Game) Driver() *autopilot.Driver { return g.driver }
 
 // SaveRecording writes the captured drive, if recording was enabled.
 func (g *Game) SaveRecording(path string) error {
@@ -374,7 +429,7 @@ func (g *Game) updateCameras(dt float32) {
 		g.cam.Position = vec3(mount.X, 1.45, mount.Z)
 		g.cam.Target = vec3(look.X, 1.25, look.Z)
 	case CameraHigh:
-		g.cam.Position = vec3(p.Pos.X, 34, p.Pos.Z+0.1)
+		g.cam.Position = vec3(p.Pos.X, g.overheadHeight, p.Pos.Z+0.1)
 		g.cam.Target = vec3(p.Pos.X, 0, p.Pos.Z)
 	default:
 		// Chase camera: trails the car, and swings wider as speed rises.
@@ -438,16 +493,32 @@ func (g *Game) scanAICamera() {
 	}
 }
 
-// Run opens a window and drives the game loop until the user quits.
-func Run(opts Options) error {
+// WithWindow opens a window, builds a game in it, and hands it to fn. The
+// window and the game are torn down before it returns, whatever fn does.
+//
+// It exists so raylib's setup lives in one place: the game loop and the media
+// tool both go through here rather than each initialising a window themselves.
+// A window is still required even when nothing is watching, because the scene
+// is drawn on the GPU; on a headless Linux box run under xvfb-run.
+func WithWindow(opts Options, fn func(*Game) error) error {
 	rl.SetTraceLogLevel(rl.LogWarning)
 	rl.SetConfigFlags(rl.FlagMsaa4xHint)
 	rl.InitWindow(int32(opts.Width), int32(opts.Height), "Autobahn")
 	defer rl.CloseWindow()
-	rl.SetTargetFPS(60)
 
 	g := New(opts)
 	defer g.Close()
+	return fn(g)
+}
+
+// Run opens a window and drives the game loop until the user quits.
+func Run(opts Options) error {
+	return WithWindow(opts, run)
+}
+
+func run(g *Game) error {
+	opts := g.opts
+	rl.SetTargetFPS(60)
 
 	for !rl.WindowShouldClose() {
 		dt := rl.GetFrameTime()

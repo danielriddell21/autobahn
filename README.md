@@ -11,6 +11,10 @@ Both drivers are scored by the same judge, so the comparison is honest.
 
 ![Go 1.26](https://img.shields.io/badge/go-1.26-blue)
 
+![The autopilot driving the city](docs/media/drive.gif)
+
+*The autopilot at the wheel. The panel in the corner is the image it is reading.*
+
 ## Running it
 
 ```sh
@@ -89,6 +93,10 @@ detections: a class and a rectangle. That is all the autopilot ever receives.
 The panel in the corner is not a visualisation of the AI's state. It is the
 actual image being scanned. What you see is what it gets.
 
+![The annotated camera feed](docs/media/vision.gif)
+
+*The feed on its own: boxes tracking traffic, signals and the lane ahead.*
+
 ### The classes
 
 | | | | |
@@ -154,6 +162,10 @@ fix for a failure that actually happened during testing:
 
 Amber means stop unless stopping would be unsafe, which is the rule as written.
 
+![Stopping at a red light](docs/media/junction.gif)
+
+*Slowing for a red it detected, and holding at the line.*
+
 ### Seeing how it did
 
 ```sh
@@ -185,7 +197,8 @@ This game is a raylib app, so the Ebiten-facing half of
 | `hud` + `status` | Those events become the on-screen fault toast, wired judge → bus → status source → overlay. |
 | `keymap` | The controls panel, wrapped to the available width. |
 | `paint` | Colour dimming for façades, roofs and brake lights. |
-| `record` | `-record drive.gif` — its `Add(image.Image)` is renderer-agnostic, so it works behind raylib unchanged. |
+| `record` | `-record drive.gif` in the game, and every file `demogen` writes. Its `Add(image.Image)` is renderer-agnostic, so it works behind raylib unchanged. |
+| `demo` | `tools/demogen`. `Clip` drives and captures each run, `Montage` tiles the contact sheets, `Ramp` builds the GIF palette. |
 
 ### What crucible would need to cover more
 
@@ -211,10 +224,49 @@ backwards-compatible:
    have borrowed, and both are already there — the layout code is genuinely
    app-specific and should stay here.
 
+## Documentation media
+
+The GIFs and contact sheets above are generated, not hand-captured:
+
+```sh
+just demo                 # build everything into docs/media
+just demo-list            # what it can build
+just demo -only vision    # just one
+```
+
+Nothing is staged. Each clip drives a real session through the same game loop
+the player runs, with the autopilot at the wheel, so the media cannot drift away
+from what the code does. The junction clip in particular does not seek a
+timestamp — it runs until the autopilot is genuinely slowing for a signal and
+starts recording there, which is what crucible's `demo.Clip` Ready gate is for.
+
+| | |
+|---|---|
+| `drive.gif` | the autopilot driving, chase camera |
+| `vision.gif` | the annotated feed on its own |
+| `junction.gif` | opens when the AI starts braking for a red |
+| `city.png` | four seeds from above |
+| `cameras.png` | the three viewpoints on one scene |
+
+![Four generated cities](docs/media/city.png)
+
+*Four seeds, same overhead view: block sizes, parks and road classes all vary.*
+
+The GIF palette is built with `demo.Ramp` from the game's own colours plus the
+vision classes, so the saturated detection boxes survive quantisation intact.
+
+Because the scene is drawn on the GPU, `demogen` needs a display. On a headless
+machine run it under xvfb:
+
+```sh
+xvfb-run -a just demo
+```
+
 ## Layout
 
 ```
 cmd/autobahn        entrypoint and flags
+tools/demogen       builds the README's GIFs and contact sheets
 internal/mathx      ground-plane vectors, oriented boxes, units
 internal/city       procedural layout: roads, lanes, junctions, signs, buildings
 internal/sim        vehicle dynamics, traffic, signals, routing, the judge

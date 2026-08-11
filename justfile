@@ -68,6 +68,16 @@ fmt:
 tidy:
     {{go}} mod tidy
 
+# build the documentation media into docs/media
+[group('dev')]
+demo *ARGS:
+    {{go}} run -tags "{{tags}}" ./tools/demogen {{ARGS}}
+
+# list the media demogen can build
+[group('dev')]
+demo-list:
+    {{go}} run -tags "{{tags}}" ./tools/demogen -list
+
 # drive headlessly and print a session summary
 [group('dev')]
 soak frames="1800":

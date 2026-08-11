@@ -10,6 +10,7 @@ import (
 	"github.com/danielriddell21/autobahn/internal/city"
 	"github.com/danielriddell21/autobahn/internal/mathx"
 	"github.com/danielriddell21/autobahn/internal/sim"
+	"github.com/danielriddell21/autobahn/internal/vision"
 )
 
 // The world palette. Every colour here is deliberately muted: the vision
@@ -450,4 +451,32 @@ func drawCar(v *sim.Vehicle, paint rl.Color, ind sim.Indicator, blinkOn bool) {
 	}
 
 	rl.PopMatrix()
+}
+
+// PaletteBases returns the world's key colours together with the vision
+// system's annotation colours. Feeding these through crucible's demo.Ramp
+// builds a GIF palette that reproduces both the city and the detection boxes
+// without banding.
+func PaletteBases() []color.RGBA {
+	out := []color.RGBA{
+		toRGBAColor(colSky), toRGBAColor(colGround), toRGBAColor(colAsphalt),
+		toRGBAColor(colSidewalk), toRGBAColor(colKerb), toRGBAColor(colPark),
+		toRGBAColor(colLinePale), toRGBAColor(colLineWarm), toRGBAColor(colPole),
+		toRGBAColor(colStopFace), toRGBAColor(colSignFace), toRGBAColor(colGlass),
+		toRGBAColor(colTyre), toRGBAColor(hudPanel), toRGBAColor(hudText),
+	}
+	for _, c := range buildingShades {
+		out = append(out, toRGBAColor(c))
+	}
+	for _, c := range carPaints {
+		out = append(out, toRGBAColor(c))
+	}
+	for cl := vision.ClassVehicle; cl <= vision.ClassStopLine; cl++ {
+		out = append(out, vision.RGBA(cl))
+	}
+	return out
+}
+
+func toRGBAColor(c rl.Color) color.RGBA {
+	return color.RGBA{R: c.R, G: c.G, B: c.B, A: 255}
 }
