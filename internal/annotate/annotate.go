@@ -51,9 +51,13 @@ func Annotate(w *sim.World, cam rl.Camera3D, screenW, screenH int32, showLabels 
 		if !visible(a.V.Pos, vehicleRange) {
 			continue
 		}
+		cl := vision.ClassVehicle
+		if a.Role == sim.RolePolice {
+			cl = vision.ClassPolice
+		}
 		s := a.V.Spec
 		if r, ok := boxOf(cam, a.V.Pos, s.Height/2, s.HalfWidth, s.Height/2, s.HalfLength, a.V.Yaw, screenW, screenH); ok {
-			draw(r, vision.ClassVehicle, showLabels)
+			draw(r, cl, showLabels)
 		}
 	}
 

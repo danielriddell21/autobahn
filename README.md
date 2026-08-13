@@ -3,8 +3,8 @@
 *n.* a road built for driving on. Also: a British city that only exists to be driven through.
 
 A 3D driving game in Go. Part one is you, a car, and a procedurally generated
-British city with traffic, lights, signs and road rules. Part two hands the same
-car to an autopilot that sees the world **only through a camera**, as
+British city with traffic, lights, signs, road rules and police. Part two hands
+the same car to an autopilot that sees the world **only through a camera**, as
 colour-coded detection boxes it has to read back out of the pixels.
 
 Both drivers are scored by the same judge, so the comparison is honest.
@@ -71,6 +71,27 @@ It is British, so:
 - centre lines are **white**; the yellow paint is double yellows against the kerb
 - zebra crossings, pavements and kerbs, because you will end up on one
 
+### Driving styles
+
+Ambient traffic is not one driver copied out. Each car draws a `Style` that
+supplies every parameter the car-following model uses, so the queue in front of
+you is made of individuals:
+
+| Style | Drives like |
+|---|---|
+| cautious | 18% of traffic. Under the limit, big gaps, lifts early for an amber. |
+| normal | 46%. The reference the others vary from. |
+| brisk | 26%. Presses on, closes up, still within the rules. |
+| aggressive | 10%. Quick, close enough to fill your mirrors, and will chance an amber. |
+
+Speed, headway, standstill gap, acceleration and braking rates, how much room
+they want before pulling out of a junction, how hard they slow for a corner, and
+whether they run an amber all come from the style. Each car then jitters its own
+numbers slightly, so two aggressive drivers are not identical.
+
+The player is not styled — a human drives however they like — and the autopilot
+has its own controller.
+
 ### The rules it judges you on
 
 A judge watches your car and logs what you break: running a red, failing to stop,
@@ -78,6 +99,54 @@ speeding, driving on the wrong side, leaving the carriageway, and collisions
 (with severity from the impact speed). Each fault carries penalty points.
 
 The judge does not care whether a human or the autopilot is driving.
+
+### The police
+
+![A pursuit](docs/media/police.gif)
+
+*A pursuit, seen from above. Nothing here is staged — the offences were earned.*
+
+Marked units patrol the city like any other traffic, driving to the limit and
+stopping at lights, until something happens.
+
+The judge already publishes every infraction on a crucible telemetry bus for the
+HUD, so the police subscribe to the same stream. An offence raises **heat** only
+if they actually notice it: a unit has to be close enough to have seen it, or a
+pursuit has to be under way already, in which case they are watching by
+definition. Speeding down an empty side street is between you and your
+conscience.
+
+Heat becomes a **wanted level** from one to four. Units within range switch on
+the blues, and from then on they route through the junction graph toward you
+rather than wandering their patrol — greedily, picking whichever exit ends up
+nearest, which is enough on a grid. On a call they are quicker, they close up,
+and they will pass a red, slowing to do it.
+
+Getting out of it, in the order the game will let you:
+
+- **Evade.** Stay more than 190 m from every unit for seven and a half seconds
+  and you shed a level. The HUD says `EVADING` and counts down.
+- **Cool off.** Stop offending and the heat fades on its own, so one mistake
+  does not follow you across the city.
+- **Pull over.** Stop with a unit alongside and you are `PULLED OVER`: the
+  pursuit ends and the level clears.
+
+`-police 0` removes them entirely. The judge still scores everything; there is
+simply nobody to respond.
+
+### Exercising it
+
+Driving badly on purpose is tedious, so there is a controller that does it:
+
+```sh
+go run -tags x11 ./cmd/autobahn -reckless
+```
+
+It follows the road and ignores everything else — limits, signals, signs. It
+slows for a corner only because a car wrapped around a building stops exercising
+anything. Every fault it collects is judged through the ordinary path, so it is
+the end-to-end test of the police: about 200 penalty points in twenty seconds,
+and a wanted level of three.
 
 ## Part two: the AI drives
 
@@ -101,10 +170,10 @@ actual image being scanned. What you see is what it gets.
 
 | | | | |
 |---|---|---|---|
-| 🟥 vehicle | 🟪 light: red | 🌸 light: red+amber | 🟧 light: amber |
-| 🟩 light: green | 🟨 stop | 🩵 give way | 🟦 lane |
-| 🟢 lane (alt) | 🔵 limit 20 | 🩵 limit 30 | 🟣 limit 40 |
-| 🟩 stop line | | | |
+| 🟥 vehicle | 💗 police | 🟪 light: red | 🌸 light: red+amber |
+| 🟧 light: amber | 🟩 light: green | 🟨 stop | 🩵 give way |
+| 🟦 lane | 🟢 lane (alt) | 🔵 limit 20 | 🩵 limit 30 |
+| 🟣 limit 40 | 🟩 stop line | | |
 
 Every class colour is a fully saturated combination of 0, 128 and 255. Nothing
 in the world's palette uses one, so an exact pixel match cannot produce a false
@@ -193,7 +262,7 @@ This game is a raylib app, so the Ebiten-facing half of
 |---|---|
 | `rng` | Every random draw. Layout, traffic, signal offsets and routing each take a named stream, so adding one system never disturbs another's sequence. |
 | `ring` | The infraction history, bounded so a long session cannot grow it without end. |
-| `telemetry` | The judge publishes each infraction on a bus, generic over this game's own event type. |
+| `telemetry` | The judge publishes each infraction on a bus, generic over this game's own event type. Both the HUD and the police subscribe to it, which is how an offence becomes a pursuit without the two knowing about each other. |
 | `hud` + `status` | Those events become the on-screen fault toast, wired judge → bus → status source → overlay. |
 | `keymap` | The controls panel, wrapped to the available width. |
 | `paint` | Colour dimming for façades, roofs and brake lights. |
@@ -236,15 +305,17 @@ just demo -only vision    # just one
 
 Nothing is staged. Each clip drives a real session through the same game loop
 the player runs, with the autopilot at the wheel, so the media cannot drift away
-from what the code does. The junction clip in particular does not seek a
-timestamp — it runs until the autopilot is genuinely slowing for a signal and
-starts recording there, which is what crucible's `demo.Clip` Ready gate is for.
+from what the code does. The junction and police clips in particular do not seek a
+timestamp — one runs until the autopilot is genuinely slowing for a signal, the
+other until units are actually in pursuit, and each starts recording there.
+That is what crucible's `demo.Clip` Ready gate is for.
 
 | | |
 |---|---|
 | `drive.gif` | the autopilot driving, chase camera |
 | `vision.gif` | the annotated feed on its own |
 | `junction.gif` | opens when the AI starts braking for a red |
+| `police.gif` | a pursuit, opening when units are actually chasing |
 | `city.png` | four seeds from above |
 | `cameras.png` | the three viewpoints on one scene |
 
@@ -269,7 +340,7 @@ cmd/autobahn        entrypoint and flags
 tools/demogen       builds the README's GIFs and contact sheets
 internal/mathx      ground-plane vectors, oriented boxes, units
 internal/city       procedural layout: roads, lanes, junctions, signs, buildings
-internal/sim        vehicle dynamics, traffic, signals, routing, the judge
+internal/sim        vehicle dynamics, traffic, styles, police, signals, the judge
 internal/vision     detection classes, camera model, the pixel scanner  (pure)
 internal/annotate   draws the boxes  (knows the world; the autopilot cannot see it)
 internal/autopilot  the camera-driven driver  (imports vision, nothing else)
@@ -303,6 +374,11 @@ it cannot see the road at all.
 - Roads are axis-aligned. No roundabouts, which for a British city is a notable
   omission and the most obvious thing to build next.
 - Pedestrians exist only as the crossings they would use.
+- Police units route greedily toward the car rather than planning a route, so
+  they can commit to a turn that a shortest-path search would not. On a grid it
+  rarely shows.
+- There is no roadblock, spike strip or stinger. Getting caught means being
+  boxed in until you stop.
 
 ## Licence
 

@@ -37,15 +37,20 @@ const (
 
 // Options configures a game session.
 type Options struct {
-	Seed        uint64
-	Traffic     int
-	Width       int
-	Height      int
-	CamWidth    int // AI camera width in pixels
-	CamHeight   int
-	Autopilot   bool // start with the AI driving
+	Seed      uint64
+	Traffic   int
+	Police    int // marked units patrolling; zero disables the police
+	Width     int
+	Height    int
+	CamWidth  int // AI camera width in pixels
+	CamHeight int
+	Autopilot bool // start with the AI driving
+	// Reckless drives the car along its route at full throttle, ignoring every
+	// rule. It is a development aid for exercising the judge and the police.
+	Reckless    bool
 	ShowPanel   bool // show the AI camera panel
-	Frames      int  // when > 0, run this many frames then exit
+	Camera      CameraMode
+	Frames      int // when > 0, run this many frames then exit
 	Screenshot  string
 	Stats       bool    // print a session summary on exit
 	Record      string  // capture the drive to this .gif or .mp4 path
@@ -57,7 +62,7 @@ type Options struct {
 // DefaultOptions returns the standard session settings.
 func DefaultOptions() Options {
 	return Options{
-		Seed: 7, Traffic: 70, Width: 1280, Height: 720,
+		Seed: 7, Traffic: 70, Police: 5, Width: 1280, Height: 720,
 		CamWidth: 420, CamHeight: 236, ShowPanel: true, PerceptionH: 20,
 	}
 }
@@ -99,6 +104,7 @@ type Game struct {
 	blinkT    float32
 	frame     int
 
+	peakWanted  int
 	speedSum    float32
 	detSum      int
 	detFrames   int
@@ -116,6 +122,8 @@ type Summary struct {
 	AvgSpeed      float32 // mph
 	Points        int
 	Faults        map[string]int
+	Wanted        int // the wanted level reached at its worst
+	Stops         int // how many times the police pulled the driver over
 	AvgDetections float32
 	Frames        int
 	NearestLane   float32 // furthest lane marker the camera resolved, metres
@@ -142,6 +150,7 @@ func (g *Game) Summary() Summary {
 		s.Faults[in.Kind.String()]++
 	}
 	s.TotalFaults = g.world.Judge.Faults
+	s.Wanted, s.Stops = g.peakWanted, g.world.Wanted.Stops
 	return s
 }
 
@@ -149,9 +158,11 @@ func (g *Game) Summary() Summary {
 // open, because the AI camera allocates a render texture.
 func New(opts Options) *Game {
 	g := &Game{
-		opts:  opts,
-		world: sim.NewWorld(sim.Config{Seed: opts.Seed, Traffic: opts.Traffic}),
-		auto:  opts.Autopilot, showPanel: opts.ShowPanel,
+		opts: opts,
+		world: sim.NewWorld(sim.Config{
+			Seed: opts.Seed, Traffic: opts.Traffic, Police: opts.Police,
+		}),
+		auto: opts.Autopilot, showPanel: opts.ShowPanel,
 		showHUD: true, showLabels: true, overheadHeight: 34,
 		scanner:   vision.NewScanner(),
 		visionCam: vision.DefaultCamera(opts.CamWidth, opts.CamHeight),
@@ -177,6 +188,7 @@ func New(opts Options) *Game {
 	g.cam = rl.Camera3D{Up: vec3(0, 1, 0), Fovy: 62, Projection: rl.CameraPerspective}
 	g.aiCam = rl.Camera3D{Up: vec3(0, 1, 0),
 		Fovy: g.visionCam.FovY, Projection: rl.CameraPerspective}
+	g.camMode = opts.Camera % numCameraModes
 	g.camPos = g.world.Player.Pos
 	g.updateCameras(0)
 	return g
@@ -244,6 +256,7 @@ func (g *Game) SetAutopilot(on bool) {
 func (g *Game) Step(dt float32) {
 	g.frame++
 	g.speedSum += g.world.Player.Speed()
+	g.peakWanted = max(g.peakWanted, g.world.Wanted.Level)
 	g.handleInput()
 
 	if g.blinkT += dt; g.blinkT > 0.36 {
@@ -267,6 +280,9 @@ func (g *Game) Step(dt float32) {
 	}
 
 	controls := g.manualControls()
+	if g.opts.Reckless {
+		controls = sim.RecklessControls(g.world)
+	}
 	if g.auto {
 		cmd := g.driver.Drive(g.dets, g.world.Player.Speed(), dt)
 		g.lastCmd = cmd
@@ -553,6 +569,10 @@ func printSummary(s Summary) {
 	fmt.Printf("  perception %.1f detections/frame, saw lane markers to %.0f m\n",
 		s.AvgDetections, s.NearestLane)
 	fmt.Printf("  penalty    %d points from %d faults\n", s.Points, s.TotalFaults)
+	if s.Wanted > 0 || s.Stops > 0 {
+		fmt.Printf("  police     peak wanted level %d, pulled over %d time(s)\n",
+			s.Wanted, s.Stops)
+	}
 	for k, n := range s.Faults {
 		fmt.Printf("               %-16s x%d\n", k, n)
 	}

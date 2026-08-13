@@ -277,7 +277,7 @@ func (d *Driver) hazards(dets []vision.Detection, lane []lanePoint, speed, dt fl
 	// The car in front. A vehicle box's bottom edge is where its tyres meet
 	// the road, which is the usable range cue.
 	for _, det := range dets {
-		if det.Class != vision.ClassVehicle {
+		if !vision.IsVehicle(det.Class) {
 			continue
 		}
 		dist := d.cam.GroundDistance(det.MaxY)
@@ -448,7 +448,7 @@ func crossingTraffic(cam vision.Camera, dets []vision.Detection, lineDist float3
 	// Anything detected off to the side at roughly the distance of the give way
 	// line is traffic on the road being joined.
 	for _, det := range dets {
-		if det.Class != vision.ClassVehicle {
+		if !vision.IsVehicle(det.Class) {
 			continue
 		}
 		dist := cam.GroundDistance(det.MaxY)

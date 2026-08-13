@@ -27,6 +27,7 @@ type Class int
 const (
 	ClassNone Class = iota
 	ClassVehicle
+	ClassPolice
 	ClassLightRed
 	ClassLightRedAmber
 	ClassLightAmber
@@ -47,6 +48,8 @@ func (c Class) String() string {
 	switch c {
 	case ClassVehicle:
 		return "VEHICLE"
+	case ClassPolice:
+		return "POLICE"
 	case ClassLightRed:
 		return "LIGHT:RED"
 	case ClassLightRedAmber:
@@ -102,6 +105,7 @@ func (c Class) StopsTraffic() bool {
 var classColors = [numClasses]color.RGBA{
 	ClassNone:          {0, 0, 0, 0},
 	ClassVehicle:       {255, 0, 0, 255},
+	ClassPolice:        {255, 128, 255, 255},
 	ClassLightRed:      {255, 0, 255, 255},
 	ClassLightRedAmber: {255, 0, 128, 255},
 	ClassLightAmber:    {255, 128, 0, 255},
@@ -118,6 +122,11 @@ var classColors = [numClasses]color.RGBA{
 
 // RGBA returns the exact colour a class is annotated in.
 func RGBA(c Class) color.RGBA { return classColors[c] }
+
+// IsVehicle reports whether a class is a car of any kind. A police car is
+// still something to avoid rear-ending, so the autopilot treats both alike
+// when it is deciding what to follow.
+func IsVehicle(c Class) bool { return c == ClassVehicle || c == ClassPolice }
 
 // IsLaneMarker reports whether a class is one of the lane centreline markers.
 //

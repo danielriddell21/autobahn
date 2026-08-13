@@ -32,6 +32,7 @@ import (
 	"github.com/danielriddell21/autobahn/internal/autopilot"
 	"github.com/danielriddell21/autobahn/internal/game"
 	"github.com/danielriddell21/autobahn/internal/mathx"
+	"github.com/danielriddell21/autobahn/internal/sim"
 )
 
 // config is what the flags collect.
@@ -41,6 +42,7 @@ type config struct {
 	width   int
 	height  int
 	traffic int
+	police  int
 	scale   int
 	fps     int
 	only    []string
@@ -64,6 +66,7 @@ func items() []item {
 		{"drive", "drive.gif", "the autopilot driving the city, chase camera", clipDrive},
 		{"vision", "vision.gif", "the annotated camera feed the autopilot reads", clipVision},
 		{"junction", "junction.gif", "the autopilot stopping at a red light", clipJunction},
+		{"police", "police.gif", "a pursuit, earned by driving badly", clipPolice},
 		{"city", "city.png", "four seeds from above, showing the layout variety", sheetCity},
 		{"cameras", "cameras.png", "the three viewpoints on one scene", sheetCameras},
 	}
@@ -78,6 +81,7 @@ func main() {
 	flag.IntVar(&cfg.width, "width", 1280, "render width in pixels")
 	flag.IntVar(&cfg.height, "height", 720, "render height in pixels")
 	flag.IntVar(&cfg.traffic, "traffic", 70, "number of ambient traffic cars")
+	flag.IntVar(&cfg.police, "police", 10, "number of patrolling police units")
 	flag.IntVar(&cfg.scale, "scale", 3, "downscale factor for the captures")
 	flag.IntVar(&cfg.fps, "fps", 20, "frames per second in the output")
 	flag.StringVar(&only, "only", "", "comma-separated names to build; default builds all")
@@ -128,6 +132,7 @@ func (c config) opts(seed uint64) game.Options {
 	o := game.DefaultOptions()
 	o.Seed = seed
 	o.Traffic = c.traffic
+	o.Police = c.police
 	o.Width, o.Height = c.width, c.height
 	o.Autopilot = true
 	o.ShowPanel = true
@@ -216,6 +221,36 @@ func clipJunction(cfg config) error {
 			},
 		}
 		return save(clip, rec, cfg.path("junction.gif"))
+	})
+}
+
+// clipPolice records a pursuit. Nothing about it is staged: the car is driven
+// by the reckless controller, which follows the road and ignores every rule, so
+// the offences are judged and the response summoned through the ordinary path.
+// Recording opens only once units are actually chasing.
+func clipPolice(cfg config) error {
+	o := cfg.opts(cfg.seed)
+	o.Autopilot = false
+	o.Reckless = true
+	o.Police = max(cfg.police, 10)
+	o.Camera = game.CameraHigh
+
+	return game.WithWindow(o, func(g *game.Game) error {
+		// High enough to take in the units converging on the car.
+		g.SetOverheadHeight(120)
+		rec := cfg.recorder(140, cfg.scale)
+
+		clip := demo.Clip{
+			Frames:   140,
+			Every:    3,
+			MaxSteps: 9000,
+			Step:     func(int) error { g.Step(fixedStep); return nil },
+			Ready: func(int) bool {
+				return g.World().Wanted.State == sim.PursuitActive
+			},
+			Frame: func(int) image.Image { return g.Snapshot() },
+		}
+		return save(clip, rec, cfg.path("police.gif"))
 	})
 }
 

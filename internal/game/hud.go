@@ -42,6 +42,7 @@ func (g *Game) drawHUD() {
 	if g.auto {
 		g.drawAutopilotPanel()
 	}
+	g.drawWanted()
 	g.drawMinimap(int32(g.opts.Width)/2-72, 8, 144)
 	g.drawNotice()
 	if g.showHelp {
@@ -146,6 +147,40 @@ func (g *Game) drawInfractions() {
 	}
 }
 
+// drawWanted shows the police response: the wanted level and what the units
+// are currently doing about it.
+func (g *Game) drawWanted() {
+	wa := g.world.Wanted
+	if wa.Level == 0 && wa.State != sim.PursuitStopped {
+		return
+	}
+	x, y := int32(g.opts.Width)/2-110, int32(g.opts.Height)-150
+	panel(x, y, 220, 52)
+
+	col := hudWarn
+	switch wa.State {
+	case sim.PursuitActive:
+		col = hudBad
+	case sim.PursuitStopped:
+		col = hudAccent
+	}
+	rl.DrawText(wa.State.String(), x+14, y+8, 18, col)
+
+	// One lamp per wanted level, lit up to the current one.
+	for i := range 4 {
+		lamp := rl.NewColor(58, 60, 66, 255)
+		if i < wa.Level {
+			lamp = col
+		}
+		rl.DrawCircle(x+150+int32(i)*16, y+18, 6, lamp)
+	}
+	if wa.State == sim.PursuitEvading {
+		rl.DrawText("keep out of sight", x+14, y+32, 12, hudDim)
+		return
+	}
+	rl.DrawText(fmt.Sprintf("%d witnessed", wa.Witnessed), x+14, y+32, 12, hudDim)
+}
+
 // drawAIPanel shows the exact image the autopilot is reading, boxes and all.
 func (g *Game) drawAIPanel() {
 	w := int32(g.opts.CamWidth)
@@ -174,7 +209,8 @@ func (g *Game) drawClassLegend(x, y int32) {
 		seen[d.Class]++
 	}
 	classes := [...]vision.Class{
-		vision.ClassVehicle, vision.ClassLightRed, vision.ClassLightRedAmber,
+		vision.ClassVehicle, vision.ClassPolice,
+		vision.ClassLightRed, vision.ClassLightRedAmber,
 		vision.ClassLightAmber, vision.ClassLightGreen,
 		vision.ClassStopSign, vision.ClassGiveWay, vision.ClassStopLine,
 		vision.ClassSpeed20, vision.ClassSpeed30, vision.ClassSpeed40,
@@ -281,7 +317,8 @@ func (g *Game) drawNotice() {
 	}
 	w := rl.MeasureText(text, 20) + 36
 	x := int32(g.opts.Width)/2 - w/2
-	y := int32(g.opts.Height) - 168
+	// Sits above the wanted panel, which occupies the band below it.
+	y := int32(g.opts.Height) - 214
 	panel(x, y, w, 34)
 	rl.DrawText(text, x+18, y+8, 20, col)
 }
@@ -318,7 +355,14 @@ func (g *Game) drawMinimap(x, y, size int32) {
 		if d.Len() > worldSpan*1.4 {
 			continue
 		}
-		rl.DrawCircle(cx+int32(d.X*scale), cy+int32(d.Z*scale), 1.6, hudWarn)
+		col, r := hudWarn, float32(1.6)
+		if a.Role == sim.RolePolice {
+			col, r = hudAccent, 2.6
+			if a.Pursuing() {
+				col = hudBad
+			}
+		}
+		rl.DrawCircle(cx+int32(d.X*scale), cy+int32(d.Z*scale), r, col)
 	}
 	// The player, drawn as an arrow pointing along the heading.
 	f := g.world.Player.Forward()

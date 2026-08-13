@@ -17,12 +17,15 @@ func main() {
 
 	seed := flag.Uint64("seed", opts.Seed, "city generation seed")
 	traffic := flag.Int("traffic", opts.Traffic, "number of ambient traffic cars")
+	police := flag.Int("police", opts.Police, "number of patrolling police units; 0 disables them")
 	width := flag.Int("width", opts.Width, "window width in pixels")
 	height := flag.Int("height", opts.Height, "window height in pixels")
 	camW := flag.Int("camwidth", opts.CamWidth, "AI camera width in pixels")
 	camH := flag.Int("camheight", opts.CamHeight, "AI camera height in pixels")
 	auto := flag.Bool("autopilot", false, "start with the AI driving")
+	reckless := flag.Bool("reckless", false, "drive the route at full throttle ignoring every rule, to exercise the police")
 	panel := flag.Bool("panel", true, "show the AI camera panel")
+	camera := flag.String("camera", "chase", "viewpoint: chase, bonnet or high")
 	hz := flag.Float64("perception", float64(opts.PerceptionH), "perception updates per second")
 	frames := flag.Int("frames", 0, "run this many frames then exit; 0 runs until closed")
 	shot := flag.String("screenshot", "", "write a screenshot to this path before exiting")
@@ -34,10 +37,23 @@ func main() {
 
 	opts.Seed = *seed
 	opts.Traffic = *traffic
+	opts.Police = *police
 	opts.Width, opts.Height = *width, *height
 	opts.CamWidth, opts.CamHeight = *camW, *camH
 	opts.Autopilot = *auto
+	opts.Reckless = *reckless
 	opts.ShowPanel = *panel
+	switch *camera {
+	case "bonnet":
+		opts.Camera = game.CameraBonnet
+	case "high":
+		opts.Camera = game.CameraHigh
+	case "chase":
+		opts.Camera = game.CameraChase
+	default:
+		fmt.Fprintf(os.Stderr, "autobahn: unknown camera %q\n", *camera)
+		os.Exit(2)
+	}
 	opts.PerceptionH = float32(*hz)
 	opts.Frames = *frames
 	opts.Screenshot = *shot

@@ -32,11 +32,15 @@ const (
 type Config struct {
 	Seed    uint64
 	Traffic int
+	// Police is how many marked units patrol the city. Zero disables the
+	// police entirely, which leaves the judge still scoring but nobody
+	// responding.
+	Police int
 }
 
 // DefaultConfig returns a populated city configuration.
 func DefaultConfig(seed uint64) Config {
-	return Config{Seed: seed, Traffic: 70}
+	return Config{Seed: seed, Traffic: 70, Police: 5}
 }
 
 // World is the whole simulation: the city, its traffic, the signal controller
@@ -47,6 +51,8 @@ type World struct {
 	Player  *Vehicle
 	Agents  []*Agent
 	Judge   *Judge
+	// Wanted tracks the police response to how the player has been driving.
+	Wanted Wanted
 	// Route is the player car's navigation plan, used to draw lane guidance
 	// into the annotated camera image.
 	Route *Route
@@ -100,7 +106,44 @@ func NewWorld(cfg Config) *World {
 		}
 		w.Agents = append(w.Agents, a)
 	}
+	for i := range cfg.Police {
+		lane := c.RandomLane(traffic, 30)
+		u := NewPoliceUnit(cfg.Traffic+i, c, lane, traffic.Float32()*lane.Length, traffic)
+		if w.tooClose(u.V.Pos, 9) {
+			continue
+		}
+		w.Agents = append(w.Agents, u)
+	}
+	w.watchForOffences()
 	return w
+}
+
+// watchForOffences subscribes the police to the judge. An offence only draws
+// attention when a unit was close enough to witness it, so driving badly on an
+// empty street is its own affair.
+func (w *World) watchForOffences() {
+	w.Judge.Events.Subscribe(judgeWatcher(func(in Infraction) {
+		if w.witnessed() {
+			w.Wanted.witness(in.Points)
+		}
+	}))
+}
+
+// judgeWatcher adapts a function to the telemetry subscriber interface.
+type judgeWatcher func(Infraction)
+
+// OnEvent implements the telemetry subscriber interface.
+func (f judgeWatcher) OnEvent(in Infraction) { f(in) }
+
+// Police returns the marked units in the world.
+func (w *World) Police() []*Agent {
+	var out []*Agent
+	for _, a := range w.Agents {
+		if a.Role == RolePolice {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // Respawn returns the player to the starting pose.
@@ -129,6 +172,7 @@ func (w *World) Update(c Controls, dt float32) {
 		a.drive(w, dt)
 	}
 	w.resolveCollisions()
+	w.updateWanted(dt)
 	w.recycleAgents()
 	w.Route.Update(w.Player.Pos, w.Player.Forward())
 	w.Judge.Update(w.Player, w.Signals, w.Time, dt)
@@ -348,6 +392,9 @@ func (w *World) recycleAgents() {
 		stranded := !a.hasNext && a.s >= a.lane.Length-0.5
 		if a.V.Pos.DistTo(w.Player.Pos) < keepRadius && !stranded {
 			continue
+		}
+		if a.pursuing && !stranded {
+			continue // never teleport a unit out of an active pursuit
 		}
 		w.relocate(a)
 	}

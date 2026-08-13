@@ -55,6 +55,15 @@ var (
 		rl.NewColor(126, 74, 132, 255),
 	}
 
+	// Police livery: a white car with the reflective blue-and-yellow blocks of
+	// British battenburg markings, and a light bar that runs blues and reds.
+	colPoliceBody   = rl.NewColor(232, 232, 236, 255)
+	colPoliceBlue   = rl.NewColor(36, 76, 168, 255)
+	colPoliceYellow = rl.NewColor(226, 198, 62, 255)
+	colBeaconBlue   = rl.NewColor(64, 110, 245, 255)
+	colBeaconRed    = rl.NewColor(238, 66, 58, 255)
+	colBeaconDark   = rl.NewColor(52, 54, 62, 255)
+
 	bulbRed   = rl.NewColor(232, 58, 48, 255)
 	bulbAmber = rl.NewColor(232, 158, 44, 255)
 	bulbGreen = rl.NewColor(72, 196, 96, 255)
@@ -109,6 +118,10 @@ void main() {
 
 func vec3(x, y, z float32) rl.Vector3 { return rl.NewVector3(x, y, z) }
 
+// rad2deg converts the simulation's radians to the degrees raylib's matrix
+// helpers expect.
+const rad2deg = rl.Rad2deg
+
 // drawWorld renders the whole scene from the given camera. When drawPlayer is
 // false the player's own car is omitted, which is what the bonnet-mounted AI
 // camera wants.
@@ -128,6 +141,10 @@ func (g *Game) drawWorld(cam rl.Camera3D, drawPlayer bool) {
 
 	for _, a := range g.world.Agents {
 		if a.V.Pos.DistTo(eye) > cullBuildings {
+			continue
+		}
+		if a.Role == sim.RolePolice {
+			drawPoliceCar(a, g.blink)
 			continue
 		}
 		drawCar(a.V, carPaints[a.Paint%len(carPaints)], a.Indicator(), g.blink)
@@ -479,4 +496,45 @@ func PaletteBases() []color.RGBA {
 
 func toRGBAColor(c rl.Color) color.RGBA {
 	return color.RGBA{R: c.R, G: c.G, B: c.B, A: 255}
+}
+
+// drawPoliceCar renders a marked unit: the same body as any other car, with
+// battenburg blocks down the side and a light bar on the roof. The bar only
+// flashes when the unit is actually running to a call.
+func drawPoliceCar(a *sim.Agent, blinkOn bool) {
+	v := a.V
+	drawCar(v, colPoliceBody, a.Indicator(), blinkOn)
+
+	s := v.Spec
+	rl.PushMatrix()
+	rl.Translatef(v.Pos.X, 0, v.Pos.Z)
+	rl.Rotatef(-v.Yaw*rad2deg, 0, 1, 0)
+
+	// Battenburg: alternating blocks along both flanks.
+	for i := range 5 {
+		x := (float32(i) - 2) * (s.HalfLength * 2 / 5.5)
+		block := colPoliceBlue
+		if i%2 == 1 {
+			block = colPoliceYellow
+		}
+		for _, side := range [2]float32{1, -1} {
+			rl.DrawCube(vec3(x, 0.62, side*(s.HalfWidth+0.01)),
+				s.HalfLength*2/5.6, 0.34, 0.04, block)
+		}
+	}
+
+	// The light bar. Both halves sit dark until the unit is on a call, then
+	// they alternate blue and red.
+	left, right := colBeaconDark, colBeaconDark
+	if a.BluesAndTwos() {
+		left, right = colBeaconBlue, colBeaconRed
+		if blinkOn {
+			left, right = right, left
+		}
+	}
+	rl.DrawCube(vec3(-0.1, 1.4, 0), 0.26, 0.1, s.HalfWidth*1.7, colBeaconDark)
+	rl.DrawCube(vec3(-0.1, 1.44, s.HalfWidth*0.42), 0.22, 0.12, s.HalfWidth*0.7, left)
+	rl.DrawCube(vec3(-0.1, 1.44, -s.HalfWidth*0.42), 0.22, 0.12, s.HalfWidth*0.7, right)
+
+	rl.PopMatrix()
 }
