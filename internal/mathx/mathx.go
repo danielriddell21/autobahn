@@ -229,3 +229,45 @@ func project(pts [4]Vec, axis Vec) (lo, hi float32) {
 	}
 	return lo, hi
 }
+
+// Vec3 is a point or direction in world space, with +Y up.
+type Vec3 struct{ X, Y, Z float32 }
+
+// V3 returns the vector with the given components.
+func V3(x, y, z float32) Vec3 { return Vec3{x, y, z} }
+
+// Ground returns the XZ components of a, dropping its height.
+func (a Vec3) Ground() Vec { return Vec{a.X, a.Z} }
+
+// Add returns the sum of a and b.
+func (a Vec3) Add(b Vec3) Vec3 { return Vec3{a.X + b.X, a.Y + b.Y, a.Z + b.Z} }
+
+// Sub returns the difference a - b.
+func (a Vec3) Sub(b Vec3) Vec3 { return Vec3{a.X - b.X, a.Y - b.Y, a.Z - b.Z} }
+
+// Mul returns a scaled by s.
+func (a Vec3) Mul(s float32) Vec3 { return Vec3{a.X * s, a.Y * s, a.Z * s} }
+
+// Dot returns the dot product of a and b.
+func (a Vec3) Dot(b Vec3) float32 { return a.X*b.X + a.Y*b.Y + a.Z*b.Z }
+
+// Cross returns the cross product of a and b.
+func (a Vec3) Cross(b Vec3) Vec3 {
+	return Vec3{
+		a.Y*b.Z - a.Z*b.Y,
+		a.Z*b.X - a.X*b.Z,
+		a.X*b.Y - a.Y*b.X,
+	}
+}
+
+// Len returns the length of a.
+func (a Vec3) Len() float32 { return Sqrt(a.Dot(a)) }
+
+// Norm returns a unit-length copy of a, or the zero vector if a is degenerate.
+func (a Vec3) Norm() Vec3 {
+	l := a.Len()
+	if l < 1e-6 {
+		return Vec3{}
+	}
+	return Vec3{a.X / l, a.Y / l, a.Z / l}
+}

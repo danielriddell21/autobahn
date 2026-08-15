@@ -69,10 +69,26 @@ func (r *Route) Update(pos, fwd mathx.Vec) {
 		// The car is somewhere else entirely and pointing along a different
 		// lane, so re-plan from there.
 		r.adopt(proj.Lane)
+	case r.strayed(pos):
+		// The car has left its planned lane far enough that keeping the plan is
+		// worse than losing it: the route would keep pointing back at a lane the
+		// car is no longer on, and everything downstream reads from that. Take
+		// the nearest lane even though the heading disagrees, and re-plan.
+		r.adopt(proj.Lane)
 	}
 	if r.lane != nil {
 		r.s = mathx.Clamp(pos.Sub(r.lane.A).Dot(r.lane.Fwd), 0, r.lane.Length)
 	}
+}
+
+// strayRange is how far off its planned lane the car may drift before the plan
+// is abandoned, in metres. It is wider than a carriageway so an ordinary lane
+// change does not trigger it.
+const strayRange float32 = 11
+
+func (r *Route) strayed(pos mathx.Vec) bool {
+	s := mathx.Clamp(pos.Sub(r.lane.A).Dot(r.lane.Fwd), 0, r.lane.Length)
+	return pos.DistTo(r.lane.A.Add(r.lane.Fwd.Mul(s))) > strayRange
 }
 
 func (r *Route) adopt(l *city.Lane) {

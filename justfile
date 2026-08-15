@@ -40,6 +40,11 @@ race:
 bench:
     {{go}} test -bench=. -benchmem -tags "{{tags}}" ./...
 
+# score the autopilot across many cities, with no display needed
+[group('test')]
+eval *ARGS:
+    {{go}} run ./tools/eval {{ARGS}}
+
 # prove the autopilot cannot read simulation state
 [group('test')]
 boundary:
@@ -85,4 +90,4 @@ soak frames="1800":
 
 # full gate: lint + test + build + boundary. all must pass before committing
 [group('dev')]
-ci: lint test build boundary
+ci: lint test build boundary eval

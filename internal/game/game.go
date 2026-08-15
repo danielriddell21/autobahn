@@ -82,6 +82,7 @@ type Game struct {
 	cam            rl.Camera3D
 	camPos         mathx.Vec
 	aiCam          rl.Camera3D
+	aiView         annotate.View
 	aiTarget       rl.RenderTexture2D
 
 	scanner   *vision.Scanner
@@ -432,13 +433,14 @@ func (g *Game) updateCameras(dt float32) {
 	fwd := p.Forward()
 
 	// The AI camera is rigidly mounted, matching the calibration the autopilot
-	// was built with. It never smooths, because a real sensor does not.
+	// was built with. It never smooths, because a real sensor does not. The pose
+	// comes from the annotator so the rendered view and the projected boxes
+	// cannot disagree.
+	g.aiView = annotate.BonnetView(g.visionCam, p.Pos, p.Yaw)
+	g.aiCam.Position = vec3(g.aiView.Position.X, g.aiView.Position.Y, g.aiView.Position.Z)
+	g.aiCam.Target = vec3(g.aiView.Target.X, g.aiView.Target.Y, g.aiView.Target.Z)
 	mount := p.Pos.Add(fwd.Mul(1.7))
-	eyeY := g.visionCam.Mount
-	g.aiCam.Position = vec3(mount.X, eyeY, mount.Z)
 	look := mount.Add(fwd.Mul(24))
-	g.aiCam.Position.Y = eyeY
-	g.aiCam.Target = vec3(look.X, eyeY-24*mathx.Tan(g.visionCam.Pitch), look.Z)
 
 	switch g.camMode {
 	case CameraBonnet:
@@ -472,10 +474,8 @@ func (g *Game) renderAICamera() {
 	rl.BeginTextureMode(g.aiTarget)
 	rl.ClearBackground(colSky)
 	g.drawWorld(g.aiCam, false)
-	// The boxes are drawn outside the lighting shader so their colours land in
-	// the framebuffer exactly as specified. The scanner matches them exactly.
-	annotate.Annotate(g.world, g.aiCam,
-		int32(g.opts.CamWidth), int32(g.opts.CamHeight), g.showLabels)
+	boxes := annotate.Layout(g.world, g.aiView)
+	drawBoxes(boxes, g.showLabels)
 	rl.EndTextureMode()
 }
 

@@ -1,5 +1,6 @@
 /autobahn
 /demogen
+/eval
 
 # Stray captures at the repo root. Generated documentation media is committed,
 # and lives in docs/media.

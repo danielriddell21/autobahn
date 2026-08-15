@@ -235,7 +235,43 @@ Amber means stop unless stopping would be unsafe, which is the rule as written.
 
 *Slowing for a red it detected, and holding at the line.*
 
-### Seeing how it did
+### Scoring it
+
+The autopilot is graded across a spread of cities, with **no display involved
+at all**:
+
+```sh
+just eval                          # 12 cities, 90 simulated seconds each
+just eval -seeds 40 -workers 8
+```
+
+```
+seed  distance  avg mph  det/frame  no lane  points  faults
+1     359 m     9        11.3       0%       0       0
+2     376 m     9        8.7        18%      50      3
+...
+12 cities, 83% clean (10 of 12)
+mean 359 m at 9 mph, 13.3 penalty points, 0.58 faults
+lane lost on 4.1% of frames
+```
+
+Twelve cities take about five seconds, and CI fails the build if the mean
+penalty climbs.
+
+Nothing is short-circuited to achieve that. The annotator projects the world
+into boxes, the boxes are rasterised into an image, and the scanner reads that
+image back a pixel at a time — the autopilot still receives only pixels. It
+works without a GPU because **the scanner matches exact class colours and never
+looks at the scene behind the boxes**, so rasterising the boxes alone produces
+exactly the detections a rendered frame would. `Layout` is shared by both paths,
+so the two cannot drift apart.
+
+That harness immediately corrected the record. Running a handful of seeds by
+hand had suggested the autopilot was faultless; across twelve it is clean on
+ten. It also pinned the dominant failure — losing sight of the lane — and one
+fix for it, described under known limitations below.
+
+### Seeing a single run
 
 ```sh
 just soak 1800     # drive headlessly, then print a summary
@@ -338,11 +374,12 @@ xvfb-run -a just demo
 ```
 cmd/autobahn        entrypoint and flags
 tools/demogen       builds the README's GIFs and contact sheets
+tools/eval          scores the autopilot across many cities, headlessly
 internal/mathx      ground-plane vectors, oriented boxes, units
 internal/city       procedural layout: roads, lanes, junctions, signs, buildings
 internal/sim        vehicle dynamics, traffic, styles, police, signals, the judge
 internal/vision     detection classes, camera model, the pixel scanner  (pure)
-internal/annotate   draws the boxes  (knows the world; the autopilot cannot see it)
+internal/annotate   lays out and rasterises the boxes  (renderer-free)
 internal/autopilot  the camera-driven driver  (imports vision, nothing else)
 internal/game       rendering, HUD, input, the two driving modes
 ```
@@ -354,7 +391,13 @@ internal/game       rendering, HUD, input, the two driving modes
 ```sh
 just test
 just boundary   # prove the autopilot cannot reach simulation state
+just eval       # score the autopilot across many cities
+just ci         # everything, which is what CI runs
 ```
+
+CI runs on every push: build, vet, race-enabled tests, the boundary check, and
+an evaluation across sixteen cities that fails if the autopilot starts breaking
+noticeably more rules than it does today.
 
 The scanner and the autopilot are pure Go and test without a GPU. The autopilot
 tests build synthetic detections at known ranges and assert on behaviour: it
@@ -374,6 +417,12 @@ it cannot see the road at all.
 - Roads are axis-aligned. No roundabouts, which for a British city is a notable
   omission and the most obvious thing to build next.
 - Pedestrians exist only as the crossings they would use.
+- **The autopilot is clean on about ten cities in twelve, not all of them.**
+  The remaining failures start the same way: it loses sight of the lane, and
+  being off the road makes that worse rather than better. One cause is fixed —
+  the route used to keep pointing at a lane the car had already left, so the
+  markers projected behind the car and it went blind. Seed 12 still fails, with
+  the lane out of view for a third of the run, and `just eval` reproduces it.
 - Police units route greedily toward the car rather than planning a route, so
   they can commit to a turn that a shortest-path search would not. On a grid it
   rarely shows.

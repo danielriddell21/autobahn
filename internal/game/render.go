@@ -7,6 +7,7 @@ import (
 
 	"github.com/danielriddell21/crucible/paint"
 
+	"github.com/danielriddell21/autobahn/internal/annotate"
 	"github.com/danielriddell21/autobahn/internal/city"
 	"github.com/danielriddell21/autobahn/internal/mathx"
 	"github.com/danielriddell21/autobahn/internal/sim"
@@ -537,4 +538,37 @@ func drawPoliceCar(a *sim.Agent, blinkOn bool) {
 	rl.DrawCube(vec3(-0.1, 1.44, -s.HalfWidth*0.42), 0.22, 0.12, s.HalfWidth*0.7, right)
 
 	rl.PopMatrix()
+}
+
+// viewOf converts a raylib camera into the renderer-free view the annotator
+// projects with, so the boxes drawn on screen and the boxes an evaluation run
+// rasterises come from one piece of arithmetic.
+func viewOf(cam rl.Camera3D, w, h int) annotate.View {
+	return annotate.View{
+		Position: mathx.V3(cam.Position.X, cam.Position.Y, cam.Position.Z),
+		Target:   mathx.V3(cam.Target.X, cam.Target.Y, cam.Target.Z),
+		FovY:     cam.Fovy,
+		Width:    w, Height: h,
+	}
+}
+
+// drawBoxes paints the annotator's boxes over whatever is already rendered.
+// It must run outside the lighting shader so the colours land in the
+// framebuffer exactly as specified: the scanner matches them exactly.
+func drawBoxes(boxes []annotate.Box, labels bool) {
+	for _, b := range boxes {
+		v := vision.RGBA(b.Class)
+		col := rl.NewColor(v.R, v.G, v.B, v.A)
+		rl.DrawRectangleLinesEx(
+			rl.NewRectangle(b.MinX, b.MinY, b.Width(), b.Height()),
+			annotate.Thickness, col)
+		if !labels || b.Width() <= 26 {
+			continue
+		}
+		y := b.MinY - 11
+		if y < 1 {
+			y = b.MaxY + 2
+		}
+		rl.DrawText(b.Class.String(), int32(b.MinX), int32(y), 10, col)
+	}
 }
