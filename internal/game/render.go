@@ -136,6 +136,7 @@ func (g *Game) drawWorld(cam rl.Camera3D, drawPlayer bool) {
 
 	g.drawGround()
 	g.drawBlocks(eye)
+	g.drawRoundabouts(eye)
 	g.drawMarkings(eye)
 	g.drawBuildings(eye)
 	g.drawProps(eye)
@@ -192,10 +193,39 @@ func (g *Game) drawBlocks(eye mathx.Vec) {
 	}
 }
 
+// drawRoundabouts paints the central island and its kerb. The circulating
+// carriageway itself needs nothing: the asphalt is already there, and the
+// pavements simply do not cover it.
+func (g *Game) drawRoundabouts(eye mathx.Vec) {
+	for _, n := range g.world.City.Roundabouts() {
+		if n.Pos.DistTo(eye) > cullBlocks {
+			continue
+		}
+		island := n.RingRadius() - city.LaneWidth*1.6
+		if island < 2 {
+			continue
+		}
+		base := vec3(n.Pos.X, 0, n.Pos.Z)
+		// A kerbed island with a planted top, as most of them are.
+		rl.DrawCylinderEx(base, vec3(n.Pos.X, city.KerbHeight, n.Pos.Z),
+			island, island, 24, colKerb)
+		rl.DrawCylinderEx(vec3(n.Pos.X, city.KerbHeight, n.Pos.Z),
+			vec3(n.Pos.X, city.KerbHeight+0.02, n.Pos.Z),
+			island-0.6, island-0.6, 24, colPark)
+		// A low mound so it reads as an island from the driver's seat.
+		rl.DrawCylinderEx(vec3(n.Pos.X, city.KerbHeight, n.Pos.Z),
+			vec3(n.Pos.X, city.KerbHeight+1.1, n.Pos.Z),
+			island*0.55, island*0.2, 16, colPark)
+	}
+}
+
 func (g *Game) drawMarkings(eye mathx.Vec) {
 	c := g.world.City
 	const y = 0.015
 	for _, r := range c.Roads {
+		if r.Ring {
+			continue // a circle has no centre line to paint
+		}
 		mid := c.Nodes[r.A].Pos.Lerp(c.Nodes[r.B].Pos, 0.5)
 		if mid.DistTo(eye) > cullMarkings+r.Length/2 {
 			continue

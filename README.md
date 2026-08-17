@@ -67,9 +67,23 @@ It is British, so:
 - traffic keeps **left**, and it is the **right** turn that crosses oncoming traffic
 - limits are posted in **mph** — 20 on residential streets, 30 built-up, 40 on the main roads
 - signals run **red → red and amber → green → amber**, and red-and-amber is *not* permission to go
+- **roundabouts**, circulating clockwise, giving way to the right on entry
 - **give way** is the common priority marking, with stop signs the rarer case
 - centre lines are **white**; the yellow paint is double yellows against the kerb
 - zebra crossings, pavements and kerbs, because you will end up on one
+
+### Roundabouts
+
+About a quarter of the junctions are roundabouts. Traffic gives way to whatever
+is already circulating and about to reach the entry — the car coming from your
+right — and how small a gap a driver will accept comes from their style, so an
+aggressive one pulls out into a gap a cautious one would let go.
+
+The ring is built from short straight lanes joined end to end rather than as a
+curve. That was a deliberate choice: every system that already understands a
+lane — the traffic agents, the navigation route, the judge, the annotator — then
+works on a roundabout with no changes whatsoever, and keeping the pieces under
+five metres makes the polygon read as a circle.
 
 ### Driving styles
 
@@ -417,12 +431,19 @@ it cannot see the road at all.
 - Roads are axis-aligned. No roundabouts, which for a British city is a notable
   omission and the most obvious thing to build next.
 - Pedestrians exist only as the crossings they would use.
-- **The autopilot is clean on about ten cities in twelve, not all of them.**
+- **Roundabouts cost the autopilot a good deal of its margin.** It was clean on
+  fourteen cities in sixteen before they existed and on twelve after, which is
+  the honest price of a much harder world. `just eval` shows the current figure
+  rather than a flattering one.
+- **The autopilot is clean on about three cities in four, not all of them.**
   The remaining failures start the same way: it loses sight of the lane, and
   being off the road makes that worse rather than better. One cause is fixed —
   the route used to keep pointing at a lane the car had already left, so the
-  markers projected behind the car and it went blind. Seed 12 still fails, with
-  the lane out of view for a third of the run, and `just eval` reproduces it.
+  markers projected behind the car and it went blind. Another was the lookahead:
+  markers were ordered by range, and on a ring the far side is nearer in a
+  straight line than the road just ahead, so it steered across the island. The
+  markers are now chained into path order first, which took clean runs on
+  roundabout cities from 44% to 75%.
 - Police units route greedily toward the car rather than planning a route, so
   they can commit to a turn that a shortest-path search would not. On a grid it
   rarely shows.

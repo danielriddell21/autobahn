@@ -55,6 +55,11 @@ func TestEveryLaneLeadsSomewhere(t *testing.T) {
 				l.ID, c.Nodes[l.ToNode].Degree())
 		}
 		for _, s := range l.Succ {
+			// Circulating lanes legitimately continue onto the same synthetic
+			// ring road; anywhere else, that would be a U-turn.
+			if c.Roads[l.Road].Ring {
+				continue
+			}
 			if c.Lanes[s.Lane].Road == l.Road {
 				t.Fatalf("lane %d has a U-turn connector", l.ID)
 			}
@@ -149,6 +154,121 @@ func TestBuildingsStayOffTheCarriageway(t *testing.T) {
 		if p.Dist < c.RoadHalfWidth(p.Lane) {
 			t.Fatalf("building %d at %v sits %.2fm from a lane centreline, inside the carriageway",
 				i, b.Center, p.Dist)
+		}
+	}
+}
+
+func TestRoundaboutsAreGenerated(t *testing.T) {
+	c := build(7)
+	rounds := c.Roundabouts()
+	if len(rounds) == 0 {
+		t.Fatal("no roundabouts were generated")
+	}
+	for _, n := range rounds {
+		if !n.IsRoundabout() {
+			t.Errorf("node %d is listed but not marked", n.ID)
+		}
+		if n.RingRadius() < 8 {
+			t.Errorf("roundabout %d has a ring radius of %.1fm", n.ID, n.RingRadius())
+		}
+		if n.Degree() < 3 {
+			t.Errorf("roundabout %d has only %d arms", n.ID, n.Degree())
+		}
+	}
+}
+
+// The circulating carriageway has to be a closed loop, or traffic joining it
+// would run out of road.
+func TestRingIsAClosedLoop(t *testing.T) {
+	c := build(7)
+	n := c.Roundabouts()[0]
+
+	var ring []*city.Lane
+	for _, l := range c.Lanes {
+		if c.Roads[l.Road].Ring && l.FromNode == n.ID {
+			ring = append(ring, l)
+		}
+	}
+	if len(ring) < 8 {
+		t.Fatalf("ring has %d lanes, want a reasonable circle", len(ring))
+	}
+
+	start := ring[0]
+	at := start
+	for step := range len(ring) * 2 {
+		var onward *city.Lane
+		for _, s := range at.Succ {
+			if c.Roads[c.Lanes[s.Lane].Road].Ring {
+				onward = c.Lanes[s.Lane]
+				break
+			}
+		}
+		if onward == nil {
+			t.Fatalf("ring lane %d after %d steps has no continuation", at.ID, step)
+		}
+		if onward == start {
+			return // closed
+		}
+		at = onward
+	}
+	t.Error("following the ring never returned to the start")
+}
+
+func TestRoundaboutApproachesGiveWay(t *testing.T) {
+	c := build(7)
+	n := c.Roundabouts()[0]
+
+	var approaches int
+	for _, l := range c.Lanes {
+		if l.ToNode != n.ID || c.Roads[l.Road].Ring {
+			continue
+		}
+		approaches++
+		if l.Control != city.ControlGiveWay {
+			t.Errorf("approach lane %d has control %v, want give way", l.ID, l.Control)
+		}
+		if len(l.Succ) == 0 {
+			t.Errorf("approach lane %d does not join the ring", l.ID)
+		}
+		for _, s := range l.Succ {
+			if !c.Roads[c.Lanes[s.Lane].Road].Ring {
+				t.Errorf("approach lane %d leads somewhere other than the ring", l.ID)
+			}
+		}
+	}
+	if approaches == 0 {
+		t.Fatal("the roundabout has no approach lanes")
+	}
+}
+
+// Every arm has to be reachable, or the roundabout would be a dead end.
+func TestRingLeavesByEveryArm(t *testing.T) {
+	c := build(7)
+	n := c.Roundabouts()[0]
+
+	exits := map[int]bool{}
+	for _, l := range c.Lanes {
+		if !c.Roads[l.Road].Ring || l.FromNode != n.ID {
+			continue
+		}
+		for _, s := range l.Succ {
+			if r := c.Roads[c.Lanes[s.Lane].Road]; !r.Ring {
+				exits[r.ID] = true
+			}
+		}
+	}
+	if len(exits) != n.Degree() {
+		t.Errorf("ring leaves by %d arms, want all %d", len(exits), n.Degree())
+	}
+}
+
+func TestNoBuildingStandsInARoundabout(t *testing.T) {
+	c := build(7)
+	for _, n := range c.Roundabouts() {
+		for i, b := range c.Buildings {
+			if b.Center.DistTo(n.Pos) < n.RingRadius() {
+				t.Errorf("building %d stands inside roundabout %d", i, n.ID)
+			}
 		}
 	}
 }

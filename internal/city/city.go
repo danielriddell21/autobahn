@@ -115,6 +115,12 @@ type Node struct {
 	Control      ControlKind
 	Signalised   bool
 	GridI, GridJ int
+
+	// Roundabout marks a junction whose traffic circulates around an island
+	// instead of being governed by signals or priority.
+	Roundabout bool
+	ringRadius float32
+	ringEntry  map[int]int // road ID to the ring lane it joins
 }
 
 // Degree returns the number of roads meeting at the node.
@@ -132,6 +138,9 @@ type Road struct {
 	Dir       mathx.Vec // unit vector from A to B
 	Length    float32
 	Axis      int // 0 when the road runs along X, 1 along Z
+	// Ring marks the synthetic road carrying a roundabout's circulating lanes.
+	// It has no real geometry, so anything that paints road markings skips it.
+	Ring bool
 }
 
 // Turn is a connector leading from one lane to a successor lane through a
@@ -231,11 +240,16 @@ type Params struct {
 	Seed             uint64
 	Cols, Rows       int
 	MinSpan, MaxSpan float32 // block span range in metres
+	// Roundabouts is the share of eligible junctions built as roundabouts.
+	Roundabouts float32
 }
 
 // DefaultParams returns generation parameters for a reasonably sized city.
 func DefaultParams(seed uint64) Params {
-	return Params{Seed: seed, Cols: 9, Rows: 9, MinSpan: 80, MaxSpan: 150}
+	return Params{
+		Seed: seed, Cols: 9, Rows: 9, MinSpan: 80, MaxSpan: 150,
+		Roundabouts: 0.28,
+	}
 }
 
 // Generate builds a city from the given parameters. The same seed always
@@ -288,11 +302,14 @@ func Generate(p Params) *City {
 
 	c.removeSomeRoads(rng)
 	c.computeRadii()
+	c.chooseRoundabouts(rng, p.Roundabouts)
 	c.buildLanes()
 	c.assignControls()
 	c.buildConnectors()
+	c.buildRings()
 	c.placeProps(rng)
 	c.buildBlocks(rng, xs, zs)
+	c.clearRoundabouts()
 	c.indexLanes()
 	c.computeBounds()
 	return c
@@ -443,6 +460,10 @@ func (l *Lane) finish() {
 
 func (c *City) assignControls() {
 	for _, n := range c.Nodes {
+		if n.Roundabout {
+			n.Control = ControlGiveWay
+			continue
+		}
 		if n.Degree() < 3 {
 			n.Control = ControlNone
 			continue
@@ -508,6 +529,9 @@ func sameClassJunction(c *City, n *Node) bool {
 func (c *City) buildConnectors() {
 	for _, l := range c.Lanes {
 		n := c.Nodes[l.ToNode]
+		if n.Roundabout {
+			continue // wired by buildRing, once the ring lanes exist
+		}
 		fromLanes := c.Roads[l.Road].Class.Lanes()
 		for _, rid := range n.Roads {
 			if rid == l.Road {
@@ -742,6 +766,9 @@ func (c *City) buildBlocks(rng *rand.Rand, xs, zs []float32) {
 	hwCol := make([]float32, len(xs))
 	hwRow := make([]float32, len(zs))
 	for _, r := range c.Roads {
+		if r.Ring {
+			continue
+		}
 		if r.Axis == 1 {
 			i := c.Nodes[r.A].GridI
 			hwCol[i] = max(hwCol[i], r.HalfWidth)
@@ -825,6 +852,40 @@ func (c *City) fillBlock(rng *rand.Rand, lo, hi mathx.Vec, downtown float32) {
 			z += d
 		}
 	}
+}
+
+func (c *City) clearRoundabouts() {
+	// A roundabout is far wider than an ordinary junction, so a block laid out
+	// against the road widths alone can overlap one. Drop anything standing in
+	// the carriageway.
+	kept := c.Buildings[:0]
+	for _, b := range c.Buildings {
+		clash := false
+		for _, n := range c.Nodes {
+			if !n.Roundabout {
+				continue
+			}
+			if b.Center.DistTo(n.Pos) < n.ringRadius+6+max(b.W, b.D)/2 {
+				clash = true
+				break
+			}
+		}
+		if !clash {
+			kept = append(kept, b)
+		}
+	}
+	c.Buildings = kept
+}
+
+// Roundabouts returns the roundabout junctions, for rendering their islands.
+func (c *City) Roundabouts() []*Node {
+	var out []*Node
+	for _, n := range c.Nodes {
+		if n.Roundabout {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 func (c *City) indexLanes() {

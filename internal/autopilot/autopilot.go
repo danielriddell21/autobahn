@@ -220,13 +220,46 @@ func (d *Driver) lanePoints(dets []vision.Detection) []lanePoint {
 		bearing := d.cam.Bearing(det.CenterX())
 		pts = append(pts, lanePoint{dist: dist, lateral: dist * tan(bearing)})
 	}
-	// Nearest first, so the lookahead search can stop early.
-	for i := 1; i < len(pts); i++ {
-		for j := i; j > 0 && pts[j].dist < pts[j-1].dist; j-- {
-			pts[j], pts[j-1] = pts[j-1], pts[j]
+	return chain(pts)
+}
+
+// chain puts lane markers into the order they run along the road, by starting
+// at the nearest and repeatedly taking whichever is closest to the last one.
+//
+// Sorting them by range instead would be wrong on anything tightly curved. Most
+// of the way round a roundabout is nearer in a straight line than a point just
+// ahead on the ring, so a range-ordered lookahead picks a target across the
+// island and steers at it. Following the chain keeps the path a path.
+func chain(pts []lanePoint) []lanePoint {
+	if len(pts) < 2 {
+		return pts
+	}
+	// Start from whichever marker is nearest the car.
+	start := 0
+	for i, p := range pts {
+		if p.dist < pts[start].dist {
+			start = i
 		}
 	}
+	pts[0], pts[start] = pts[start], pts[0]
+
+	for i := 1; i < len(pts); i++ {
+		best, bestGap := i, float32(1e9)
+		for j := i; j < len(pts); j++ {
+			if g := gap(pts[i-1], pts[j]); g < bestGap {
+				best, bestGap = j, g
+			}
+		}
+		pts[i], pts[best] = pts[best], pts[i]
+	}
 	return pts
+}
+
+// gap is the distance between two lane markers on the ground.
+func gap(a, b lanePoint) float32 {
+	dx := b.lateral - a.lateral
+	dz := b.dist - a.dist
+	return sqrt(dx*dx + dz*dz)
 }
 
 func (d *Driver) readSigns(dets []vision.Detection) {
@@ -251,9 +284,15 @@ func (d *Driver) steerFor(lane []lanePoint, speed, dt float32) float32 {
 		return d.steer
 	}
 	look := clamp(5.5+0.85*speed, 7, 24)
+	// Measure the lookahead along the chain rather than straight out from the
+	// car, so a curve is followed round instead of cut across.
 	tgt := lane[len(lane)-1]
-	for _, p := range lane {
-		if p.dist >= look {
+	travelled := lane[0].dist
+	for i, p := range lane {
+		if i > 0 {
+			travelled += gap(lane[i-1], p)
+		}
+		if travelled >= look {
 			tgt = p
 			break
 		}
@@ -348,7 +387,10 @@ func (d *Driver) hazards(dets []vision.Detection, lane []lanePoint, speed, dt fl
 		if !haveLine && d.haveStopDist && d.stopDist > 0 {
 			lineDist, haveLine = d.stopDist, true
 		}
-		red = red || haveLine
+		// A remembered signal governs the junction it was seen at. A give way
+		// line belongs to a different junction entirely — a roundabout, most
+		// likely — so it must not revive the memory.
+		red = red || (haveLine && !giveWay)
 	}
 
 	// A stop line painted on the road is often hidden by the car waiting on it.
@@ -491,7 +533,9 @@ func cornerLimit(lane []lanePoint) float32 {
 	if far.dist < 6 {
 		return 1e6
 	}
-	// Lateral displacement over distance approximates the turn's tightness.
+	// Lateral displacement over range approximates how tightly the road turns.
+	// On a ring the far end of the chain swings a long way off the centreline,
+	// which is what pulls the speed down for a roundabout.
 	curve := abs(far.lateral) / far.dist
 	if curve < 0.06 {
 		return 1e6

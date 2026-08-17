@@ -243,6 +243,9 @@ func (w *World) leaderFor(a *Agent) (gap, leadSpeed float32, ok bool) {
 
 func (w *World) junctionBlocked(a *Agent) bool {
 	node := w.City.Nodes[a.lane.ToNode]
+	if node.IsRoundabout() {
+		return w.ringBlocked(a, node)
+	}
 	clearance := node.Radius + 3
 
 	for _, o := range w.Agents {
@@ -294,6 +297,26 @@ func (w *World) junctionBlocked(a *Agent) bool {
 		}
 	}
 	return false
+}
+
+// ringBlocked reports whether a driver waiting to join a roundabout should
+// give way. The rule is to yield to whatever is already circulating and about
+// to reach the entry, which on a British roundabout is the traffic coming from
+// the right. How small a gap the driver will take is their own business, so it
+// scales with their style.
+func (w *World) ringBlocked(a *Agent, node *city.Node) bool {
+	entry := node.EntryAngle(a.lane)
+	return node.RingOccupied(entry, func(yield func(mathx.Vec, float32) bool) {
+		for _, o := range w.Agents {
+			if o == a {
+				continue
+			}
+			if !yield(o.V.Pos, o.V.Speed()) {
+				return
+			}
+		}
+		yield(w.Player.Pos, w.Player.Speed())
+	}, a.style().GapAcceptance)
 }
 
 func turnAcrossTraffic() city.TurnKind {
