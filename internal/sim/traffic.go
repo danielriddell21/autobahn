@@ -56,9 +56,9 @@ type Agent struct {
 // Pursuing reports whether this unit is currently on a blue-light run.
 func (a *Agent) Pursuing() bool { return a.pursuing }
 
-// style returns the style currently in force, which is the pursuit style while
-// a police unit is running to a call.
 func (a *Agent) style() Style {
+	// Returns the style currently in force, which is the pursuit style while
+	// a police unit is running to a call.
 	if a.pursuing {
 		return Pursuit()
 	}

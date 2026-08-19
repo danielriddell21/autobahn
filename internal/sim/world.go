@@ -118,10 +118,10 @@ func NewWorld(cfg Config) *World {
 	return w
 }
 
-// watchForOffences subscribes the police to the judge. An offence only draws
-// attention when a unit was close enough to witness it, so driving badly on an
-// empty street is its own affair.
 func (w *World) watchForOffences() {
+	// Subscribes the police to the judge. An offence only draws
+	// attention when a unit was close enough to witness it, so driving badly on an
+	// empty street is its own affair.
 	w.Judge.Events.Subscribe(judgeWatcher(func(in Infraction) {
 		if w.witnessed() {
 			w.Wanted.witness(in.Points)
@@ -299,12 +299,12 @@ func (w *World) junctionBlocked(a *Agent) bool {
 	return false
 }
 
-// ringBlocked reports whether a driver waiting to join a roundabout should
-// give way. The rule is to yield to whatever is already circulating and about
-// to reach the entry, which on a British roundabout is the traffic coming from
-// the right. How small a gap the driver will take is their own business, so it
-// scales with their style.
 func (w *World) ringBlocked(a *Agent, node *city.Node) bool {
+	// Reports whether a driver waiting to join a roundabout should
+	// give way. The rule is to yield to whatever is already circulating and about
+	// to reach the entry, which on a British roundabout is the traffic coming from
+	// the right. How small a gap the driver will take is their own business, so it
+	// scales with their style.
 	entry := node.EntryAngle(a.lane)
 	return node.RingOccupied(entry, func(yield func(mathx.Vec, float32) bool) {
 		for _, o := range w.Agents {

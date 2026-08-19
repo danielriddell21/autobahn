@@ -147,9 +147,9 @@ func (g *Game) drawInfractions() {
 	}
 }
 
-// drawWanted shows the police response: the wanted level and what the units
-// are currently doing about it.
 func (g *Game) drawWanted() {
+	// Shows the police response: the wanted level and what the units
+	// are currently doing about it.
 	wa := g.world.Wanted
 	if wa.Level == 0 && wa.State != sim.PursuitStopped {
 		return
@@ -181,8 +181,8 @@ func (g *Game) drawWanted() {
 	rl.DrawText(fmt.Sprintf("%d witnessed", wa.Witnessed), x+14, y+32, 12, hudDim)
 }
 
-// drawAIPanel shows the exact image the autopilot is reading, boxes and all.
 func (g *Game) drawAIPanel() {
+	// Shows the exact image the autopilot is reading, boxes and all.
 	w := int32(g.opts.CamWidth)
 	h := int32(g.opts.CamHeight)
 	x := int32(g.opts.Width) - w - 12
@@ -266,8 +266,8 @@ func (g *Game) drawAutopilotPanel() {
 	rl.DrawRectangle(x+176, y+96, 60, 1, rl.NewColor(70, 74, 82, 255))
 }
 
-// controlBindings is the game's key list, laid out by crucible's keymap.
 func controlBindings() []keymap.Binding {
+	// Is the game's key list, laid out by crucible's keymap.
 	return []keymap.Binding{
 		{Key: "W/S", Action: "throttle, brake"},
 		{Key: "A/D", Action: "steer"},
@@ -304,9 +304,9 @@ func (g *Game) drawHelp() {
 	}
 }
 
-// drawNotice shows the current overlay line: the toast raised whenever the
-// judge records an infraction.
 func (g *Game) drawNotice() {
+	// Shows the current overlay line: the toast raised whenever the
+	// judge records an infraction.
 	text, ch, ok := g.notices.Active()
 	if !ok {
 		return
@@ -323,9 +323,9 @@ func (g *Game) drawNotice() {
 	rl.DrawText(text, x+18, y+8, 20, col)
 }
 
-// drawMinimap draws a top-down plan of the surrounding streets. Everything is
-// clipped to the panel, so the road lines cannot spill across the screen.
 func (g *Game) drawMinimap(x, y, size int32) {
+	// Draws a top-down plan of the surrounding streets. Everything is
+	// clipped to the panel, so the road lines cannot spill across the screen.
 	const worldSpan float32 = 250
 	half := size / 2
 	cx, cy := x+half, y+half

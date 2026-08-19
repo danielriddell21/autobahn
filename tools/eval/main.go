@@ -171,9 +171,9 @@ func driveOne(seed uint64, cfg runConfig) result {
 	return r
 }
 
-// asColors reinterprets an RGBA image as the pixel slice the scanner reads,
-// filling a buffer the caller owns so a long run does not allocate per frame.
 func asColors(img *image.RGBA, into []color.RGBA) []color.RGBA {
+	// Reinterprets an RGBA image as the pixel slice the scanner reads,
+	// filling a buffer the caller owns so a long run does not allocate per frame.
 	for i := range into {
 		o := i * 4
 		into[i] = color.RGBA{

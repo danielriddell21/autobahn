@@ -173,8 +173,8 @@ func DefaultCamera(w, h int) Camera {
 	return Camera{Width: w, Height: h, FovY: 62, Mount: 1.35, Pitch: 0.10}
 }
 
-// focal returns the focal length in pixels for the vertical axis.
 func (c Camera) focal() float32 {
+	// Returns the focal length in pixels for the vertical axis.
 	return float32(c.Height) / 2 / mathx.Tan(c.FovY*0.5*3.14159265/180)
 }
 

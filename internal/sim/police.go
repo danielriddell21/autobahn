@@ -112,18 +112,18 @@ func (w *Wanted) Clear() {
 	w.outOfSight, w.heldStill = 0, 0
 }
 
-// witness adds heat for an offence a unit saw, and is what the telemetry
-// subscription calls.
 func (w *Wanted) witness(points int) {
+	// Adds heat for an offence a unit saw, and is what the telemetry
+	// subscription calls.
 	w.Witnessed++
 	w.Heat += float32(points) * heatPerPoint
 	w.sinceOffence = 0
 	w.Level = min(1+int(w.Heat/heatPerLevel), maxWanted)
 }
 
-// nearestUnit returns the distance to the closest police unit, and whether
-// there is one at all.
 func (w *World) nearestUnit() (float32, bool) {
+	// Returns the distance to the closest police unit, and whether
+	// there is one at all.
 	best, found := float32(1e9), false
 	for _, a := range w.Agents {
 		if a.Role != RolePolice {
@@ -136,10 +136,10 @@ func (w *World) nearestUnit() (float32, bool) {
 	return best, found
 }
 
-// witnessed reports whether an offence draws police attention: either a unit
-// was close enough to see it, or a pursuit is already under way, in which case
-// they are watching by definition.
 func (w *World) witnessed() bool {
+	// Reports whether an offence draws police attention: either a unit
+	// was close enough to see it, or a pursuit is already under way, in which case
+	// they are watching by definition.
 	if w.Wanted.State == PursuitActive {
 		return true
 	}
@@ -203,8 +203,8 @@ func (w *World) updateWanted(dt float32) {
 	w.setPursuit(true)
 }
 
-// setPursuit puts every unit within range onto the call, or stands them down.
 func (w *World) setPursuit(on bool) {
+	// Puts every unit within range onto the call, or stands them down.
 	for _, a := range w.Agents {
 		if a.Role != RolePolice {
 			continue
@@ -213,10 +213,10 @@ func (w *World) setPursuit(on bool) {
 	}
 }
 
-// pursuitTurn picks the exit from a junction that gets a unit closest to the
-// car it is chasing. It is greedy rather than a full search, which is enough
-// on a grid and costs nothing.
 func (a *Agent) pursuitTurn(c *city.City, target mathx.Vec) (city.Turn, bool) {
+	// Picks the exit from a junction that gets a unit closest to the
+	// car it is chasing. It is greedy rather than a full search, which is enough
+	// on a grid and costs nothing.
 	if len(a.lane.Succ) == 0 {
 		return city.Turn{}, false
 	}

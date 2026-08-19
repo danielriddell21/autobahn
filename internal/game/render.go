@@ -123,10 +123,10 @@ func vec3(x, y, z float32) rl.Vector3 { return rl.NewVector3(x, y, z) }
 // helpers expect.
 const rad2deg = rl.Rad2deg
 
-// drawWorld renders the whole scene from the given camera. When drawPlayer is
-// false the player's own car is omitted, which is what the bonnet-mounted AI
-// camera wants.
 func (g *Game) drawWorld(cam rl.Camera3D, drawPlayer bool) {
+	// Renders the whole scene from the given camera. When drawPlayer is
+	// false the player's own car is omitted, which is what the bonnet-mounted AI
+	// camera wants.
 	eye := mathx.V(cam.Position.X, cam.Position.Z)
 
 	rl.BeginMode3D(cam)
@@ -193,10 +193,10 @@ func (g *Game) drawBlocks(eye mathx.Vec) {
 	}
 }
 
-// drawRoundabouts paints the central island and its kerb. The circulating
-// carriageway itself needs nothing: the asphalt is already there, and the
-// pavements simply do not cover it.
 func (g *Game) drawRoundabouts(eye mathx.Vec) {
+	// Paints the central island and its kerb. The circulating
+	// carriageway itself needs nothing: the asphalt is already there, and the
+	// pavements simply do not cover it.
 	for _, n := range g.world.City.Roundabouts() {
 		if n.Pos.DistTo(eye) > cullBlocks {
 			continue
@@ -312,9 +312,9 @@ func signOf(positive bool) float32 {
 	return -1
 }
 
-// drawStripe paints a flat rectangle on the road. axis 0 runs along X, axis 1
-// along Z; length follows the axis and width crosses it.
 func drawStripe(p mathx.Vec, axis int, length, width, y float32, col rl.Color) {
+	// Paints a flat rectangle on the road. axis 0 runs along X, axis 1
+	// along Z; length follows the axis and width crosses it.
 	if axis == 0 {
 		rl.DrawCube(vec3(p.X, y, p.Z), length, 0.02, width, col)
 		return
@@ -342,9 +342,9 @@ func (g *Game) drawBuildings(eye mathx.Vec) {
 	}
 }
 
-// scaleColor dims a colour, delegating the arithmetic to crucible's paint
-// package so brightness scaling matches the rest of the family.
 func scaleColor(c rl.Color, f float32) rl.Color {
+	// Dims a colour, delegating the arithmetic to crucible's paint
+	// package so brightness scaling matches the rest of the family.
 	v := paint.Scale(color.RGBA{R: c.R, G: c.G, B: c.B, A: c.A}, float64(f))
 	return rl.NewColor(v.R, v.G, v.B, v.A)
 }
@@ -407,9 +407,9 @@ func drawSignPost(p city.Prop, face rl.Color, size float32) {
 	rl.PopMatrix()
 }
 
-// drawGiveWaySign renders the British inverted triangle: a white face with a
-// red border, pointing down.
 func drawGiveWaySign(p city.Prop) {
+	// Renders the British inverted triangle: a white face with a
+	// red border, pointing down.
 	const size float32 = 0.5
 	rl.DrawCylinderEx(vec3(p.Pos.X, 0, p.Pos.Z), vec3(p.Pos.X, p.Height-size, p.Pos.Z),
 		0.05, 0.05, 8, colPole)
@@ -438,9 +438,9 @@ func drawLamp(p city.Prop) {
 	rl.PopMatrix()
 }
 
-// drawCar renders a vehicle as a stack of boxes in its own local space, so the
-// whole car rotates with a single matrix push.
 func drawCar(v *sim.Vehicle, paint rl.Color, ind sim.Indicator, blinkOn bool) {
+	// Renders a vehicle as a stack of boxes in its own local space, so the
+	// whole car rotates with a single matrix push.
 	s := v.Spec
 	rl.PushMatrix()
 	rl.Translatef(v.Pos.X, 0, v.Pos.Z)
@@ -529,10 +529,10 @@ func toRGBAColor(c rl.Color) color.RGBA {
 	return color.RGBA{R: c.R, G: c.G, B: c.B, A: 255}
 }
 
-// drawPoliceCar renders a marked unit: the same body as any other car, with
-// battenburg blocks down the side and a light bar on the roof. The bar only
-// flashes when the unit is actually running to a call.
 func drawPoliceCar(a *sim.Agent, blinkOn bool) {
+	// Renders a marked unit: the same body as any other car, with
+	// battenburg blocks down the side and a light bar on the roof. The bar only
+	// flashes when the unit is actually running to a call.
 	v := a.V
 	drawCar(v, colPoliceBody, a.Indicator(), blinkOn)
 
@@ -570,10 +570,10 @@ func drawPoliceCar(a *sim.Agent, blinkOn bool) {
 	rl.PopMatrix()
 }
 
-// viewOf converts a raylib camera into the renderer-free view the annotator
-// projects with, so the boxes drawn on screen and the boxes an evaluation run
-// rasterises come from one piece of arithmetic.
 func viewOf(cam rl.Camera3D, w, h int) annotate.View {
+	// Converts a raylib camera into the renderer-free view the annotator
+	// projects with, so the boxes drawn on screen and the boxes an evaluation run
+	// rasterises come from one piece of arithmetic.
 	return annotate.View{
 		Position: mathx.V3(cam.Position.X, cam.Position.Y, cam.Position.Z),
 		Target:   mathx.V3(cam.Target.X, cam.Target.Y, cam.Target.Z),
@@ -582,10 +582,10 @@ func viewOf(cam rl.Camera3D, w, h int) annotate.View {
 	}
 }
 
-// drawBoxes paints the annotator's boxes over whatever is already rendered.
-// It must run outside the lighting shader so the colours land in the
-// framebuffer exactly as specified: the scanner matches them exactly.
 func drawBoxes(boxes []annotate.Box, labels bool) {
+	// Paints the annotator's boxes over whatever is already rendered.
+	// It must run outside the lighting shader so the colours land in the
+	// framebuffer exactly as specified: the scanner matches them exactly.
 	for _, b := range boxes {
 		v := vision.RGBA(b.Class)
 		col := rl.NewColor(v.R, v.G, v.B, v.A)

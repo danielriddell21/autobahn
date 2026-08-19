@@ -195,10 +195,10 @@ func New(opts Options) *Game {
 	return g
 }
 
-// watchInfractions turns judge events into HUD lines. The judge publishes on a
-// crucible telemetry bus, a status source decides the wording, and the line is
-// posted to the overlay: the game supplies the vocabulary, crucible the plumbing.
 func (g *Game) watchInfractions() {
+	// Turns judge events into HUD lines. The judge publishes on a
+	// crucible telemetry bus, a status source decides the wording, and the line is
+	// posted to the overlay: the game supplies the vocabulary, crucible the plumbing.
 	const noticeFrames = 150
 
 	source := status.Func[sim.Infraction](func(in sim.Infraction, emit func(status.Line)) {
@@ -307,8 +307,8 @@ func (g *Game) Step(dt float32) {
 	g.capture()
 }
 
-// capture feeds the finished frame to the recorder, when one is running.
 func (g *Game) capture() {
+	// Feeds the finished frame to the recorder, when one is running.
 	if g.recorder == nil || g.recorder.Done() {
 		return
 	}
@@ -468,9 +468,9 @@ func (g *Game) updateCameras(dt float32) {
 	}
 }
 
-// renderAICamera draws the scene from the bonnet camera into the off-screen
-// target and paints the detection boxes over it.
 func (g *Game) renderAICamera() {
+	// Draws the scene from the bonnet camera into the off-screen
+	// target and paints the detection boxes over it.
 	rl.BeginTextureMode(g.aiTarget)
 	rl.ClearBackground(colSky)
 	g.drawWorld(g.aiCam, false)
@@ -479,9 +479,9 @@ func (g *Game) renderAICamera() {
 	rl.EndTextureMode()
 }
 
-// scanAICamera reads the camera image back and recovers the detections. This
-// is the only path by which world state reaches the autopilot.
 func (g *Game) scanAICamera() {
+	// Reads the camera image back and recovers the detections. This
+	// is the only path by which world state reaches the autopilot.
 	img := rl.LoadImageFromTexture(g.aiTarget.Texture)
 	if img == nil {
 		return
@@ -578,11 +578,11 @@ func printSummary(s Summary) {
 	}
 }
 
-// checkPerception compares the range the camera model infers for the nearest
-// vehicle against the simulation's true distance. It exists to validate the
-// camera calibration during development; the autopilot never sees either
-// number, and the check runs only under the -debugvision flag.
 func (g *Game) checkPerception() {
+	// Compares the range the camera model infers for the nearest
+	// vehicle against the simulation's true distance. It exists to validate the
+	// camera calibration during development; the autopilot never sees either
+	// number, and the check runs only under the -debugvision flag.
 	if g.frame%60 != 0 {
 		return
 	}

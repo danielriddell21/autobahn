@@ -33,10 +33,10 @@ func (n *Node) IsRoundabout() bool { return n.Roundabout }
 // RingRadius returns the radius of a roundabout's circulating carriageway.
 func (n *Node) RingRadius() float32 { return n.ringRadius }
 
-// chooseRoundabouts promotes a share of the junctions to roundabouts. They are
-// picked before lanes are built, because a roundabout needs a much larger
-// junction radius and the approach lanes are trimmed back to it.
 func (c *City) chooseRoundabouts(rng *rand.Rand, share float32) {
+	// Promotes a share of the junctions to roundabouts. They are
+	// picked before lanes are built, because a roundabout needs a much larger
+	// junction radius and the approach lanes are trimmed back to it.
 	for _, n := range c.Nodes {
 		if n.Degree() < 3 || rng.Float32() >= share {
 			continue
@@ -52,10 +52,10 @@ func (c *City) chooseRoundabouts(rng *rand.Rand, share float32) {
 	}
 }
 
-// buildRings lays the circulating carriageway of every roundabout. Each ring is
-// a closed run of short lanes travelling in the direction entering traffic
-// turns into, which is clockwise seen from above where traffic keeps left.
 func (c *City) buildRings() {
+	// Lays the circulating carriageway of every roundabout. Each ring is
+	// a closed run of short lanes travelling in the direction entering traffic
+	// turns into, which is clockwise seen from above where traffic keeps left.
 	for _, n := range c.Nodes {
 		if !n.Roundabout {
 			continue
@@ -134,9 +134,9 @@ type ringVertex struct {
 	road  int // the road attaching here, or -1 for a plain vertex
 }
 
-// ringAngles returns the ring's vertices in circulation order: one at every
-// road, plus enough plain vertices between them to keep the segments short.
 func (c *City) ringAngles(n *Node) []ringVertex {
+	// Returns the ring's vertices in circulation order: one at every
+	// road, plus enough plain vertices between them to keep the segments short.
 	var out []ringVertex
 	for _, rid := range n.Roads {
 		out = append(out, ringVertex{theta: c.roadAngle(n, rid), road: rid})
@@ -168,9 +168,9 @@ func (c *City) ringAngles(n *Node) []ringVertex {
 	return filled
 }
 
-// roadAngle returns the direction from a node to the far end of one of its
-// roads, which is where that road meets the ring.
 func (c *City) roadAngle(n *Node, rid int) float32 {
+	// Returns the direction from a node to the far end of one of its
+	// roads, which is where that road meets the ring.
 	r := c.Roads[rid]
 	far := c.Nodes[r.B].Pos
 	if r.B == n.ID {
@@ -183,8 +183,8 @@ func (n *Node) ringPoint(theta float32) mathx.Vec {
 	return n.Pos.Add(mathx.FromAngle(theta).Mul(n.ringRadius))
 }
 
-// approachLanes returns the lanes of a road that arrive at the given node.
 func (c *City) approachLanes(r *Road, node int) []int {
+	// Returns the lanes of a road that arrive at the given node.
 	if r.B == node {
 		return r.LanesAB
 	}

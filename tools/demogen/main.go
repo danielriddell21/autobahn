@@ -127,8 +127,8 @@ func run(cfg config) error {
 	return nil
 }
 
-// opts builds the session settings the clips share.
 func (c config) opts(seed uint64) game.Options {
+	// Builds the session settings the clips share.
 	o := game.DefaultOptions()
 	o.Seed = seed
 	o.Traffic = c.traffic
@@ -141,9 +141,9 @@ func (c config) opts(seed uint64) game.Options {
 
 func (c config) path(file string) string { return filepath.Join(c.out, file) }
 
-// recorder builds a recorder with a palette ramped from the game's own colours,
-// which keeps both the city and the saturated detection boxes clean in a GIF.
 func (c config) recorder(frames, scale int) *record.Recorder {
+	// Builds a recorder with a palette ramped from the game's own colours,
+	// which keeps both the city and the saturated detection boxes clean in a GIF.
 	return record.NewRecorder(c.fps, scale, frames,
 		record.WithPalette(demo.Ramp(game.PaletteBases(), 5)),
 		record.WithFrameDiff(),
@@ -151,9 +151,9 @@ func (c config) recorder(frames, scale int) *record.Recorder {
 	)
 }
 
-// rolling reports whether the car is properly under way, so a clip opens on
-// driving rather than on the standing start.
 func rolling(g *game.Game) bool {
+	// Reports whether the car is properly under way, so a clip opens on
+	// driving rather than on the standing start.
 	return mathx.ToMPH(g.World().Player.Speed()) > 6
 }
 
@@ -192,9 +192,9 @@ func clipVision(cfg config) error {
 	})
 }
 
-// clipJunction waits for the autopilot to actually be stopping for something
-// before it starts recording, which is what demo.Clip's Ready gate is for.
 func clipJunction(cfg config) error {
+	// Waits for the autopilot to actually be stopping for something
+	// before it starts recording, which is what demo.Clip's Ready gate is for.
 	return game.WithWindow(cfg.opts(cfg.seed), func(g *game.Game) error {
 		g.SetCameraMode(game.CameraChase)
 		rec := cfg.recorder(130, cfg.scale)
@@ -224,11 +224,11 @@ func clipJunction(cfg config) error {
 	})
 }
 
-// clipPolice records a pursuit. Nothing about it is staged: the car is driven
-// by the reckless controller, which follows the road and ignores every rule, so
-// the offences are judged and the response summoned through the ordinary path.
-// Recording opens only once units are actually chasing.
 func clipPolice(cfg config) error {
+	// Records a pursuit. Nothing about it is staged: the car is driven
+	// by the reckless controller, which follows the road and ignores every rule, so
+	// the offences are judged and the response summoned through the ordinary path.
+	// Recording opens only once units are actually chasing.
 	o := cfg.opts(cfg.seed)
 	o.Autopilot = false
 	o.Reckless = true
@@ -254,9 +254,9 @@ func clipPolice(cfg config) error {
 	})
 }
 
-// sheetCity renders the same overhead view of four different seeds, which shows
-// how much the generator varies between them.
 func sheetCity(cfg config) error {
+	// Renders the same overhead view of four different seeds, which shows
+	// how much the generator varies between them.
 	seeds := []uint64{cfg.seed, cfg.seed + 1, cfg.seed + 2, cfg.seed + 3}
 
 	return game.WithWindow(cfg.opts(seeds[0]), func(first *game.Game) error {
@@ -281,8 +281,8 @@ func sheetCity(cfg config) error {
 	})
 }
 
-// sheetCameras shows one scene from each viewpoint.
 func sheetCameras(cfg config) error {
+	// Shows one scene from each viewpoint.
 	return game.WithWindow(cfg.opts(cfg.seed), func(g *game.Game) error {
 		settle(g, 220)
 
@@ -299,9 +299,9 @@ func sheetCameras(cfg config) error {
 	})
 }
 
-// settle runs the simulation on for a while so traffic disperses and the car is
-// somewhere more interesting than the start line.
 func settle(g *game.Game, steps int) {
+	// Runs the simulation on for a while so traffic disperses and the car is
+	// somewhere more interesting than the start line.
 	for range steps {
 		g.Step(fixedStep)
 	}
@@ -329,9 +329,9 @@ func writePNG(path string, img image.Image) error {
 	return nil
 }
 
-// downscale shrinks a frame by an integer factor with a box filter, so contact
-// sheet cells are a sensible size without depending on the render resolution.
 func downscale(src image.Image, factor int) image.Image {
+	// Shrinks a frame by an integer factor with a box filter, so contact
+	// sheet cells are a sensible size without depending on the render resolution.
 	if src == nil {
 		return image.NewRGBA(image.Rect(0, 0, 1, 1))
 	}

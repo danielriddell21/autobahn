@@ -85,9 +85,9 @@ func newProjector(v View) projector {
 	}
 }
 
-// project maps a world point to image coordinates. It reports false for points
-// at or behind the eye plane, whose projection is meaningless.
 func (p projector) project(w mathx.Vec3) (x, y float32, ok bool) {
+	// Maps a world point to image coordinates. It reports false for points
+	// at or behind the eye plane, whose projection is meaningless.
 	rel := w.Sub(p.eye)
 	z := rel.Dot(p.fwd)
 	if z <= 0.05 {
@@ -196,9 +196,9 @@ func speedClass(limit float32) vision.Class {
 	}
 }
 
-// boxOf projects an oriented box standing on the ground to its screen-space
-// bounding rectangle, and reports false when nothing usable lands on the image.
 func boxOf(p projector, cl vision.Class, ground mathx.Vec, centreY, halfW, halfH, halfL, yaw float32) (Box, bool) {
+	// Projects an oriented box standing on the ground to its screen-space
+	// bounding rectangle, and reports false when nothing usable lands on the image.
 	f := mathx.FromAngle(yaw)
 	r := f.Right()
 
@@ -228,8 +228,8 @@ func boxOf(p projector, cl vision.Class, ground mathx.Vec, centreY, halfW, halfH
 	return Box{Class: cl, MinX: minX, MinY: minY, MaxX: maxX, MaxY: maxY}, true
 }
 
-// corner expands a box corner index into its three sign components.
 func corner(i int) (x, y, z float32) {
+	// Expands a box corner index into its three sign components.
 	sign := func(bit int) float32 {
 		if i&bit == 0 {
 			return -1

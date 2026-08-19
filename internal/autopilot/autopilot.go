@@ -223,14 +223,14 @@ func (d *Driver) lanePoints(dets []vision.Detection) []lanePoint {
 	return chain(pts)
 }
 
-// chain puts lane markers into the order they run along the road, by starting
-// at the nearest and repeatedly taking whichever is closest to the last one.
-//
-// Sorting them by range instead would be wrong on anything tightly curved. Most
-// of the way round a roundabout is nearer in a straight line than a point just
-// ahead on the ring, so a range-ordered lookahead picks a target across the
-// island and steers at it. Following the chain keeps the path a path.
 func chain(pts []lanePoint) []lanePoint {
+	// Puts lane markers into the order they run along the road, by starting
+	// at the nearest and repeatedly taking whichever is closest to the last one.
+	//
+	// Sorting them by range instead would be wrong on anything tightly curved. Most
+	// of the way round a roundabout is nearer in a straight line than a point just
+	// ahead on the ring, so a range-ordered lookahead picks a target across the
+	// island and steers at it. Following the chain keeps the path a path.
 	if len(pts) < 2 {
 		return pts
 	}
@@ -255,8 +255,8 @@ func chain(pts []lanePoint) []lanePoint {
 	return pts
 }
 
-// gap is the distance between two lane markers on the ground.
 func gap(a, b lanePoint) float32 {
+	// Is the distance between two lane markers on the ground.
 	dx := b.lateral - a.lateral
 	dz := b.dist - a.dist
 	return sqrt(dx*dx + dz*dz)
@@ -552,11 +552,11 @@ func approachSpeed(dist, final float32) float32 {
 	return sqrt(final*final + 2*comfortStop*dist)
 }
 
-// committed reports whether the car is too close to the line to stop safely,
-// which is the only case in which crossing on amber is permitted. Anything
-// short of that gets stopped for, so the car is not still crossing when the
-// aspect turns red.
 func committed(speed, lineDist float32) bool {
+	// Reports whether the car is too close to the line to stop safely,
+	// which is the only case in which crossing on amber is permitted. Anything
+	// short of that gets stopped for, so the car is not still crossing when the
+	// aspect turns red.
 	d := max(lineDist-stopBuffer, 0.1)
 	return speed*speed/(2*d) > hardStop
 }
