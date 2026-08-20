@@ -18,6 +18,7 @@ import (
 	"github.com/danielriddell21/crucible/telemetry"
 
 	"github.com/danielriddell21/autobahn/internal/annotate"
+	"github.com/danielriddell21/autobahn/internal/audio"
 	"github.com/danielriddell21/autobahn/internal/autopilot"
 	"github.com/danielriddell21/autobahn/internal/mathx"
 	"github.com/danielriddell21/autobahn/internal/sim"
@@ -49,6 +50,7 @@ type Options struct {
 	// rule. It is a development aid for exercising the judge and the police.
 	Reckless    bool
 	ShowPanel   bool // show the AI camera panel
+	Mute        bool // synthesise no sound at all
 	Camera      CameraMode
 	Frames      int // when > 0, run this many frames then exit
 	Screenshot  string
@@ -97,6 +99,7 @@ type Game struct {
 	showHelp   bool
 	paused     bool
 
+	audio     *audio.Kit
 	recorder  *record.Recorder
 	notices   *crucihud.Overlay
 	lastCmd   autopilot.Command
@@ -178,6 +181,7 @@ func New(opts Options) *Game {
 		g.recorder = record.NewRecorder(30, max(opts.RecordScale, 1), frames,
 			record.WithFrameDiff())
 	}
+	g.audio = audio.Open(opts.Mute)
 	g.notices = crucihud.New()
 	g.watchInfractions()
 	g.driver = autopilot.New(g.visionCam)
@@ -227,6 +231,7 @@ func (g *Game) watchInfractions() {
 
 // Close releases the GPU resources the game owns.
 func (g *Game) Close() {
+	g.audio.Close()
 	rl.UnloadRenderTexture(g.aiTarget)
 	if g.hasShader {
 		rl.UnloadShader(g.shader)
@@ -296,6 +301,7 @@ func (g *Game) Step(dt float32) {
 		g.world.Update(controls, dt)
 	}
 	g.updateCameras(dt)
+	g.updateAudio()
 
 	rl.BeginDrawing()
 	rl.ClearBackground(colSky)
@@ -382,6 +388,28 @@ func (g *Game) SaveRecording(path string) error {
 		return nil
 	}
 	return g.recorder.Save(path)
+}
+
+func (g *Game) updateAudio() {
+	// The engine note tracks the car, and the siren the nearest unit that is
+	// actually running to a call.
+	p := g.world.Player
+	g.audio.Engine(p.Speed(), p.Throttle)
+	g.audio.Skid(p.Slip, p.Speed())
+
+	nearest, bearing := float32(1e9), float32(0)
+	for _, u := range g.world.Police() {
+		if !u.Pursuing() {
+			continue
+		}
+		rel := u.V.Pos.Sub(p.Pos)
+		if d := rel.Len(); d < nearest {
+			fwd := p.Forward()
+			nearest = d
+			bearing = mathx.Atan2(rel.Dot(fwd.Right()), rel.Dot(fwd))
+		}
+	}
+	g.audio.Siren(nearest, bearing)
 }
 
 func (g *Game) handleInput() {

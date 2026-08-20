@@ -52,6 +52,8 @@ asset files, nothing is downloaded at runtime, and the whole thing runs offline.
 | `R` | return to the start |
 | `P` `H` | pause, help |
 
+`-mute` turns the sound off.
+
 ## Part one: driving
 
 The city is a seeded grid with varied block spans, arterials every third line,
@@ -316,6 +318,7 @@ This game is a raylib app, so the Ebiten-facing half of
 | `hud` + `status` | Those events become the on-screen fault toast, wired judge → bus → status source → overlay. |
 | `keymap` | The controls panel, wrapped to the available width. |
 | `paint` | Colour dimming for façades, roofs and brake lights. |
+| `synth` | Every sound in the game: engine, siren, tyres and impacts, synthesised at startup with no audio files. |
 | `record` | `-record drive.gif` in the game, and every file `demogen` writes. Its `Add(image.Image)` is renderer-agnostic, so it works behind raylib unchanged. |
 | `demo` | `tools/demogen`. `Clip` drives and captures each run, `Montage` tiles the contact sheets, `Ramp` builds the GIF palette. |
 
@@ -342,6 +345,42 @@ backwards-compatible:
    road grid. A weighted-choice and flood-fill helper is all this game would
    have borrowed, and both are already there — the layout code is genuinely
    app-specific and should stay here.
+
+## Sound
+
+Every sound is synthesised at startup from crucible's `synth`, the same way the
+geometry is generated in code. There are no audio files.
+
+| | |
+|---|---|
+| engine | a drone of four detuned voices, pitched by road speed and swelled by throttle |
+| siren | the British two-tone, alternating on about a half second |
+| tyres | filtered noise, while the rear axle is actually sliding |
+| impact | a thud scaled and pitched by how hard the collision was |
+
+The siren is panned by the bearing to the nearest unit on a call, using
+`synth.Pan`, so it arrives from the side the car is really on and swings across
+as a unit overtakes. `-mute` silences everything, and a machine with no audio
+device gets a kit that simply stays quiet rather than an error.
+
+### One thing worth adding to crucible
+
+`synth` documents itself as rendering PCM "ready for an Ebiten/oto audio
+player", and it is — but a front-end that is not Ebiten cannot take raw PCM.
+raylib, SDL and most others will only load an encoded file from memory, so this
+game carries a forty-four byte RIFF header writer to bridge the gap.
+
+That belongs in `synth` rather than in each app: something like
+
+```go
+// WAV wraps rendered PCM in a RIFF header, for players that take a file
+// rather than raw samples.
+func WAV(pcm []byte) []byte
+```
+
+It is purely additive, needs nothing from the app side, and would make `synth`
+usable from any front-end rather than only from an Ebiten one. Say the word and
+I will open it as a PR on crucible.
 
 ## Documentation media
 

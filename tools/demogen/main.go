@@ -136,6 +136,7 @@ func (c config) opts(seed uint64) game.Options {
 	o.Width, o.Height = c.width, c.height
 	o.Autopilot = true
 	o.ShowPanel = true
+	o.Mute = true
 	return o
 }
 

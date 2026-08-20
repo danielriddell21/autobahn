@@ -25,6 +25,7 @@ func main() {
 	auto := flag.Bool("autopilot", false, "start with the AI driving")
 	reckless := flag.Bool("reckless", false, "drive the route at full throttle ignoring every rule, to exercise the police")
 	panel := flag.Bool("panel", true, "show the AI camera panel")
+	mute := flag.Bool("mute", false, "synthesise no sound")
 	camera := flag.String("camera", "chase", "viewpoint: chase, bonnet or high")
 	hz := flag.Float64("perception", float64(opts.PerceptionH), "perception updates per second")
 	frames := flag.Int("frames", 0, "run this many frames then exit; 0 runs until closed")
@@ -43,6 +44,7 @@ func main() {
 	opts.Autopilot = *auto
 	opts.Reckless = *reckless
 	opts.ShowPanel = *panel
+	opts.Mute = *mute
 	switch *camera {
 	case "bonnet":
 		opts.Camera = game.CameraBonnet
