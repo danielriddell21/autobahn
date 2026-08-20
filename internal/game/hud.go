@@ -64,9 +64,13 @@ func (g *Game) drawStatusBar() {
 	}
 }
 
-func (g *Game) drawSpeedo() {
-	p := g.world.Player
+func (g *Game) drawSpeedo() { g.drawSpeedoFor(g.world.Player) }
+
+func (g *Game) drawSpeedoFor(p *sim.Vehicle) {
+	// The limit and the signal ahead belong to the judged car, so a viewer
+	// watching a police unit gets a speedometer and nothing more.
 	j := g.world.Judge
+	judged := p == g.world.Player
 	speed := mathx.ToMPH(p.Speed())
 	limit := mathx.ToMPH(j.SpeedLimit())
 
@@ -79,6 +83,10 @@ func (g *Game) drawSpeedo() {
 	}
 	rl.DrawText(fmt.Sprintf("%.0f", speed), x+16, y+16, 56, col)
 	rl.DrawText("mph", x+120, y+52, 16, hudDim)
+
+	if !judged {
+		return
+	}
 
 	// The speed limit, drawn as a roundel like the signs in the world.
 	cx, cy := x+200, y+44

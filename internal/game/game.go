@@ -21,6 +21,7 @@ import (
 	"github.com/danielriddell21/autobahn/internal/audio"
 	"github.com/danielriddell21/autobahn/internal/autopilot"
 	"github.com/danielriddell21/autobahn/internal/mathx"
+	"github.com/danielriddell21/autobahn/internal/netplay"
 	"github.com/danielriddell21/autobahn/internal/sim"
 	"github.com/danielriddell21/autobahn/internal/vision"
 )
@@ -48,9 +49,13 @@ type Options struct {
 	Autopilot bool // start with the AI driving
 	// Reckless drives the car along its route at full throttle, ignoring every
 	// rule. It is a development aid for exercising the judge and the police.
-	Reckless    bool
-	ShowPanel   bool // show the AI camera panel
-	Mute        bool // synthesise no sound at all
+	Reckless  bool
+	ShowPanel bool // show the AI camera panel
+	Mute      bool // synthesise no sound at all
+	// Host makes this machine the authority for a two-player chase, listening
+	// on the given address. Join connects to one instead.
+	Host        string
+	Join        string
 	Camera      CameraMode
 	Frames      int // when > 0, run this many frames then exit
 	Screenshot  string
@@ -98,6 +103,14 @@ type Game struct {
 	showLabels bool
 	showHelp   bool
 	paused     bool
+
+	host   *netplay.Host
+	client *netplay.Client
+	chase  Chase
+	chaser *sim.Agent
+
+	sinceSnapshot float32
+	lastDT        float32
 
 	audio     *audio.Kit
 	recorder  *record.Recorder
@@ -194,6 +207,11 @@ func New(opts Options) *Game {
 	g.aiCam = rl.Camera3D{Up: vec3(0, 1, 0),
 		Fovy: g.visionCam.FovY, Projection: rl.CameraPerspective}
 	g.camMode = opts.Camera % numCameraModes
+	if opts.Host != "" || opts.Join != "" {
+		// Both ends need the police unit the joining player drives, and it must
+		// be the same one, which it is because the world came from one seed.
+		g.chaser = g.world.Chaser()
+	}
 	g.camPos = g.world.Player.Pos
 	g.updateCameras(0)
 	return g
@@ -257,10 +275,18 @@ func (g *Game) SetAutopilot(on bool) {
 	g.world.Judge.Reset()
 }
 
+// Networked reports whether this session is one end of a two-player chase.
+func (g *Game) Networked() bool { return g.host != nil || g.client != nil }
+
 // Step advances the game by one frame: perception, control, simulation, then
 // rendering. dt is the frame duration in seconds.
 func (g *Game) Step(dt float32) {
 	g.frame++
+	g.lastDT = dt
+	if g.Networked() {
+		g.stepNetworked(dt)
+		return
+	}
 	g.speedSum += g.world.Player.Speed()
 	g.peakWanted = max(g.peakWanted, g.world.Wanted.Level)
 	g.handleInput()
@@ -270,20 +296,7 @@ func (g *Game) Step(dt float32) {
 	}
 	g.notices.Tick()
 
-	// Perception runs on its own clock, as a real sensor stack would. The
-	// camera image must be produced before the controller reads it.
-	wantVision := g.auto || g.showPanel
-	if wantVision {
-		g.perceived += dt
-		interval := 1 / max(g.opts.PerceptionH, 1)
-		if g.perceived >= interval || g.dets == nil {
-			g.perceived = 0
-			g.renderAICamera()
-			g.scanAICamera()
-			g.detSum += len(g.dets)
-			g.detFrames++
-		}
-	}
+	g.perceive(dt)
 
 	controls := g.manualControls()
 	if g.opts.Reckless {
@@ -390,6 +403,24 @@ func (g *Game) SaveRecording(path string) error {
 	return g.recorder.Save(path)
 }
 
+func (g *Game) perceive(dt float32) {
+	// Perception runs on its own clock, as a real sensor stack would. The
+	// camera image must be produced before the controller reads it.
+	if !g.auto && !g.showPanel {
+		return
+	}
+	g.perceived += dt
+	interval := 1 / max(g.opts.PerceptionH, 1)
+	if g.perceived < interval && g.dets != nil {
+		return
+	}
+	g.perceived = 0
+	g.renderAICamera()
+	g.scanAICamera()
+	g.detSum += len(g.dets)
+	g.detFrames++
+}
+
 func (g *Game) updateAudio() {
 	// The engine note tracks the car, and the siren the nearest unit that is
 	// actually running to a call.
@@ -410,6 +441,45 @@ func (g *Game) updateAudio() {
 		}
 	}
 	g.audio.Siren(nearest, bearing)
+}
+
+func (g *Game) stepNetworked(dt float32) {
+	// Runs one frame of a two-player chase. The host simulates and
+	// publishes; the joining player sends controls and draws what comes back.
+	g.handleInput()
+	g.notices.Tick()
+	if g.blinkT += dt; g.blinkT > 0.36 {
+		g.blink, g.blinkT = !g.blink, 0
+	}
+
+	if g.host != nil {
+		runner := g.manualControls()
+		if g.auto {
+			// Human against the machine: the runner can be the autopilot, which
+			// still sees nothing but its camera.
+			g.perceive(dt)
+			cmd := g.driver.Drive(g.dets, g.world.Player.Speed(), dt)
+			g.lastCmd = cmd
+			runner = sim.Controls{Throttle: cmd.Throttle, Brake: cmd.Brake, Steer: cmd.Steer}
+		}
+		g.hostChase(runner, dt)
+	} else {
+		g.joinChase(dt)
+	}
+
+	g.chaseCamera(dt)
+	g.updateAudio()
+
+	rl.BeginDrawing()
+	rl.ClearBackground(colSky)
+	g.drawWorld(g.cam, true)
+	if g.showHUD {
+		g.drawSpeedoFor(g.chaseSubject())
+		g.drawChaseHUD()
+		g.drawMinimap(int32(g.opts.Width)-156, int32(g.opts.Height)-156, 144)
+	}
+	rl.EndDrawing()
+	g.capture()
 }
 
 func (g *Game) handleInput() {
@@ -545,12 +615,36 @@ func (g *Game) scanAICamera() {
 // A window is still required even when nothing is watching, because the scene
 // is drawn on the GPU; on a headless Linux box run under xvfb-run.
 func WithWindow(opts Options, fn func(*Game) error) error {
+	// A network session is opened before the window, so a bad address fails
+	// immediately rather than after a window has appeared.
+	var host *netplay.Host
+	var client *netplay.Client
+	var err error
+	switch {
+	case opts.Host != "":
+		if host, err = netplay.Listen(opts.Host); err != nil {
+			return err
+		}
+		defer host.Close()
+		fmt.Println("hosting a chase on", host.Addr())
+	case opts.Join != "":
+		if client, err = netplay.Join(opts.Join); err != nil {
+			return err
+		}
+		defer client.Close()
+		fmt.Println("joined", opts.Join, "as the police")
+	}
+
 	rl.SetTraceLogLevel(rl.LogWarning)
 	rl.SetConfigFlags(rl.FlagMsaa4xHint)
 	rl.InitWindow(int32(opts.Width), int32(opts.Height), "Autobahn")
 	defer rl.CloseWindow()
 
 	g := New(opts)
+	g.host, g.client = host, client
+	if g.Networked() {
+		g.chaser = g.world.Chaser()
+	}
 	defer g.Close()
 	return fn(g)
 }

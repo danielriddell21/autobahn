@@ -112,3 +112,7 @@ func mod(a, m float32) float32 {
 // MustStop reports whether an aspect forbids crossing the stop line. Red and
 // amber both do; red-and-amber does too, since it only means "prepare to go".
 func (s SignalState) MustStop() bool { return s != SignalGreen }
+
+// SetClock forces the signal clock, so a joining machine shows the same aspect
+// at the same moment as the host without either simulating the other's timers.
+func (s *Signals) SetClock(t float32) { s.clock = t }

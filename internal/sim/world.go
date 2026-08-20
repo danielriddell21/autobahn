@@ -146,6 +146,42 @@ func (w *World) Police() []*Agent {
 	return out
 }
 
+// Chaser designates a police unit as human-driven, and returns it. It is how
+// the two-player chase is set up: everything else about the unit — its livery,
+// its lights, the fact that catching the runner ends the pursuit — is unchanged.
+func (w *World) Chaser() *Agent {
+	for _, a := range w.Agents {
+		if a.Manual {
+			return a
+		}
+	}
+	for _, a := range w.Agents {
+		if a.Role != RolePolice {
+			continue
+		}
+		a.Manual = true
+		a.pursuing = true
+		// Put the unit on the road behind the runner, so the chase starts with
+		// something to chase rather than a search.
+		behind := w.Player.Pos.Sub(w.Player.Forward().Mul(34))
+		if p := w.City.Project(behind); p.Valid {
+			a.V.Place(p.Lane.Point(p.S), p.Lane.Heading)
+		}
+		return a
+	}
+	return nil
+}
+
+// Caught reports whether the human-driven unit has the runner stopped, which is
+// the same test the AI units are held to.
+func (w *World) Caught() bool {
+	c := w.Chaser()
+	if c == nil {
+		return false
+	}
+	return c.V.Pos.DistTo(w.Player.Pos) < stopRange && w.Player.Speed() < 2.5
+}
+
 // Respawn returns the player to the starting pose.
 func (w *World) Respawn() {
 	w.Player.Place(w.spawnPos, w.spawnYaw)
@@ -445,3 +481,24 @@ func (w *World) relocate(a *Agent) {
 		return
 	}
 }
+
+// ApplyPose moves a vehicle to a pose supplied by the host of a network game.
+// A joining machine does not simulate: it is told where everything is, and this
+// is how it is told.
+func ApplyPose(v *Vehicle, x, z, yaw, speed float32) {
+	v.Pos = mathx.V(x, z)
+	v.Yaw = yaw
+	// The velocity is reconstructed from the heading, which is enough for the
+	// renderer and for the wheels to look right.
+	v.Vel = mathx.FromAngle(yaw).Mul(speed)
+}
+
+// SetPursuing marks a unit as running to a call, for a joining machine that is
+// told rather than deciding.
+func (a *Agent) SetPursuing(on bool) { a.pursuing = on }
+
+// SetInput supplies a human-driven agent's controls.
+func (a *Agent) SetInput(c Controls) { a.Input = c }
+
+// Controls returns a human-driven agent's current controls.
+func (a *Agent) Controls() Controls { return a.Input }

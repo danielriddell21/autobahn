@@ -319,6 +319,7 @@ This game is a raylib app, so the Ebiten-facing half of
 | `keymap` | The controls panel, wrapped to the available width. |
 | `paint` | Colour dimming for façades, roofs and brake lights. |
 | `synth` | Every sound in the game: engine, siren, tyres and impacts, synthesised at startup with no audio files. |
+| `hub` | Not used. It coordinates leader and child *windows* on one machine; this game needed two machines, so it has its own small netplay package instead. |
 | `record` | `-record drive.gif` in the game, and every file `demogen` writes. Its `Add(image.Image)` is renderer-agnostic, so it works behind raylib unchanged. |
 | `demo` | `tools/demogen`. `Clip` drives and captures each run, `Montage` tiles the contact sheets, `Ramp` builds the GIF palette. |
 
@@ -345,6 +346,44 @@ backwards-compatible:
    road grid. A weighted-choice and flood-fill helper is all this game would
    have borrowed, and both are already there — the layout code is genuinely
    app-specific and should stay here.
+
+## Two players, over the network
+
+One machine hosts and owns the simulation; the other joins and drives a marked
+police unit.
+
+```sh
+go run -tags x11 ./cmd/autobahn -host :7777              # you run
+go run -tags x11 ./cmd/autobahn -join hostname:7777      # they chase
+```
+
+The runner has two minutes to stay free. The police win by stopping them — the
+same test the AI units are held to, a unit alongside and the car pulled up.
+
+**Only moving things cross the wire.** The city comes from a seed, so both ends
+build precisely the same streets, buildings, signals and traffic from the same
+number and never mention them again. What is left is a few dozen poses and a
+clock, which is small enough to send whole twenty times a second rather than
+bothering with deltas. The clock is what keeps every traffic light showing the
+same aspect at both ends without either machine simulating the other's timers.
+
+The host is the authority and the joining player sends nothing but controls.
+There is no prediction and no rollback: this is two cars in a chase, and a
+little lag on the police car behind you is not worth that machinery.
+
+### Human against the machine
+
+Add `-autopilot` on the host and the runner is driven by the camera-only
+autopilot while you chase it:
+
+```sh
+go run -tags x11 ./cmd/autobahn -host :7777 -autopilot
+```
+
+It is the same autopilot, still seeing nothing but its own camera feed, still
+judged by the same judge — now with someone actively trying to stop it. If
+nobody joins, the police unit simply goes back to the simulation and the chase
+carries on without them.
 
 ## Sound
 
@@ -434,7 +473,9 @@ internal/sim        vehicle dynamics, traffic, styles, police, signals, the judg
 internal/vision     detection classes, camera model, the pixel scanner  (pure)
 internal/annotate   lays out and rasterises the boxes  (renderer-free)
 internal/autopilot  the camera-driven driver  (imports vision, nothing else)
-internal/game       rendering, HUD, input, the two driving modes
+internal/netplay    the wire protocol for a two-player chase
+internal/audio      synthesised engine, siren, tyres and impacts
+internal/game       rendering, HUD, input, and the driving modes
 ```
 
 `sim` does not import raylib, so the simulation steps headlessly under test.

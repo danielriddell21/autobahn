@@ -205,12 +205,24 @@ func (w *World) updateWanted(dt float32) {
 
 func (w *World) setPursuit(on bool) {
 	// Puts every unit within range onto the call, or stands them down.
+	// More of the response commits as the level rises, so a driver who keeps
+	// offending finds units arriving from further away.
+	reach := pursuitRange * (0.55 + 0.15*float32(w.Wanted.Level))
 	for _, a := range w.Agents {
-		if a.Role != RolePolice {
+		if a.Role != RolePolice || a.Manual {
 			continue
 		}
-		a.pursuing = on && a.V.Pos.DistTo(w.Player.Pos) < pursuitRange
+		a.pursuing = on && a.V.Pos.DistTo(w.Player.Pos) < reach
 	}
+}
+
+// InterceptPoint returns where a pursuing unit should aim for: not the target's
+// current position, but where it will be by the time the unit gets there. It is
+// a plain constant-velocity lead, which is enough to stop units trailing behind
+// a car that is simply driving away from them.
+func InterceptPoint(target, velocity mathx.Vec, from mathx.Vec, closing float32) mathx.Vec {
+	lead := target.DistTo(from) / max(closing, 6)
+	return target.Add(velocity.Mul(mathx.Clamp(lead, 0, 3.5)))
 }
 
 func (a *Agent) pursuitTurn(c *city.City, target mathx.Vec) (city.Turn, bool) {
@@ -234,3 +246,8 @@ func (a *Agent) pursuitTurn(c *city.City, target mathx.Vec) (city.Turn, bool) {
 // BluesAndTwos reports whether the unit should be showing its lights, which is
 // whenever it is running to a call.
 func (a *Agent) BluesAndTwos() bool { return a.Role == RolePolice && a.pursuing }
+
+func (w *World) interceptOf(a *Agent) mathx.Vec {
+	// Aim where the runner will be, not where it is.
+	return InterceptPoint(w.Player.Pos, w.Player.Vel, a.V.Pos, a.V.Speed())
+}

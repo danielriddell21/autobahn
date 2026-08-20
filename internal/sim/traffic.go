@@ -51,6 +51,13 @@ type Agent struct {
 	// pursuing is set on a police unit running to a call.
 	pursuing bool
 	rng      *rand.Rand
+
+	// Manual hands the car to a human. A driven agent takes its controls from
+	// Input and is left alone otherwise: no route to follow, no lane to be
+	// nudged back onto, and no opinion about junctions.
+	Manual bool
+	// Input is the driver's controls while Manual is set.
+	Input Controls
 }
 
 // Pursuing reports whether this unit is currently on a blue-light run.
@@ -206,6 +213,10 @@ func (a *Agent) advanceRoute(c *city.City, chase mathx.Vec, dt float32) {
 
 func (a *Agent) drive(w *World, dt float32) {
 	c := w.City
+	if a.Manual {
+		a.V.Update(a.Input, dt)
+		return
+	}
 	if a.lane == nil {
 		return
 	}
@@ -222,7 +233,7 @@ func (a *Agent) drive(w *World, dt float32) {
 	}
 
 	if a.pursuing && a.hasNext && !a.inTurn && a.lane.Length-a.s < 45 {
-		a.chooseNextToward(c, w.Player.Pos, true)
+		a.chooseNextToward(c, w.interceptOf(a), true)
 	}
 
 	accel := idmFree(st, speed, limit)
