@@ -369,7 +369,9 @@ same aspect at both ends without either machine simulating the other's timers.
 
 The host is the authority and the joining player sends nothing but controls.
 There is no prediction and no rollback: this is two cars in a chase, and a
-little lag on the police car behind you is not worth that machinery.
+little lag on the police car behind you is not worth that machinery. Remote
+cars are eased toward each snapshot rather than snapped to it, because twenty
+updates a second drawn at sixty frames judders badly otherwise.
 
 ### Human against the machine
 

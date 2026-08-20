@@ -210,7 +210,7 @@ func New(opts Options) *Game {
 	if opts.Host != "" || opts.Join != "" {
 		// Both ends need the police unit the joining player drives, and it must
 		// be the same one, which it is because the world came from one seed.
-		g.chaser = g.world.Chaser()
+		g.chaser = g.world.AssignChaser()
 	}
 	g.camPos = g.world.Player.Pos
 	g.updateCameras(0)
@@ -643,7 +643,7 @@ func WithWindow(opts Options, fn func(*Game) error) error {
 	g := New(opts)
 	g.host, g.client = host, client
 	if g.Networked() {
-		g.chaser = g.world.Chaser()
+		g.chaser = g.world.AssignChaser()
 	}
 	defer g.Close()
 	return fn(g)

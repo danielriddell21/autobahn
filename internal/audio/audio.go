@@ -11,6 +11,7 @@ package audio
 
 import (
 	"encoding/binary"
+	"math"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 
@@ -105,9 +106,11 @@ func (k *Kit) Siren(distance, bearing float32) {
 		}
 		return
 	}
-	// Constant-power panning, so a unit swinging past does not dip in level.
-	left, _ := synth.Pan(float64(bearing))
-	rl.SetSoundPan(k.siren, float32(left))
+	// raylib wants a position from -1 (left) through 0 (centre) to 1 (right),
+	// which is the same left-right axis synth.Pan folds a bearing onto. Passing
+	// one of Pan's channel gains instead would put a siren dead ahead hard over
+	// to one side, and reverse the two that matter.
+	rl.SetSoundPan(k.siren, clamp(sin(float64(bearing)), -1, 1))
 	rl.SetSoundVolume(k.siren, 0.15+0.45*(1-clamp(distance/sirenRange, 0, 1)))
 	if !rl.IsSoundPlaying(k.siren) {
 		rl.PlaySound(k.siren)
@@ -204,3 +207,5 @@ func wav(pcm []byte) []byte {
 }
 
 func clamp(v, lo, hi float32) float32 { return min(max(v, lo), hi) }
+
+func sin(v float64) float32 { return float32(math.Sin(v)) }

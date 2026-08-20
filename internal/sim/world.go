@@ -146,14 +146,25 @@ func (w *World) Police() []*Agent {
 	return out
 }
 
-// Chaser designates a police unit as human-driven, and returns it. It is how
-// the two-player chase is set up: everything else about the unit — its livery,
-// its lights, the fact that catching the runner ends the pursuit — is unchanged.
+// Chaser returns the human-driven police unit, or nil if none has been
+// assigned.
 func (w *World) Chaser() *Agent {
 	for _, a := range w.Agents {
 		if a.Manual {
 			return a
 		}
+	}
+	return nil
+}
+
+// AssignChaser hands a police unit to a human and returns it, placing it on the
+// road behind the runner so a chase starts with something to chase. Everything
+// else about the unit — its livery, its lights, the fact that catching the
+// runner ends the pursuit — is unchanged. Calling it again returns the unit
+// already assigned.
+func (w *World) AssignChaser() *Agent {
+	if a := w.Chaser(); a != nil {
+		return a
 	}
 	for _, a := range w.Agents {
 		if a.Role != RolePolice {

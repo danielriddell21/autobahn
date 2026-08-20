@@ -86,6 +86,27 @@ func (g *Game) publish() {
 	g.host.Send(s)
 }
 
+func ease(v *sim.Vehicle, p netplay.Pose, dt float32) {
+	// Snapshots arrive twenty times a second and frames are drawn sixty, so
+	// snapping to each one makes every remote car judder. Sliding toward the
+	// host's pose instead costs a few centimetres of accuracy and looks like
+	// driving. A car that has moved a long way — a respawn, or the first
+	// snapshot — is placed outright rather than sliding across the city.
+	const rate = 16
+	target := mathx.V(p.X, p.Z)
+	if dt <= 0 || v.Pos.DistTo(target) > 25 {
+		sim.ApplyPose(v, p.X, p.Z, p.Yaw, p.Speed)
+		return
+	}
+	eased := mathx.V(
+		mathx.Approach(v.Pos.X, target.X, rate, dt),
+		mathx.Approach(v.Pos.Z, target.Z, rate, dt),
+	)
+	// Yaw is eased the short way round, so a car crossing north does not spin.
+	yaw := v.Yaw + mathx.WrapPi(p.Yaw-v.Yaw)*mathx.Clamp(rate*dt, 0, 1)
+	sim.ApplyPose(v, eased.X, eased.Z, yaw, p.Speed)
+}
+
 func poseOf(v *sim.Vehicle, pursuing bool) netplay.Pose {
 	var flags uint8
 	if pursuing {
@@ -108,27 +129,24 @@ func (g *Game) joinChase(dt float32) {
 		Handbrake: in.Handbrake, Reverse: in.Reverse,
 	})
 
-	s, ok := g.client.Snapshot()
-	if !ok {
-		return
+	if s, ok := g.client.Snapshot(); ok {
+		g.adopt(s, dt)
 	}
-	g.adopt(s)
-	_ = dt
 }
 
-func (g *Game) adopt(s netplay.Snapshot) {
+func (g *Game) adopt(s netplay.Snapshot, dt float32) {
 	// The city is identical at both ends because it came from the same seed, so
 	// only the moving parts are taken from the host.
 	g.world.Signals.SetClock(s.Clock)
 	g.world.Time = s.Clock
-	sim.ApplyPose(g.world.Player, s.Runner.X, s.Runner.Z, s.Runner.Yaw, s.Runner.Speed)
+	ease(g.world.Player, s.Runner, dt)
 
 	for i, p := range s.Agents {
 		if i >= len(g.world.Agents) {
 			break
 		}
 		a := g.world.Agents[i]
-		sim.ApplyPose(a.V, p.X, p.Z, p.Yaw, p.Speed)
+		ease(a.V, p, dt)
 		a.SetPursuing(p.Flags&netplay.FlagPursuing != 0)
 	}
 	if s.Chaser >= 0 && s.Chaser < len(g.world.Agents) {
