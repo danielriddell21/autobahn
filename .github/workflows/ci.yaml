@@ -2,42 +2,44 @@ name: CI
 
 on:
   push:
-    branches: ["**"]
+    branches: ["trunk"]
   pull_request:
+    branches: ["trunk"]
 
 jobs:
   ci:
+    uses: danielriddell21/github-actions/.github/workflows/ci.yaml@v1
+    permissions:
+      contents: read
+    with:
+      raylib: true
+      build-tags: x11
+      vet: true
+      test-command: go test -tags x11 -race -coverprofile=coverage.txt ./...
+      build-command: go build -tags x11 ./...
+      # gremlins runs `go test` itself and cannot be given a build tag, so
+      # mutation testing cannot compile the raylib packages.
+      mutate: false
+    secrets:
+      codecov-token: ${{ secrets.CODECOV_TOKEN }}
+      tag-token: ${{ secrets.AUTOBAHN_TOKEN }}
+
+  # The autopilot must not be able to reach simulation state. This is the
+  # guarantee the whole camera-only design rests on, so it is checked rather
+  # than trusted.
+  boundary:
+    name: Perception boundary
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
-          go-version: "1.26.4"
-          check-latest: true
+          go-version-file: go.mod
 
-      # raylib builds against the system windowing libraries. The x11 tag keeps
-      # it off Wayland, so only the X11 development headers are needed.
-      - name: Install raylib build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libgl1-mesa-dev libx11-dev libxrandr-dev libxinerama-dev \
-            libxcursor-dev libxi-dev libxkbcommon-dev
+      - uses: danielriddell21/github-actions/.github/actions/setup-raylib@v1
 
-      - name: Build
-        run: go build -tags x11 ./...
-
-      - name: Vet
-        run: go vet -tags x11 ./...
-
-      - name: Test
-        run: go test -tags x11 -race ./...
-
-      # The autopilot must not be able to reach simulation state. This is the
-      # guarantee the whole camera-only design rests on, so it is checked rather
-      # than trusted.
-      - name: Perception boundary
+      - name: Check the autopilot sees only vision and mathx
         run: |
           deps=$(go list -tags x11 -deps ./internal/autopilot | grep autobahn)
           echo "$deps"
@@ -47,7 +49,19 @@ jobs:
           fi
           echo "OK: autopilot sees only vision and mathx"
 
-      # Drives the autopilot across a spread of cities with no display at all,
-      # and fails if it starts breaking noticeably more rules than it does now.
-      - name: Evaluate the autopilot
+  # Drives the autopilot across a spread of cities with no display at all,
+  # and fails if it starts breaking noticeably more rules than it does now.
+  evaluate:
+    name: Evaluate the autopilot
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - uses: danielriddell21/github-actions/.github/actions/setup-raylib@v1
+
+      - name: Score the autopilot across 16 cities
         run: go run ./tools/eval -seeds 16 -seconds 60 -max-points 40

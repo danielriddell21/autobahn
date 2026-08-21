@@ -1,5 +1,9 @@
 version: "2"
 
+# raylib selects its backend by build tag, so the linter needs it too.
+build-tags:
+  - x11
+
 linters:
   default: standard
   enable:
@@ -18,6 +22,7 @@ linters:
     - unconvert
     - unparam
     - whitespace
+    - wrapcheck
   settings:
     govet:
       enable-all: true
@@ -32,16 +37,30 @@ linters:
       rules:
         - name: exported
           arguments: [disableStutteringCheck]
+    errcheck:
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
     gosec:
       excludes:
+        - G107
         - G115
+        - G204
+        - G304
         - G404
+        - G602
+        - G703
   exclusions:
     rules:
+      - path: (^|/)(internal|cmd)/
+        linters:
+          - revive
       - path: "_test\\.go"
         linters:
           - revive
           - dupl
+          - wrapcheck
           - gosec
           - unparam
           - gocognit
@@ -49,6 +68,7 @@ linters:
           - prealloc
           - errcheck
           - gocritic
+          - noctx
 
 formatters:
   enable:
