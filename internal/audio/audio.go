@@ -2,15 +2,14 @@
 //
 // Every sound is synthesised at startup from crucible's synth package — there
 // are no audio files, just as there are no models or textures. synth renders
-// 16-bit stereo PCM, which is wrapped in a WAV header and handed to raylib,
-// because that is the one format raylib will take from memory.
+// 16-bit stereo PCM and wraps it in a WAV header with [synth.WAV], because a
+// file in memory is the one thing raylib will load that is not on disk.
 //
 // A [Kit] with no audio device behaves as a working kit that happens to be
 // silent, so callers never have to ask whether sound is available.
 package audio
 
 import (
-	"encoding/binary"
 	"math"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -176,34 +175,13 @@ func skidLoop() []byte {
 }
 
 func load(pcm []byte) rl.Sound {
-	w := wav(pcm)
+	// raylib will only take an encoded file from memory, so the raw PCM gets a
+	// RIFF header in front of it.
+	w := synth.WAV(pcm)
 	wave := rl.LoadWaveFromMemory(".wav", w, int32(len(w)))
 	s := rl.LoadSoundFromWave(wave)
 	rl.UnloadWave(wave)
 	return s
-}
-
-func wav(pcm []byte) []byte {
-	// raylib will only take an encoded file from memory, so the raw PCM gets a
-	// forty-four byte RIFF header in front of it.
-	const headerSize = 44
-	out := make([]byte, headerSize+len(pcm))
-	byteRate := synth.SampleRate * synth.BytesPerFrame
-
-	copy(out[0:], "RIFF")
-	binary.LittleEndian.PutUint32(out[4:], uint32(36+len(pcm)))
-	copy(out[8:], "WAVEfmt ")
-	binary.LittleEndian.PutUint32(out[16:], 16) // PCM header length
-	binary.LittleEndian.PutUint16(out[20:], 1)  // uncompressed
-	binary.LittleEndian.PutUint16(out[22:], synth.ChannelCount)
-	binary.LittleEndian.PutUint32(out[24:], synth.SampleRate)
-	binary.LittleEndian.PutUint32(out[28:], uint32(byteRate))
-	binary.LittleEndian.PutUint16(out[32:], synth.BytesPerFrame)
-	binary.LittleEndian.PutUint16(out[34:], synth.BitDepthInBytes*8)
-	copy(out[36:], "data")
-	binary.LittleEndian.PutUint32(out[40:], uint32(len(pcm)))
-	copy(out[headerSize:], pcm)
-	return out
 }
 
 func clamp(v, lo, hi float32) float32 { return min(max(v, lo), hi) }

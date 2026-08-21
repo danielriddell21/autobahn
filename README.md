@@ -344,7 +344,7 @@ This game is a raylib app, so the Ebiten-facing half of
 | `hud` + `status` | Those events become the on-screen fault toast, wired judge → bus → status source → overlay. |
 | `keymap` | The controls panel, wrapped to the available width. |
 | `paint` | Colour dimming for façades, roofs and brake lights. |
-| `synth` | Every sound in the game: engine, siren, tyres and impacts, synthesised at startup with no audio files. |
+| `synth` | Every sound in the game: engine, siren, tyres and impacts, synthesised at startup with no audio files, and `synth.WAV` to hand them to raylib. |
 | `hub` | Not used. It coordinates leader and child *windows* on one machine; this game needed two machines, so it has its own small netplay package instead. |
 | `record` | `-record drive.gif` in the game, and every file `demogen` writes. Its `Add(image.Image)` is renderer-agnostic, so it works behind raylib unchanged. |
 | `demo` | `tools/demogen`. `Clip` drives and captures each run, `Montage` tiles the contact sheets, `Ramp` builds the GIF palette. |
@@ -428,19 +428,20 @@ geometry is generated in code. There are no audio files.
 | tyres | filtered noise, while the rear axle is actually sliding |
 | impact | a thud scaled and pitched by how hard the collision was |
 
-The siren is panned by the bearing to the nearest unit on a call, using
-`synth.Pan`, so it arrives from the side the car is really on and swings across
-as a unit overtakes. `-mute` silences everything, and a machine with no audio
-device gets a kit that simply stays quiet rather than an error.
+The siren is panned by the bearing to the nearest unit on a call, so it arrives
+from the side the car is really on and swings across as a unit overtakes.
+`-mute` silences everything, and a machine with no audio device gets a kit that
+simply stays quiet rather than an error.
 
-### One thing worth adding to crucible
+### What went back into crucible
 
-`synth` documents itself as rendering PCM "ready for an Ebiten/oto audio
-player", and it is — but a front-end that is not Ebiten cannot take raw PCM.
+`synth` documented itself as rendering PCM "ready for an Ebiten/oto audio
+player", and it was — but a front-end that is not Ebiten cannot take raw PCM.
 raylib, SDL and most others will only load an encoded file from memory, so this
-game carries a forty-four byte RIFF header writer to bridge the gap.
+game carried a forty-four byte RIFF header writer to bridge the gap.
 
-That belongs in `synth` rather than in each app: something like
+That belonged in `synth` rather than in each app, so it is there now, as of
+`v0.15.2`:
 
 ```go
 // WAV wraps rendered PCM in a RIFF header, for players that take a file
@@ -448,9 +449,9 @@ That belongs in `synth` rather than in each app: something like
 func WAV(pcm []byte) []byte
 ```
 
-It is purely additive, needs nothing from the app side, and would make `synth`
-usable from any front-end rather than only from an Ebiten one. Say the word and
-I will open it as a PR on crucible.
+It is purely additive, needs nothing from the app side, and makes `synth`
+usable from any front-end rather than only from an Ebiten one. The game's own
+writer is gone, and `internal/audio` calls `synth.WAV`.
 
 ## Documentation media
 
