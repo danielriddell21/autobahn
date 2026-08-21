@@ -32,6 +32,9 @@ type Agent struct {
 	ID    int
 	V     *Vehicle
 	Paint int // index into the renderer's car palette
+	// Body is the shape of the car, which sets its size, how it drives, and
+	// how the renderer builds it.
+	Body Body
 	// Style is the driver's personality, and supplies every parameter the
 	// car-following model uses.
 	Style Style
@@ -58,6 +61,9 @@ type Agent struct {
 	Manual bool
 	// Input is the driver's controls while Manual is set.
 	Input Controls
+	// Blocking marks a unit parked across the carriageway as part of a
+	// roadblock. It holds its position and drives nowhere.
+	Blocking bool
 }
 
 // Pursuing reports whether this unit is currently on a blue-light run.
@@ -108,9 +114,14 @@ func (a *Agent) SpeedLimit() float32 {
 
 // NewAgent spawns a traffic car at the given distance along a lane.
 func NewAgent(id int, c *city.City, lane *city.Lane, s float32, rng *rand.Rand) *Agent {
+	body := RandomBody(rng)
+	paint := rng.IntN(8)
+	if body.Livery >= 0 {
+		paint = body.Livery
+	}
 	a := &Agent{
-		ID: id, V: NewVehicle(TrafficSpec(), lane.Point(s), lane.Heading),
-		Paint: rng.IntN(8), Style: RandomStyle(rng), Role: RoleCivilian,
+		ID: id, V: NewVehicle(body.Spec, lane.Point(s), lane.Heading),
+		Paint: paint, Body: body, Style: RandomStyle(rng), Role: RoleCivilian,
 		lane: lane, s: s, stoppedAt: -1, rng: rng,
 	}
 	a.chooseNext(c)
@@ -123,7 +134,9 @@ func NewPoliceUnit(id int, c *city.City, lane *city.Lane, s float32, rng *rand.R
 	a := NewAgent(id, c, lane, s, rng)
 	a.Role = RolePolice
 	a.Style = Normal()
-	a.V.Spec = PoliceSpec()
+	a.Body = BodyOf(Estate) // a marked traffic car, not a hatchback
+	a.Body.Spec = PoliceSpec()
+	a.V.Spec = a.Body.Spec
 	return a
 }
 
@@ -213,6 +226,11 @@ func (a *Agent) advanceRoute(c *city.City, chase mathx.Vec, dt float32) {
 
 func (a *Agent) drive(w *World, dt float32) {
 	c := w.City
+	if a.Blocking {
+		// Parked across the road, and staying there.
+		a.V.Update(Controls{Brake: 1}, dt)
+		return
+	}
 	if a.Manual {
 		a.V.Update(a.Input, dt)
 		return

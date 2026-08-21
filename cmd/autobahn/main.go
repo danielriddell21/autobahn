@@ -26,6 +26,7 @@ func main() {
 	reckless := flag.Bool("reckless", false, "drive the route at full throttle ignoring every rule, to exercise the police")
 	panel := flag.Bool("panel", true, "show the AI camera panel")
 	mute := flag.Bool("mute", false, "synthesise no sound")
+	chase := flag.Bool("chase", false, "drive a police car and chase the autopilot")
 	host := flag.String("host", "", "host a two-player chase on this address, e.g. :7777")
 	join := flag.String("join", "", "join a chase hosted at this address")
 	camera := flag.String("camera", "chase", "viewpoint: chase, bonnet or high")
@@ -47,6 +48,7 @@ func main() {
 	opts.Reckless = *reckless
 	opts.ShowPanel = *panel
 	opts.Mute = *mute
+	opts.Chase = *chase
 	opts.Host, opts.Join = *host, *join
 	if opts.Host != "" && opts.Join != "" {
 		fmt.Fprintln(os.Stderr, "autobahn: give -host or -join, not both")

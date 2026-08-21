@@ -23,10 +23,41 @@ type Chase struct {
 	Winner string
 }
 
-func (g *Game) hostChase(runner sim.Controls, dt float32) {
-	// Advances the authoritative simulation and publishes it. The host
-	// owns the world; the joining player only ever contributes the controls of the
-	// unit they are driving.
+func (g *Game) runnerControls(dt float32) sim.Controls {
+	// The runner is the autopilot in a chase against the machine, and a person
+	// at the host's keyboard when two people are playing.
+	if !g.auto {
+		return g.manualControls()
+	}
+	g.perceive(dt)
+	cmd := g.driver.Drive(g.dets, g.world.Player.Speed(), dt)
+	g.lastCmd = cmd
+	return sim.Controls{Throttle: cmd.Throttle, Brake: cmd.Brake, Steer: cmd.Steer}
+}
+
+func (g *Game) driveChase(runner sim.Controls, dt float32) {
+	// Advances the authoritative simulation, and publishes it when somebody
+	// else is watching. The police car is driven by whoever is here: the person
+	// at this keyboard, or the one who joined over the network.
+	switch {
+	case g.host == nil && g.chaser != nil:
+		g.chaser.Manual = true
+		g.chaser.SetInput(g.chaserControls())
+	case g.host != nil:
+		g.applyRemote()
+	}
+
+	if !g.paused && !g.chase.Over {
+		g.world.Update(runner, dt)
+		g.chase.Elapsed += dt
+		g.judgeChase()
+	}
+	if g.host != nil {
+		g.publish()
+	}
+}
+
+func (g *Game) applyRemote() {
 	if in, joined := g.host.Input(); joined && g.chaser != nil {
 		g.chaser.SetInput(sim.Controls{
 			Throttle: in.Throttle, Brake: in.Brake, Steer: in.Steer,
@@ -38,13 +69,6 @@ func (g *Game) hostChase(runner sim.Controls, dt float32) {
 		// leaving a police car sitting in the road.
 		g.chaser.Manual = false
 	}
-
-	if !g.paused && !g.chase.Over {
-		g.world.Update(runner, dt)
-		g.chase.Elapsed += dt
-		g.judgeChase()
-	}
-	g.publish()
 }
 
 func (g *Game) judgeChase() {
@@ -185,7 +209,9 @@ func (g *Game) chaserControls() sim.Controls {
 func (g *Game) chaseSubject() *sim.Vehicle {
 	// Is the car this end of the connection is watching: the runner
 	// when hosting, the police unit when joined.
-	if g.client != nil && g.chaser != nil {
+	// Whoever is at this keyboard is in the police car, unless they are the
+	// runner at the host of a two-player game.
+	if g.chaser != nil && (g.client != nil || g.host == nil) {
 		return g.chaser.V
 	}
 	return g.world.Player
@@ -203,7 +229,7 @@ func (g *Game) drawChaseHUD() {
 	panel(x, 8, w, 58)
 
 	role, col := "RUNNER", hudAccent
-	if g.client != nil {
+	if g.client != nil || g.host == nil {
 		role, col = "POLICE", hudBad
 	}
 	rl.DrawText(role, x+16, 14, 14, col)

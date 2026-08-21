@@ -251,3 +251,101 @@ func (w *World) interceptOf(a *Agent) mathx.Vec {
 	// Aim where the runner will be, not where it is.
 	return InterceptPoint(w.Player.Pos, w.Player.Vel, a.V.Pos, a.V.Speed())
 }
+
+// Roadblock tuning.
+const (
+	// blockAt is the wanted level at which units start setting up ahead of the
+	// driver instead of only chasing behind.
+	blockAt = 2
+	// blockAhead is how far up the road a block is set, in metres. Far enough
+	// to be built before the car arrives, near enough to be on the route it is
+	// actually taking.
+	blockAhead float32 = 165
+	// blockCars is how many units make up a block.
+	blockCars = 3
+	// blockRedeploy is how long before a block that has been passed is lifted
+	// and set again further on.
+	blockRedeploy float32 = 22
+)
+
+func (w *World) updateRoadblock(dt float32) {
+	// Blocks are set ahead of a driver who keeps running, lifted the moment
+	// they are no longer wanted, and moved on once they have been passed.
+	if w.Wanted.Level < blockAt {
+		if w.blocked {
+			w.liftRoadblock()
+		}
+		return
+	}
+	w.sinceBlock += dt
+	if w.blocked && w.sinceBlock < blockRedeploy {
+		return
+	}
+	w.deployRoadblock()
+}
+
+func (w *World) liftRoadblock() {
+	for _, a := range w.Agents {
+		if a.Blocking {
+			a.Blocking = false
+			a.stoppedAt = -1
+		}
+	}
+	w.blocked = false
+}
+
+func (w *World) deployRoadblock() {
+	// Set the block on the road the driver is actually heading down, which the
+	// navigation route already knows.
+	pts := w.Route.Centreline(blockAhead, 1, 1)
+	if len(pts) == 0 {
+		return
+	}
+	proj := w.City.Project(pts[0])
+	if !proj.Valid {
+		return
+	}
+	lane := proj.Lane
+	at := lane.Point(proj.S)
+
+	// Take the units furthest from the driver: the near ones are the pursuit,
+	// and pulling those out of the chase would be perverse.
+	units := w.spareUnits(blockCars, at)
+	if len(units) == 0 {
+		return
+	}
+
+	w.liftRoadblock()
+	across := lane.Fwd.Right()
+	hw := w.City.RoadHalfWidth(lane)
+	for i, u := range units {
+		// Spread them across the carriageway, angled to it as they are parked
+		// in reality rather than left neatly in lane.
+		off := (float32(i) - float32(len(units)-1)/2) * (hw * 2 / float32(len(units)+1))
+		u.Blocking = true
+		u.pursuing = false
+		u.V.Place(at.Add(across.Mul(off)), lane.Heading+1.35)
+	}
+	w.blocked = true
+	w.sinceBlock = 0
+}
+
+func (w *World) spareUnits(n int, at mathx.Vec) []*Agent {
+	var out []*Agent
+	for _, a := range w.Agents {
+		if a.Role != RolePolice || a.Manual {
+			continue
+		}
+		out = append(out, a)
+	}
+	// Furthest from the driver first, so the pursuit keeps its closest cars.
+	for i := 1; i < len(out); i++ {
+		for j := i; j > 0 && out[j].V.Pos.DistTo(w.Player.Pos) > out[j-1].V.Pos.DistTo(w.Player.Pos); j-- {
+			out[j], out[j-1] = out[j-1], out[j]
+		}
+	}
+	return out[:min(n, len(out))]
+}
+
+// Roadblocked reports whether units are currently parked across the road ahead.
+func (w *World) Roadblocked() bool { return w.blocked }

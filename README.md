@@ -87,6 +87,25 @@ lane — the traffic agents, the navigation route, the judge, the annotator — 
 works on a roundabout with no changes whatsoever, and keeping the pieces under
 five metres makes the polygon read as a circle.
 
+### What is on the road
+
+Traffic is not one car repainted. Six shapes share the streets, each with its
+own dimensions and its own way of driving:
+
+| | |
+|---|---|
+| hatchback | 34% of traffic, and the reference |
+| saloon | 24%, longer and heavier |
+| estate | 14%, longer still, with the cabin carried right back |
+| van | 14%, tall and boxy, slow to get going and slower to stop |
+| taxi | 8%, upright, and always in black |
+| hot hatch | 6%, short, light, and quick |
+
+A van needs a third more room to pull up than a hot hatch and corners like it
+too, so which shape is in front of you actually matters. Police drive a marked
+estate. The car you are given is a hot hatch, on the grounds that it is the one
+being chased.
+
 ### Driving styles
 
 Ambient traffic is not one driver copied out. Each car draws a `Style` that
@@ -137,6 +156,13 @@ the blues, and from then on they route through the junction graph toward you
 rather than wandering their patrol — greedily, picking whichever exit ends up
 nearest, which is enough on a grid. On a call they are quicker, they close up,
 and they will pass a red, slowing to do it.
+
+Once a driver is wanted at level two, units stop only chasing and start getting
+**ahead**. A block of three is parked across the carriageway on the road the
+navigation route says you are about to take, angled across it rather than left
+neatly in lane. The units furthest from you are pulled for it, so the block is
+never built out of the cars currently on your tail, and it is lifted and set
+again further on once you are past it.
 
 Getting out of it, in the order the game will let you:
 
@@ -347,10 +373,24 @@ backwards-compatible:
    have borrowed, and both are already there — the layout code is genuinely
    app-specific and should stay here.
 
-## Two players, over the network
+## Chasing
 
-One machine hosts and owns the simulation; the other joins and drives a marked
-police unit.
+You can be the one doing the chasing. On your own, that needs no network at
+all — the other driver is the AI:
+
+```sh
+go run -tags x11 ./cmd/autobahn -chase
+```
+
+You drive a marked unit and the camera-only autopilot runs from you. It is the
+same autopilot, still seeing nothing but its own camera feed, still judged by
+the same judge — now with someone actively trying to stop it. Two minutes and
+it has got away; catch it stopped and you have it.
+
+### Two players, over the network
+
+For two people, one machine hosts and owns the simulation; the other joins and
+drives a marked police unit.
 
 ```sh
 go run -tags x11 ./cmd/autobahn -host :7777              # you run
@@ -373,19 +413,8 @@ little lag on the police car behind you is not worth that machinery. Remote
 cars are eased toward each snapshot rather than snapped to it, because twenty
 updates a second drawn at sixty frames judders badly otherwise.
 
-### Human against the machine
-
-Add `-autopilot` on the host and the runner is driven by the camera-only
-autopilot while you chase it:
-
-```sh
-go run -tags x11 ./cmd/autobahn -host :7777 -autopilot
-```
-
-It is the same autopilot, still seeing nothing but its own camera feed, still
-judged by the same judge — now with someone actively trying to stop it. If
-nobody joins, the police unit simply goes back to the simulation and the chase
-carries on without them.
+If nobody joins, the police unit simply goes back to the simulation and the
+chase carries on without them.
 
 ## Sound
 

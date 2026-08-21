@@ -52,8 +52,12 @@ type Options struct {
 	Reckless  bool
 	ShowPanel bool // show the AI camera panel
 	Mute      bool // synthesise no sound at all
-	// Host makes this machine the authority for a two-player chase, listening
-	// on the given address. Join connects to one instead.
+	// Chase puts the player in a police car with the autopilot running from
+	// them, on this machine alone. It needs no network: there is only one
+	// human, and the other driver is the AI.
+	Chase bool
+	// Host makes this machine the authority for a two-player chase against
+	// another person, listening on the given address. Join connects to one.
 	Host        string
 	Join        string
 	Camera      CameraMode
@@ -179,7 +183,9 @@ func New(opts Options) *Game {
 		world: sim.NewWorld(sim.Config{
 			Seed: opts.Seed, Traffic: opts.Traffic, Police: opts.Police,
 		}),
-		auto: opts.Autopilot, showPanel: opts.ShowPanel,
+		// In a chase against the machine the runner is always the autopilot;
+		// that is what makes it a chase against the machine.
+		auto: opts.Autopilot || opts.Chase, showPanel: opts.ShowPanel,
 		showHUD: true, showLabels: true, overheadHeight: 34,
 		scanner:   vision.NewScanner(),
 		visionCam: vision.DefaultCamera(opts.CamWidth, opts.CamHeight),
@@ -207,7 +213,7 @@ func New(opts Options) *Game {
 	g.aiCam = rl.Camera3D{Up: vec3(0, 1, 0),
 		Fovy: g.visionCam.FovY, Projection: rl.CameraPerspective}
 	g.camMode = opts.Camera % numCameraModes
-	if opts.Host != "" || opts.Join != "" {
+	if opts.Chase || opts.Host != "" || opts.Join != "" {
 		// Both ends need the police unit the joining player drives, and it must
 		// be the same one, which it is because the world came from one seed.
 		g.chaser = g.world.AssignChaser()
@@ -275,16 +281,21 @@ func (g *Game) SetAutopilot(on bool) {
 	g.world.Judge.Reset()
 }
 
-// Networked reports whether this session is one end of a two-player chase.
+// Networked reports whether this session is one end of a chase against another
+// person, rather than against the AI on this machine.
 func (g *Game) Networked() bool { return g.host != nil || g.client != nil }
+
+// Chasing reports whether the player is driving a police car, whoever or
+// whatever is running from them.
+func (g *Game) Chasing() bool { return g.opts.Chase || g.Networked() }
 
 // Step advances the game by one frame: perception, control, simulation, then
 // rendering. dt is the frame duration in seconds.
 func (g *Game) Step(dt float32) {
 	g.frame++
 	g.lastDT = dt
-	if g.Networked() {
-		g.stepNetworked(dt)
+	if g.Chasing() {
+		g.stepChase(dt)
 		return
 	}
 	g.speedSum += g.world.Player.Speed()
@@ -443,7 +454,7 @@ func (g *Game) updateAudio() {
 	g.audio.Siren(nearest, bearing)
 }
 
-func (g *Game) stepNetworked(dt float32) {
+func (g *Game) stepChase(dt float32) {
 	// Runs one frame of a two-player chase. The host simulates and
 	// publishes; the joining player sends controls and draws what comes back.
 	g.handleInput()
@@ -452,19 +463,10 @@ func (g *Game) stepNetworked(dt float32) {
 		g.blink, g.blinkT = !g.blink, 0
 	}
 
-	if g.host != nil {
-		runner := g.manualControls()
-		if g.auto {
-			// Human against the machine: the runner can be the autopilot, which
-			// still sees nothing but its camera.
-			g.perceive(dt)
-			cmd := g.driver.Drive(g.dets, g.world.Player.Speed(), dt)
-			g.lastCmd = cmd
-			runner = sim.Controls{Throttle: cmd.Throttle, Brake: cmd.Brake, Steer: cmd.Steer}
-		}
-		g.hostChase(runner, dt)
-	} else {
+	if g.client != nil {
 		g.joinChase(dt)
+	} else {
+		g.driveChase(g.runnerControls(dt), dt)
 	}
 
 	g.chaseCamera(dt)

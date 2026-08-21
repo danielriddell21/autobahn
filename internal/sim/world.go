@@ -60,9 +60,11 @@ type World struct {
 	// Time is the elapsed simulation time in seconds.
 	Time float32
 
-	rng       *rand.Rand
-	buildings map[[2]int][]int
-	cellSize  float32
+	rng        *rand.Rand
+	buildings  map[[2]int][]int
+	cellSize   float32
+	blocked    bool
+	sinceBlock float32
 	// spawn is where the player restarts.
 	spawnPos mathx.Vec
 	spawnYaw float32
@@ -94,7 +96,7 @@ func NewWorld(cfg Config) *World {
 	}
 	w.spawnPos = start.Point(min(18, start.Length*0.35))
 	w.spawnYaw = start.Heading
-	w.Player = NewVehicle(CarSpec(), w.spawnPos, w.spawnYaw)
+	w.Player = NewVehicle(PlayerBody().Spec, w.spawnPos, w.spawnYaw)
 	w.Route = NewRoute(c, rng.Stream(cfg.Seed, streamRoute))
 	w.Route.Update(w.Player.Pos, w.Player.Forward())
 
@@ -220,6 +222,7 @@ func (w *World) Update(c Controls, dt float32) {
 	}
 	w.resolveCollisions()
 	w.updateWanted(dt)
+	w.updateRoadblock(dt)
 	w.recycleAgents()
 	w.Route.Update(w.Player.Pos, w.Player.Forward())
 	w.Judge.Update(w.Player, w.Signals, w.Time, dt)
@@ -463,7 +466,7 @@ func (w *World) recycleAgents() {
 		if a.V.Pos.DistTo(w.Player.Pos) < keepRadius && !stranded {
 			continue
 		}
-		if a.pursuing && !stranded {
+		if (a.pursuing || a.Blocking) && !stranded {
 			continue // never teleport a unit out of an active pursuit
 		}
 		w.relocate(a)
