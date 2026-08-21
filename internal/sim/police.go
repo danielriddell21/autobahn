@@ -310,7 +310,7 @@ func (w *World) deployRoadblock() {
 
 	// Take the units furthest from the driver: the near ones are the pursuit,
 	// and pulling those out of the chase would be perverse.
-	units := w.spareUnits(blockCars, at)
+	units := w.spareUnits(blockCars)
 	if len(units) == 0 {
 		return
 	}
@@ -330,7 +330,7 @@ func (w *World) deployRoadblock() {
 	w.sinceBlock = 0
 }
 
-func (w *World) spareUnits(n int, at mathx.Vec) []*Agent {
+func (w *World) spareUnits(n int) []*Agent {
 	var out []*Agent
 	for _, a := range w.Agents {
 		if a.Role != RolePolice || a.Manual {

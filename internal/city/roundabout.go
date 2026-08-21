@@ -137,7 +137,7 @@ type ringVertex struct {
 func (c *City) ringAngles(n *Node) []ringVertex {
 	// Returns the ring's vertices in circulation order: one at every
 	// road, plus enough plain vertices between them to keep the segments short.
-	var out []ringVertex
+	out := make([]ringVertex, 0, len(n.Roads))
 	for _, rid := range n.Roads {
 		out = append(out, ringVertex{theta: c.roadAngle(n, rid), road: rid})
 	}

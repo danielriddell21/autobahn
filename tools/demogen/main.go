@@ -105,7 +105,7 @@ func run(cfg config) error {
 		}
 		return nil
 	}
-	if err := os.MkdirAll(cfg.out, 0o755); err != nil {
+	if err := os.MkdirAll(cfg.out, 0o750); err != nil {
 		return fmt.Errorf("creating the output directory: %w", err)
 	}
 

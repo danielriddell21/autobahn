@@ -129,7 +129,6 @@ type Game struct {
 	speedSum    float32
 	detSum      int
 	detFrames   int
-	scanNanos   int64
 	minLaneDist float32
 }
 
@@ -210,8 +209,10 @@ func New(opts Options) *Game {
 	g.hasShader = g.shader.ID != 0
 
 	g.cam = rl.Camera3D{Up: vec3(0, 1, 0), Fovy: 62, Projection: rl.CameraPerspective}
-	g.aiCam = rl.Camera3D{Up: vec3(0, 1, 0),
-		Fovy: g.visionCam.FovY, Projection: rl.CameraPerspective}
+	g.aiCam = rl.Camera3D{
+		Up: vec3(0, 1, 0), Fovy: g.visionCam.FovY,
+		Projection: rl.CameraPerspective,
+	}
 	g.camMode = opts.Camera % numCameraModes
 	if opts.Chase || opts.Host != "" || opts.Join != "" {
 		// Both ends need the police unit the joining player drives, and it must
@@ -627,13 +628,13 @@ func WithWindow(opts Options, fn func(*Game) error) error {
 		if host, err = netplay.Listen(opts.Host); err != nil {
 			return err
 		}
-		defer host.Close()
+		defer func() { _ = host.Close() }()
 		fmt.Println("hosting a chase on", host.Addr())
 	case opts.Join != "":
 		if client, err = netplay.Join(opts.Join); err != nil {
 			return err
 		}
-		defer client.Close()
+		defer func() { _ = client.Close() }()
 		fmt.Println("joined", opts.Join, "as the police")
 	}
 

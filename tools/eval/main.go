@@ -57,6 +57,7 @@ func main() {
 		width    = flag.Int("camwidth", 420, "camera width in pixels")
 		height   = flag.Int("camheight", 236, "camera height in pixels")
 		workers  = flag.Int("workers", runtime.NumCPU(), "cities to drive in parallel")
+		verbose  = flag.Bool("verbose", false, "report the circumstances of every fault")
 		failOver = flag.Int("max-points", -1, "exit non-zero if mean penalty exceeds this")
 	)
 	flag.Parse()
@@ -64,6 +65,7 @@ func main() {
 	cfg := runConfig{
 		seconds: float32(*seconds), traffic: *traffic, police: *police,
 		perception: float32(*hz), width: *width, height: *height,
+		verbose: *verbose,
 	}
 
 	results := drive(*seeds, *from, cfg, max(*workers, 1))
@@ -83,6 +85,7 @@ type runConfig struct {
 	police        int
 	perception    float32
 	width, height int
+	verbose       bool
 }
 
 func drive(seeds int, from uint64, cfg runConfig, workers int) []result {
@@ -115,6 +118,18 @@ func driveOne(seed uint64, cfg runConfig) result {
 	}
 	driver := autopilot.New(cam)
 	scanner := vision.NewScanner()
+
+	if cfg.verbose {
+		// The judge already publishes every fault; listening tells us what the
+		// controller believed at the moment it broke a rule, which is the only
+		// way to tell a perception failure from a control one.
+		w.Judge.Events.Subscribe(faultWatcher(func(in sim.Infraction) {
+			fmt.Printf("seed %-3d t=%6.1fs  %-16s %-34s speed %4.1f target %4.1f  %v: %s\n",
+				seed, in.At, in.Kind, in.Detail,
+				mathx.ToMPH(w.Player.Speed()), mathx.ToMPH(driver.TargetSpeed),
+				driver.State, driver.Reason)
+		}))
+	}
 
 	// One frame buffer for the whole run: the rasteriser clears and reuses it.
 	frame := image.NewRGBA(image.Rect(0, 0, cfg.width, cfg.height))
@@ -171,6 +186,12 @@ func driveOne(seed uint64, cfg runConfig) result {
 	return r
 }
 
+// faultWatcher adapts a function to the telemetry subscriber interface.
+type faultWatcher func(sim.Infraction)
+
+// OnEvent implements the telemetry subscriber interface.
+func (f faultWatcher) OnEvent(in sim.Infraction) { f(in) }
+
 func asColors(img *image.RGBA, into []color.RGBA) []color.RGBA {
 	// Reinterprets an RGBA image as the pixel slice the scanner reads,
 	// filling a buffer the caller owns so a long run does not allocate per frame.
@@ -187,13 +208,13 @@ func report(results []result) float64 {
 	sort.Slice(results, func(i, j int) bool { return results[i].seed < results[j].seed })
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "seed\tdistance\tavg mph\tdet/frame\tno lane\tpoints\tfaults")
+	_, _ = fmt.Fprintln(tw, "seed\tdistance\tavg mph\tdet/frame\tno lane\tpoints\tfaults")
 	var totalPoints, totalFaults int
 	var sumSpeed, sumDist, sumBlind float64
 	clean := 0
 
 	for _, r := range results {
-		fmt.Fprintf(tw, "%d\t%.0f m\t%.0f\t%.1f\t%.0f%%\t%d\t%d\n",
+		_, _ = fmt.Fprintf(tw, "%d\t%.0f m\t%.0f\t%.1f\t%.0f%%\t%d\t%d\n",
 			r.seed, r.distance, r.avgSpeed, r.detections, r.blind*100, r.points, r.faults)
 		totalPoints += r.points
 		totalFaults += r.faults
@@ -204,7 +225,7 @@ func report(results []result) float64 {
 			clean++
 		}
 	}
-	tw.Flush()
+	_ = tw.Flush()
 
 	n := float64(len(results))
 	if n == 0 {

@@ -292,58 +292,71 @@ func (w *World) leaderFor(a *Agent) (gap, leadSpeed float32, ok bool) {
 }
 
 func (w *World) junctionBlocked(a *Agent) bool {
+	// Three separate rules decide whether a driver waits at a junction, and
+	// each is its own question.
 	node := w.City.Nodes[a.lane.ToNode]
 	if node.IsRoundabout() {
 		return w.ringBlocked(a, node)
 	}
+	return w.boxOccupied(a, node) ||
+		w.oncomingBlocks(a, node) ||
+		w.higherPriorityWaiting(a, node)
+}
+
+func (w *World) boxOccupied(a *Agent, node *city.Node) bool {
+	// Something already in the junction has to clear it first, unless it is
+	// simply following us out.
 	clearance := node.Radius + 3
-
 	for _, o := range w.Agents {
-		if o == a {
+		if o == a || o.V.Pos.DistTo(node.Pos) > clearance {
 			continue
 		}
-		d := o.V.Pos.DistTo(node.Pos)
-		if d > clearance {
+		if !o.inTurn && o.V.Speed() >= 1.2 {
 			continue
 		}
-		// Something is already occupying the box. Only wait for it if it is
-		// not simply following us out of the junction.
-		if o.inTurn || o.V.Speed() < 1.2 {
-			if o.V.Pos.Sub(a.V.Pos).Dot(a.V.Forward()) > 0 {
-				return true
-			}
+		if o.V.Pos.Sub(a.V.Pos).Dot(a.V.Forward()) > 0 {
+			return true
 		}
 	}
+	return false
+}
 
-	// Turning across oncoming traffic must give way to it.
-	if a.hasNext && a.next.Kind == turnAcrossTraffic() {
-		for _, o := range w.Agents {
-			if o == a || o.lane == nil || o.inTurn {
-				continue
-			}
-			if o.lane.ToNode != node.ID || o.V.Speed() < 2 {
-				continue
-			}
-			// Oncoming means heading roughly opposite to us.
-			if o.lane.Fwd.Dot(a.lane.Fwd) > -0.7 {
-				continue
-			}
-			if o.lane.Length-o.s < 32 {
-				return true
-			}
+func (w *World) oncomingBlocks(a *Agent, node *city.Node) bool {
+	// Turning across the oncoming stream means giving way to it.
+	if !a.hasNext || a.next.Kind != turnAcrossTraffic() {
+		return false
+	}
+	for _, o := range w.Agents {
+		if o == a || o.lane == nil || o.inTurn {
+			continue
+		}
+		if o.lane.ToNode != node.ID || o.V.Speed() < 2 {
+			continue
+		}
+		// Oncoming means heading roughly opposite to us.
+		if o.lane.Fwd.Dot(a.lane.Fwd) > -0.7 {
+			continue
+		}
+		if o.lane.Length-o.s < 32 {
+			return true
 		}
 	}
+	return false
+}
 
-	// Where several cars are waiting at the same priority junction, let the
-	// lowest-numbered one go first so they never sit staring at each other.
-	if a.lane.Control == city.ControlStop || a.lane.Control == city.ControlGiveWay {
-		for _, o := range w.Agents {
-			if o == a || o.lane == nil || o.inTurn || o.ID >= a.ID {
-				continue
-			}
-			if o.lane.ToNode == node.ID && o.lane.Length-o.s < 6 && o.V.Speed() < 1.5 {
-				return true
-			}
+func (w *World) higherPriorityWaiting(a *Agent, node *city.Node) bool {
+	// Where several cars are waiting at the same priority junction, the
+	// lowest-numbered goes first, so four of them never sit staring at each
+	// other.
+	if a.lane.Control != city.ControlStop && a.lane.Control != city.ControlGiveWay {
+		return false
+	}
+	for _, o := range w.Agents {
+		if o == a || o.lane == nil || o.inTurn || o.ID >= a.ID {
+			continue
+		}
+		if o.lane.ToNode == node.ID && o.lane.Length-o.s < 6 && o.V.Speed() < 1.5 {
+			return true
 		}
 	}
 	return false

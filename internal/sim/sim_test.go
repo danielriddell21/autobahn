@@ -44,7 +44,7 @@ func TestSteeringTurnsTheCar(t *testing.T) {
 
 func TestSignalCycleReachesEveryAspect(t *testing.T) {
 	w := world(t)
-	var node int = -1
+	node := -1
 	for _, n := range w.City.Nodes {
 		if n.Signalised {
 			node = n.ID

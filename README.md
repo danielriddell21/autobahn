@@ -524,6 +524,12 @@ CI runs on every push: build, vet, race-enabled tests, the boundary check, and
 an evaluation across sixteen cities that fails if the autopilot starts breaking
 noticeably more rules than it does today.
 
+`just lint` needs a golangci-lint built against Go 1.26; a binary built against
+1.25 refuses the target outright. `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest`
+under the right toolchain sorts it. Seven complexity findings remain, all of
+them long functions in the renderer and the simulation rather than defects, and
+they are left visible rather than silenced by loosening the threshold.
+
 The scanner and the autopilot are pure Go and test without a GPU. The autopilot
 tests build synthetic detections at known ranges and assert on behaviour: it
 stops for red, and for red-and-amber; it does not stop for green; it stops for a

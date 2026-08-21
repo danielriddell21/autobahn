@@ -34,8 +34,8 @@ type Style struct {
 	CornerBias float32
 }
 
-// The stock driving styles, from the driver who holds everyone up to the one
-// filling your mirrors.
+// Cautious returns the driver who holds everyone up: under the limit, big
+// gaps, and off the throttle at the first sight of an amber.
 func Cautious() Style {
 	return Style{
 		Name: "cautious", SpeedBias: 0.82, Headway: 2.1, MinGap: 3.4,

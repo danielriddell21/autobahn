@@ -14,6 +14,7 @@
 package netplay
 
 import (
+	"context"
 	"encoding/gob"
 	"errors"
 	"fmt"
@@ -79,18 +80,18 @@ type Input struct {
 type Host struct {
 	listener net.Listener
 
-	mu       sync.Mutex
-	input    Input
-	joined   bool
-	lastErr  error
-	snapshot Snapshot
-	enc      *gob.Encoder
-	conn     net.Conn
+	mu      sync.Mutex
+	input   Input
+	joined  bool
+	lastErr error
+	enc     *gob.Encoder
+	conn    net.Conn
 }
 
 // Listen starts a host on the given address, which may be just ":7777".
 func Listen(addr string) (*Host, error) {
-	l, err := net.Listen("tcp", addr)
+	var cfg net.ListenConfig
+	l, err := cfg.Listen(context.Background(), "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("listening on %s: %w", addr, err)
 	}
@@ -137,7 +138,7 @@ func (h *Host) Close() error {
 	conn := h.conn
 	h.mu.Unlock()
 	if conn != nil {
-		conn.Close()
+		_ = conn.Close()
 	}
 	return h.listener.Close()
 }
@@ -151,7 +152,7 @@ func (h *Host) accept() {
 		h.mu.Lock()
 		// One player at a time: a second caller replaces the first.
 		if h.conn != nil {
-			h.conn.Close()
+			_ = h.conn.Close()
 		}
 		h.conn, h.enc, h.joined = conn, gob.NewEncoder(conn), true
 		h.mu.Unlock()
@@ -177,7 +178,7 @@ func (h *Host) drop(err error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.conn != nil {
-		h.conn.Close()
+		_ = h.conn.Close()
 		h.conn = nil
 	}
 	h.enc, h.joined, h.input = nil, false, Input{}
@@ -210,7 +211,8 @@ func Join(addr string) (*Client, error) {
 	if _, _, err := net.SplitHostPort(addr); err != nil {
 		addr = net.JoinHostPort(addr, Port)
 	}
-	conn, err := net.DialTimeout("tcp", addr, 8*time.Second)
+	d := net.Dialer{Timeout: 8 * time.Second}
+	conn, err := d.DialContext(context.Background(), "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("joining %s: %w", addr, err)
 	}

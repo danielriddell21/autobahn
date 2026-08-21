@@ -211,9 +211,11 @@ const (
 // Prop is a roadside object. Signals and signs are what the vision system
 // annotates, so each records the node and phase group it governs.
 type Prop struct {
-	Kind    PropKind
-	Pos     mathx.Vec
-	Heading float32 // faces oncoming traffic
+	Kind PropKind
+	Pos  mathx.Vec
+	// Heading is the direction of travel of the approach this prop governs.
+	// The sign's face points back along it, at the drivers being addressed.
+	Heading float32
 	Node    int
 	Group   int
 	Limit   float32 // speed limit in m/s, for PropSpeedSign

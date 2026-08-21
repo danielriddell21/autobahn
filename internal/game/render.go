@@ -221,7 +221,6 @@ func (g *Game) drawRoundabouts(eye mathx.Vec) {
 
 func (g *Game) drawMarkings(eye mathx.Vec) {
 	c := g.world.City
-	const y = 0.015
 	for _, r := range c.Roads {
 		if r.Ring {
 			continue // a circle has no centre line to paint
@@ -243,12 +242,12 @@ func (g *Game) drawMarkings(eye mathx.Vec) {
 		if r.Class == city.Arterial {
 			for _, off := range [2]float32{-0.18, 0.18} {
 				p := centre.Add(r.Dir.Right().Mul(off))
-				drawStripe(p, r.Axis, length, 0.14, y, colLinePale)
+				drawStripe(p, r.Axis, length, 0.14, colLinePale)
 			}
 		} else if mid.DistTo(eye) < cullDashes {
 			for t := float32(2); t < length-2; t += 9 {
 				p := a.Add(r.Dir.Mul(t + 2))
-				drawStripe(p, r.Axis, 4, 0.14, y, colLinePale)
+				drawStripe(p, r.Axis, 4, 0.14, colLinePale)
 			}
 		}
 
@@ -256,7 +255,7 @@ func (g *Game) drawMarkings(eye mathx.Vec) {
 		for _, s := range [2]float32{-1, 1} {
 			for _, off := range [2]float32{0.26, 0.46} {
 				p := centre.Add(r.Dir.Right().Mul(s * (r.HalfWidth - off)))
-				drawStripe(p, r.Axis, length, 0.1, y, colLineWarm)
+				drawStripe(p, r.Axis, length, 0.1, colLineWarm)
 			}
 		}
 
@@ -266,7 +265,7 @@ func (g *Game) drawMarkings(eye mathx.Vec) {
 				off := s * city.LaneWidth
 				for t := float32(2); t < length-2; t += 6.5 {
 					p := a.Add(r.Dir.Mul(t + 1.6)).Add(r.Dir.Right().Mul(off))
-					drawStripe(p, r.Axis, 3.2, 0.14, y, colLinePale)
+					drawStripe(p, r.Axis, 3.2, 0.14, colLinePale)
 				}
 			}
 		}
@@ -285,11 +284,11 @@ func (g *Game) drawMarkings(eye mathx.Vec) {
 				p := bar.Sub(l.Fwd.Mul(back))
 				for i := range 4 {
 					off := (float32(i) - 1.5) * 0.85
-					drawStripe(p.Add(l.Fwd.Right().Mul(off)), 1-axis, 0.5, 0.28, y, colLinePale)
+					drawStripe(p.Add(l.Fwd.Right().Mul(off)), 1-axis, 0.5, 0.28, colLinePale)
 				}
 			}
 		} else {
-			drawStripe(bar, 1-axis, city.LaneWidth-0.3, 0.5, y, colLinePale)
+			drawStripe(bar, 1-axis, city.LaneWidth-0.3, 0.5, colLinePale)
 		}
 
 		if l.Index == 0 && l.B.DistTo(eye) < cullCrossing {
@@ -299,20 +298,15 @@ func (g *Game) drawMarkings(eye mathx.Vec) {
 			for i := range 5 {
 				off := (float32(i) - 2) * 0.8
 				p := base.Add(l.Fwd.Right().Mul(off))
-				drawStripe(p, axis, 2.6, 0.4, y, colLinePale)
+				drawStripe(p, axis, 2.6, 0.4, colLinePale)
 			}
 		}
 	}
 }
 
-func signOf(positive bool) float32 {
-	if positive {
-		return 1
-	}
-	return -1
-}
-
-func drawStripe(p mathx.Vec, axis int, length, width, y float32, col rl.Color) {
+func drawStripe(p mathx.Vec, axis int, length, width float32, col rl.Color) {
+	// Road paint sits just above the carriageway so it does not z-fight with it.
+	const y = 0.015
 	// Paints a flat rectangle on the road. axis 0 runs along X, axis 1
 	// along Z; length follows the axis and width crosses it.
 	if axis == 0 {
@@ -345,7 +339,7 @@ func (g *Game) drawBuildings(eye mathx.Vec) {
 func scaleColor(c rl.Color, f float32) rl.Color {
 	// Dims a colour, delegating the arithmetic to crucible's paint
 	// package so brightness scaling matches the rest of the family.
-	v := paint.Scale(color.RGBA{R: c.R, G: c.G, B: c.B, A: c.A}, float64(f))
+	v := paint.Scale(c, float64(f))
 	return rl.NewColor(v.R, v.G, v.B, v.A)
 }
 
@@ -504,29 +498,26 @@ func drawCar(v *sim.Vehicle, paint rl.Color, ind sim.Indicator, blinkOn bool) {
 // PaletteBases returns the world's key colours together with the vision
 // system's annotation colours. Feeding these through crucible's demo.Ramp
 // builds a GIF palette that reproduces both the city and the detection boxes
-// without banding.
-func PaletteBases() []color.RGBA {
-	out := []color.RGBA{
-		toRGBAColor(colSky), toRGBAColor(colGround), toRGBAColor(colAsphalt),
-		toRGBAColor(colSidewalk), toRGBAColor(colKerb), toRGBAColor(colPark),
-		toRGBAColor(colLinePale), toRGBAColor(colLineWarm), toRGBAColor(colPole),
-		toRGBAColor(colStopFace), toRGBAColor(colSignFace), toRGBAColor(colGlass),
-		toRGBAColor(colTyre), toRGBAColor(hudPanel), toRGBAColor(hudText),
-	}
-	for _, c := range buildingShades {
-		out = append(out, toRGBAColor(c))
-	}
-	for _, c := range carPaints {
-		out = append(out, toRGBAColor(c))
-	}
-	for cl := vision.ClassVehicle; cl <= vision.ClassStopLine; cl++ {
-		out = append(out, vision.RGBA(cl))
-	}
-	return out
-}
 
-func toRGBAColor(c rl.Color) color.RGBA {
-	return color.RGBA{R: c.R, G: c.G, B: c.B, A: 255}
+func drawBoxes(boxes []annotate.Box, labels bool) {
+	// Paints the annotator's boxes over whatever is already rendered.
+	// It must run outside the lighting shader so the colours land in the
+	// framebuffer exactly as specified: the scanner matches them exactly.
+	for _, b := range boxes {
+		v := vision.RGBA(b.Class)
+		col := rl.NewColor(v.R, v.G, v.B, v.A)
+		rl.DrawRectangleLinesEx(
+			rl.NewRectangle(b.MinX, b.MinY, b.Width(), b.Height()),
+			annotate.Thickness, col)
+		if !labels || b.Width() <= 26 {
+			continue
+		}
+		y := b.MinY - 11
+		if y < 1 {
+			y = b.MaxY + 2
+		}
+		rl.DrawText(b.Class.String(), int32(b.MinX), int32(y), 10, col)
+	}
 }
 
 func drawPoliceCar(a *sim.Agent, blinkOn bool) {
@@ -570,35 +561,30 @@ func drawPoliceCar(a *sim.Agent, blinkOn bool) {
 	rl.PopMatrix()
 }
 
-func viewOf(cam rl.Camera3D, w, h int) annotate.View {
-	// Converts a raylib camera into the renderer-free view the annotator
-	// projects with, so the boxes drawn on screen and the boxes an evaluation run
-	// rasterises come from one piece of arithmetic.
-	return annotate.View{
-		Position: mathx.V3(cam.Position.X, cam.Position.Y, cam.Position.Z),
-		Target:   mathx.V3(cam.Target.X, cam.Target.Y, cam.Target.Z),
-		FovY:     cam.Fovy,
-		Width:    w, Height: h,
+// PaletteBases returns the world's key colours together with the vision
+// system's annotation colours. Feeding these through crucible's demo.Ramp
+// builds a GIF palette that reproduces both the city and the detection boxes
+// without banding.
+func PaletteBases() []color.RGBA {
+	out := []color.RGBA{
+		toRGBAColor(colSky), toRGBAColor(colGround), toRGBAColor(colAsphalt),
+		toRGBAColor(colSidewalk), toRGBAColor(colKerb), toRGBAColor(colPark),
+		toRGBAColor(colLinePale), toRGBAColor(colLineWarm), toRGBAColor(colPole),
+		toRGBAColor(colStopFace), toRGBAColor(colSignFace), toRGBAColor(colGlass),
+		toRGBAColor(colTyre), toRGBAColor(hudPanel), toRGBAColor(hudText),
 	}
+	for _, c := range buildingShades {
+		out = append(out, toRGBAColor(c))
+	}
+	for _, c := range carPaints {
+		out = append(out, toRGBAColor(c))
+	}
+	for cl := vision.ClassVehicle; cl <= vision.ClassStopLine; cl++ {
+		out = append(out, vision.RGBA(cl))
+	}
+	return out
 }
 
-func drawBoxes(boxes []annotate.Box, labels bool) {
-	// Paints the annotator's boxes over whatever is already rendered.
-	// It must run outside the lighting shader so the colours land in the
-	// framebuffer exactly as specified: the scanner matches them exactly.
-	for _, b := range boxes {
-		v := vision.RGBA(b.Class)
-		col := rl.NewColor(v.R, v.G, v.B, v.A)
-		rl.DrawRectangleLinesEx(
-			rl.NewRectangle(b.MinX, b.MinY, b.Width(), b.Height()),
-			annotate.Thickness, col)
-		if !labels || b.Width() <= 26 {
-			continue
-		}
-		y := b.MinY - 11
-		if y < 1 {
-			y = b.MaxY + 2
-		}
-		rl.DrawText(b.Class.String(), int32(b.MinX), int32(y), 10, col)
-	}
+func toRGBAColor(c rl.Color) color.RGBA {
+	return color.RGBA{R: c.R, G: c.G, B: c.B, A: 255}
 }

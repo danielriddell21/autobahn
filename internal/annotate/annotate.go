@@ -142,8 +142,22 @@ func Layout(w *sim.World, v View) []Box {
 		if !visible(prop.Pos, propRange) {
 			continue
 		}
-		// Signs and signals only face one way, so skip those turned away.
-		if mathx.FromAngle(prop.Heading).Dot(fwd) > -0.25 {
+		// A prop's heading is the direction of the traffic it governs, so the one
+		// meant for this car points the way the car is going.
+		//
+		// Signals are the exception, and are taken from either direction. The
+		// head at your own stop line disappears over the bonnet once you have
+		// pulled up at it, and a driver who could see nothing else would have no
+		// way of knowing when the light changed. Real junctions answer that with
+		// a secondary head across the junction, which is precisely the one
+		// facing the other way — same road, same phase group, same aspect. Signs
+		// have no secondary, so the ones facing away belong to somebody else.
+		facing := mathx.FromAngle(prop.Heading).Dot(fwd)
+		if prop.Kind == city.PropTrafficLight {
+			if mathx.Abs(facing) < 0.25 {
+				continue // a signal across the junction, governing other traffic
+			}
+		} else if facing < 0.25 {
 			continue
 		}
 		switch prop.Kind {
