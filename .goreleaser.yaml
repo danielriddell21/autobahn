@@ -1,0 +1,62 @@
+version: 2
+
+project_name: autobahn
+
+before:
+  hooks:
+    - go mod tidy
+
+# raylib driving game: a cgo darwin build shipped as a Homebrew cask. Built on
+# a macOS runner, since raylib needs cgo on every platform and a Linux clang
+# cannot cross-build a darwin binary. Linux/Windows users build from source.
+builds:
+  - id: autobahn
+    main: ./cmd/autobahn
+    binary: autobahn
+    env:
+      - CGO_ENABLED=1
+    goos: [darwin]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: default
+    ids: [autobahn]
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+
+release:
+  name_template: "v{{ .Version }}"
+
+# Homebrew cask: the macOS-only native raylib window.
+homebrew_casks:
+  - name: autobahn
+    repository:
+      owner: danielriddell21
+      name: homebrew-tap
+      branch: trunk
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: https://github.com/danielriddell21/autobahn
+    description: A 3D driving game with a camera-only autopilot
+    license: MIT
+    caveats: "autobahn opens a raylib window and is macOS-only; on Linux/Windows, build from source with -tags x11."

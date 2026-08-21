@@ -1,0 +1,17 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  goreleaser:
+    # macOS so the cgo darwin binary can be built natively; raylib needs cgo on
+    # every platform and a Linux clang cannot cross-build a darwin binary.
+    uses: danielriddell21/github-actions/.github/workflows/release.yaml@v1
+    permissions:
+      contents: write
+    with:
+      runs-on: macos-latest
+    secrets:
+      tap-app-private-key: ${{ secrets.TAP_APP_PRIVATE_KEY }}
