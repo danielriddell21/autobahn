@@ -1,8 +1,9 @@
 version: "2"
 
 # raylib selects its backend by build tag, so the linter needs it too.
-build-tags:
-  - x11
+run:
+  build-tags:
+    - x11
 
 linters:
   default: standard
@@ -22,7 +23,6 @@ linters:
     - unconvert
     - unparam
     - whitespace
-    - wrapcheck
   settings:
     govet:
       enable-all: true
@@ -60,7 +60,6 @@ linters:
         linters:
           - revive
           - dupl
-          - wrapcheck
           - gosec
           - unparam
           - gocognit

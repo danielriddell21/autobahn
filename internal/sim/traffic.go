@@ -331,30 +331,8 @@ func (a *Agent) junctionStop(w *World) (dist float32, stop bool) {
 		return 0, false
 	}
 
-	switch a.lane.Control {
-	case city.ControlSignal:
-		switch w.Signals.LaneState(a.lane) {
-		case SignalRed, SignalRedAmber:
-			return d, true
-		case SignalAmber:
-			if style.StopsForAmber(d, a.V.Speed()) {
-				return d, true
-			}
-		}
-	case city.ControlStop:
-		if a.stoppedAt != a.lane.ToNode {
-			if d < 3.2 && a.V.Speed() < 0.5 {
-				a.stoppedAt = a.lane.ToNode // stop completed
-			} else {
-				return d, true
-			}
-		}
-	case city.ControlGiveWay:
-		// No halt is required, but the approach is taken slowly and the car
-		// waits for a gap when the junction is not clear.
-		if d < 26 && w.junctionBlocked(a) {
-			return d, true
-		}
+	if a.controlStop(w, style, d) {
+		return d, true
 	}
 
 	// Even on a green light, do not enter a junction that is already occupied,
@@ -363,6 +341,41 @@ func (a *Agent) junctionStop(w *World) (dist float32, stop bool) {
 		return d, true
 	}
 	return 0, false
+}
+
+func (a *Agent) controlStop(w *World, style Style, d float32) bool {
+	switch a.lane.Control {
+	case city.ControlSignal:
+		return a.signalStop(w, style, d)
+	case city.ControlStop:
+		return a.signStop(d)
+	case city.ControlGiveWay:
+		// No halt is required, but the approach is taken slowly and the car
+		// waits for a gap when the junction is not clear.
+		return d < 26 && w.junctionBlocked(a)
+	}
+	return false
+}
+
+func (a *Agent) signalStop(w *World, style Style, d float32) bool {
+	switch w.Signals.LaneState(a.lane) {
+	case SignalRed, SignalRedAmber:
+		return true
+	case SignalAmber:
+		return style.StopsForAmber(d, a.V.Speed())
+	}
+	return false
+}
+
+func (a *Agent) signStop(d float32) bool {
+	if a.stoppedAt == a.lane.ToNode {
+		return false
+	}
+	if d < 3.2 && a.V.Speed() < 0.5 {
+		a.stoppedAt = a.lane.ToNode // stop completed
+		return false
+	}
+	return true
 }
 
 func idmFree(s Style, v, v0 float32) float32 {

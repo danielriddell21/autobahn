@@ -311,8 +311,42 @@ func (d *Driver) steerFor(lane []lanePoint, speed, dt float32) float32 {
 }
 
 func (d *Driver) hazards(dets []vision.Detection, lane []lanePoint, speed, dt float32) []target {
-	var out []target
+	out := d.vehicleTargets(dets, lane, speed)
 
+	a := d.scanAspects(dets)
+	d.carryStopLine(&a, speed, dt)
+	d.applyAspectMemory(&a, dt)
+
+	// A stop line painted on the road is often hidden by the car waiting on it.
+	// When a signal is showing but its line cannot be seen, range the signal
+	// head itself, whose mounting height is known.
+	if !a.haveLine {
+		if dd, ok := d.signalDistance(dets); ok {
+			a.lineDist, a.haveLine = dd, true
+		}
+	}
+
+	out = append(out, d.controlTargets(&a, dets, speed, dt)...)
+
+	if a.green || (!a.red && !a.amber && !a.stopSign && !a.giveWay) {
+		// Once the way is clear the memory of a stop is discharged.
+		if !a.stopSign {
+			d.stopArmed = false
+		}
+	}
+	return out
+}
+
+// aspects is what the camera can currently say about the junction ahead.
+type aspects struct {
+	red, amber, green bool
+	stopSign, giveWay bool
+	lineDist          float32
+	haveLine          bool
+}
+
+func (d *Driver) vehicleTargets(dets []vision.Detection, lane []lanePoint, speed float32) []target {
+	var out []target
 	// The car in front. A vehicle box's bottom edge is where its tyres meet
 	// the road, which is the usable range cue.
 	for _, det := range dets {
@@ -335,34 +369,40 @@ func (d *Driver) hazards(dets []vision.Detection, lane []lanePoint, speed, dt fl
 			why: fmt.Sprintf("vehicle %.0fm ahead", dist),
 		})
 	}
+	return out
+}
 
+func (d *Driver) scanAspects(dets []vision.Detection) aspects {
 	// Signals and signs, positioned by the stop line when it is visible.
 	lineDist, haveLine := d.stopLineDistance(dets)
-	var red, amber, green, stopSign, giveWay bool
+	a := aspects{lineDist: lineDist, haveLine: haveLine}
 	for _, det := range dets {
 		switch det.Class {
 		case vision.ClassLightRed, vision.ClassLightRedAmber:
 			// Red and amber together still means stop: it only warns that
 			// green is coming.
-			red = true
+			a.red = true
 		case vision.ClassLightAmber:
-			amber = true
+			a.amber = true
 		case vision.ClassLightGreen:
-			green = true
+			a.green = true
 		case vision.ClassStopSign, vision.ClassGiveWay:
 			if det.Class == vision.ClassGiveWay {
-				giveWay = true
+				a.giveWay = true
 			} else {
-				stopSign = true
+				a.stopSign = true
 			}
-			if !haveLine {
+			if !a.haveLine {
 				if dd := d.cam.GroundDistance(det.MaxY); dd > 0 && dd < 60 {
-					lineDist, haveLine = dd, true
+					a.lineDist, a.haveLine = dd, true
 				}
 			}
 		}
 	}
+	return a
+}
 
+func (d *Driver) carryStopLine(a *aspects, speed, dt float32) {
 	// Carry the stop line forward on odometry while it is in view, so it
 	// survives being hidden by the car in front or leaving the frame.
 	if d.haveStopDist {
@@ -371,76 +411,69 @@ func (d *Driver) hazards(dets []vision.Detection, lane []lanePoint, speed, dt fl
 			d.haveStopDist = false
 		}
 	}
-	if haveLine {
-		d.stopDist, d.haveStopDist = lineDist, true
+	if a.haveLine {
+		d.stopDist, d.haveStopDist = a.lineDist, true
 	}
+}
 
+func (d *Driver) applyAspectMemory(a *aspects, dt float32) {
 	// A signal seen a moment ago still governs this junction even once it has
 	// slipped out of frame. Seeing green cancels the memory at once.
 	switch {
-	case green:
+	case a.green:
 		d.redMemory = 0
-	case red || amber:
+	case a.red || a.amber:
 		d.redMemory = aspectMemory
 	case d.redMemory > 0:
 		d.redMemory -= dt
-		if !haveLine && d.haveStopDist && d.stopDist > 0 {
-			lineDist, haveLine = d.stopDist, true
+		if !a.haveLine && d.haveStopDist && d.stopDist > 0 {
+			a.lineDist, a.haveLine = d.stopDist, true
 		}
 		// A remembered signal governs the junction it was seen at. A give way
 		// line belongs to a different junction entirely — a roundabout, most
 		// likely — so it must not revive the memory.
-		red = red || (haveLine && !giveWay)
+		a.red = a.red || (a.haveLine && !a.giveWay)
 	}
+}
 
-	// A stop line painted on the road is often hidden by the car waiting on it.
-	// When a signal is showing but its line cannot be seen, range the signal
-	// head itself, whose mounting height is known.
-	if !haveLine {
-		if dd, ok := d.signalDistance(dets); ok {
-			lineDist, haveLine = dd, true
-		}
-	}
-
-	switch {
-	case haveLine && red:
-		out = append(out, target{dist: max(lineDist-stopBuffer, 0), why: "red light"})
-	case haveLine && amber && !committed(speed, lineDist):
-		out = append(out, target{dist: max(lineDist-stopBuffer, 0), why: "amber light"})
-	case haveLine && stopSign:
-		d.handleStopSign(lineDist, speed, dt)
-		if !d.stopHeld && d.stopArmed {
-			out = append(out, target{dist: max(lineDist-stopBuffer, 0), why: "stop sign"})
-		}
-	case haveLine && giveWay:
-		// A give way sign needs no halt, only a slow approach and a stop if
-		// something is crossing.
-		out = append(out, target{
-			dist: max(lineDist-stopBuffer, 0), speed: giveWaySpeed,
-			why: "give way",
-		})
-		if crossingTraffic(d.cam, dets, lineDist) {
-			out = append(out, target{
-				dist: max(lineDist-stopBuffer, 0), why: "giving way to traffic",
-			})
-		}
-	}
+func (d *Driver) controlTargets(a *aspects, dets []vision.Detection, speed, dt float32) []target {
+	out := d.stopTargets(a, dets, speed, dt)
 	// Approach an unconfirmed junction at a speed the car can stop from, unless
 	// the line is already too close to stop for at all.
-	if haveLine && !green && lineDist < junctionWatch && !committed(speed, lineDist) {
+	if a.haveLine && !a.green && a.lineDist < junctionWatch && !committed(speed, a.lineDist) {
 		out = append(out, target{
-			dist: max(lineDist-stopBuffer, 0), speed: junctionCreep,
+			dist: max(a.lineDist-stopBuffer, 0), speed: junctionCreep,
 			why: "approaching a junction",
 		})
 	}
-
-	if green || (!red && !amber && !stopSign && !giveWay) {
-		// Once the way is clear the memory of a stop is discharged.
-		if !stopSign {
-			d.stopArmed = false
-		}
-	}
 	return out
+}
+
+func (d *Driver) stopTargets(a *aspects, dets []vision.Detection, speed, dt float32) []target {
+	if !a.haveLine {
+		return nil
+	}
+	stop := max(a.lineDist-stopBuffer, 0)
+	switch {
+	case a.red:
+		return []target{{dist: stop, why: "red light"}}
+	case a.amber && !committed(speed, a.lineDist):
+		return []target{{dist: stop, why: "amber light"}}
+	case a.stopSign:
+		d.handleStopSign(a.lineDist, speed, dt)
+		if !d.stopHeld && d.stopArmed {
+			return []target{{dist: stop, why: "stop sign"}}
+		}
+	case a.giveWay:
+		// A give way sign needs no halt, only a slow approach and a stop if
+		// something is crossing.
+		out := []target{{dist: stop, speed: giveWaySpeed, why: "give way"}}
+		if crossingTraffic(d.cam, dets, a.lineDist) {
+			out = append(out, target{dist: stop, why: "giving way to traffic"})
+		}
+		return out
+	}
+	return nil
 }
 
 func (d *Driver) handleStopSign(lineDist, speed, dt float32) {

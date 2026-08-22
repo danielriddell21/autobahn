@@ -235,40 +235,7 @@ func (g *Game) drawMarkings(eye mathx.Vec) {
 		if length <= 1 {
 			continue
 		}
-		centre := a.Lerp(b, 0.5)
-
-		// The centre line dividing opposing traffic is white here: solid and
-		// doubled on the main roads, a long broken line elsewhere.
-		if r.Class == city.Arterial {
-			for _, off := range [2]float32{-0.18, 0.18} {
-				p := centre.Add(r.Dir.Right().Mul(off))
-				drawStripe(p, r.Axis, length, 0.14, colLinePale)
-			}
-		} else if mid.DistTo(eye) < cullDashes {
-			for t := float32(2); t < length-2; t += 9 {
-				p := a.Add(r.Dir.Mul(t + 2))
-				drawStripe(p, r.Axis, 4, 0.14, colLinePale)
-			}
-		}
-
-		// Double yellow lines against both kerbs: no waiting at any time.
-		for _, s := range [2]float32{-1, 1} {
-			for _, off := range [2]float32{0.26, 0.46} {
-				p := centre.Add(r.Dir.Right().Mul(s * (r.HalfWidth - off)))
-				drawStripe(p, r.Axis, length, 0.1, colLineWarm)
-			}
-		}
-
-		// Dashed dividers between same-direction lanes on multi-lane roads.
-		if r.Class.Lanes() > 1 && mid.DistTo(eye) < cullDashes {
-			for _, s := range [2]float32{-1, 1} {
-				off := s * city.LaneWidth
-				for t := float32(2); t < length-2; t += 6.5 {
-					p := a.Add(r.Dir.Mul(t + 1.6)).Add(r.Dir.Right().Mul(off))
-					drawStripe(p, r.Axis, 3.2, 0.14, colLinePale)
-				}
-			}
-		}
+		drawRoadPaint(r, a, b, length, mid.DistTo(eye))
 	}
 
 	// Stop lines and pedestrian crossings on controlled approaches.
@@ -276,31 +243,77 @@ func (g *Game) drawMarkings(eye mathx.Vec) {
 		if l.Control == city.ControlNone || l.B.DistTo(eye) > cullMarkings {
 			continue
 		}
-		axis := c.Roads[l.Road].Axis
-		bar := l.B.Sub(l.Fwd.Mul(0.5))
-		if l.Control == city.ControlGiveWay {
-			// A give way line is broken, and there are two of them.
-			for _, back := range [2]float32{0.0, 0.55} {
-				p := bar.Sub(l.Fwd.Mul(back))
-				for i := range 4 {
-					off := (float32(i) - 1.5) * 0.85
-					drawStripe(p.Add(l.Fwd.Right().Mul(off)), 1-axis, 0.5, 0.28, colLinePale)
-				}
-			}
-		} else {
-			drawStripe(bar, 1-axis, city.LaneWidth-0.3, 0.5, colLinePale)
-		}
+		drawJunctionPaint(l, c.Roads[l.Road].Axis, l.B.DistTo(eye))
+	}
+}
 
-		if l.Index == 0 && l.B.DistTo(eye) < cullCrossing {
-			// Zebra stripes just beyond the stop line, running with the
-			// direction of travel and spaced across the lane.
-			base := l.B.Add(l.Fwd.Mul(1.7))
-			for i := range 5 {
-				off := (float32(i) - 2) * 0.8
-				p := base.Add(l.Fwd.Right().Mul(off))
-				drawStripe(p, axis, 2.6, 0.4, colLinePale)
+func drawRoadPaint(r *city.Road, a, b mathx.Vec, length, eyeDist float32) {
+	centre := a.Lerp(b, 0.5)
+	drawCentreLine(r, a, centre, length, eyeDist)
+
+	// Double yellow lines against both kerbs: no waiting at any time.
+	for _, s := range [2]float32{-1, 1} {
+		for _, off := range [2]float32{0.26, 0.46} {
+			p := centre.Add(r.Dir.Right().Mul(s * (r.HalfWidth - off)))
+			drawStripe(p, r.Axis, length, 0.1, colLineWarm)
+		}
+	}
+
+	// Dashed dividers between same-direction lanes on multi-lane roads.
+	if r.Class.Lanes() > 1 && eyeDist < cullDashes {
+		for _, s := range [2]float32{-1, 1} {
+			off := s * city.LaneWidth
+			for t := float32(2); t < length-2; t += 6.5 {
+				p := a.Add(r.Dir.Mul(t + 1.6)).Add(r.Dir.Right().Mul(off))
+				drawStripe(p, r.Axis, 3.2, 0.14, colLinePale)
 			}
 		}
+	}
+}
+
+func drawCentreLine(r *city.Road, a, centre mathx.Vec, length, eyeDist float32) {
+	// The centre line dividing opposing traffic is white here: solid and
+	// doubled on the main roads, a long broken line elsewhere.
+	if r.Class == city.Arterial {
+		for _, off := range [2]float32{-0.18, 0.18} {
+			p := centre.Add(r.Dir.Right().Mul(off))
+			drawStripe(p, r.Axis, length, 0.14, colLinePale)
+		}
+		return
+	}
+	if eyeDist >= cullDashes {
+		return
+	}
+	for t := float32(2); t < length-2; t += 9 {
+		p := a.Add(r.Dir.Mul(t + 2))
+		drawStripe(p, r.Axis, 4, 0.14, colLinePale)
+	}
+}
+
+func drawJunctionPaint(l *city.Lane, axis int, eyeDist float32) {
+	bar := l.B.Sub(l.Fwd.Mul(0.5))
+	if l.Control == city.ControlGiveWay {
+		// A give way line is broken, and there are two of them.
+		for _, back := range [2]float32{0.0, 0.55} {
+			p := bar.Sub(l.Fwd.Mul(back))
+			for i := range 4 {
+				off := (float32(i) - 1.5) * 0.85
+				drawStripe(p.Add(l.Fwd.Right().Mul(off)), 1-axis, 0.5, 0.28, colLinePale)
+			}
+		}
+	} else {
+		drawStripe(bar, 1-axis, city.LaneWidth-0.3, 0.5, colLinePale)
+	}
+
+	if l.Index != 0 || eyeDist >= cullCrossing {
+		return
+	}
+	// Zebra stripes just beyond the stop line, running with the direction of
+	// travel and spaced across the lane.
+	base := l.B.Add(l.Fwd.Mul(1.7))
+	for i := range 5 {
+		off := (float32(i) - 2) * 0.8
+		drawStripe(base.Add(l.Fwd.Right().Mul(off)), axis, 2.6, 0.4, colLinePale)
 	}
 }
 

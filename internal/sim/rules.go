@@ -254,16 +254,8 @@ func (j *Judge) checkOffRoad(v *Vehicle, proj city.LaneProjection, speed, now, d
 
 func (j *Judge) checkJunction(v *Vehicle, proj city.LaneProjection, sig *Signals, speed, now float32) {
 	l := proj.Lane
-	// Track the approach lane while the car is still short of the stop line.
 	beyond := v.Pos.Sub(l.B).Dot(l.Fwd)
-	if beyond < -0.5 && l.Control != city.ControlNone && v.Vel.Dot(l.Fwd) > 0 {
-		if j.approach != l {
-			j.approach, j.judgedPass, j.stopDone = l, false, false
-		}
-		// A full stop anywhere near the line satisfies a stop sign.
-		if beyond > -4.5 && speed < 0.7 {
-			j.stopDone = true
-		}
+	if j.trackApproach(v, l, beyond, speed) {
 		return
 	}
 
@@ -275,6 +267,25 @@ func (j *Judge) checkJunction(v *Vehicle, proj city.LaneProjection, sig *Signals
 		return
 	}
 	j.judgedPass = true
+	j.judgeControl(v, l, sig, speed, now)
+}
+
+func (j *Judge) trackApproach(v *Vehicle, l *city.Lane, beyond, speed float32) bool {
+	// Only while the car is still short of the stop line and heading for it.
+	if beyond >= -0.5 || l.Control == city.ControlNone || v.Vel.Dot(l.Fwd) <= 0 {
+		return false
+	}
+	if j.approach != l {
+		j.approach, j.judgedPass, j.stopDone = l, false, false
+	}
+	// A full stop anywhere near the line satisfies a stop sign.
+	if beyond > -4.5 && speed < 0.7 {
+		j.stopDone = true
+	}
+	return true
+}
+
+func (j *Judge) judgeControl(v *Vehicle, l *city.Lane, sig *Signals, speed, now float32) {
 	switch l.Control {
 	case city.ControlSignal:
 		if sig.LaneState(l).MustStop() {
