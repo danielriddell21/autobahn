@@ -60,9 +60,12 @@ type World struct {
 	// Time is the elapsed simulation time in seconds.
 	Time float32
 
-	rng        *rand.Rand
-	buildings  map[[2]int][]int
-	cellSize   float32
+	rng       *rand.Rand
+	buildings map[[2]int][]int
+	cellSize  float32
+	// indexed is how many buildings have been filed, so growth only indexes
+	// what has just appeared.
+	indexed    int
 	blocked    bool
 	sinceBlock float32
 	// spawn is where the player restarts.
@@ -76,7 +79,7 @@ func NewWorld(cfg Config) *World {
 	c := city.Generate(city.DefaultParams(cfg.Seed))
 
 	w := &World{
-		City: c, Signals: NewSignals(c, rng.Stream(cfg.Seed, streamSignals)),
+		City: c, Signals: NewSignals(c, cfg.Seed),
 		Judge: NewJudge(c),
 		rng:   traffic, buildings: map[[2]int][]int{}, cellSize: 48,
 	}
@@ -121,13 +124,14 @@ func NewWorld(cfg Config) *World {
 }
 
 func (w *World) watchForOffences() {
-	// Subscribes the police to the judge. An offence only draws
-	// attention when a unit was close enough to witness it, so driving badly on an
-	// empty street is its own affair.
+	// Subscribes the police to the judge. An offence a unit saw draws attention
+	// at once; one nobody saw is remembered, and enough of them get called in.
 	w.Judge.Events.Subscribe(judgeWatcher(func(in Infraction) {
 		if w.witnessed() {
 			w.Wanted.witness(in.Points)
+			return
 		}
+		w.Wanted.report(in.Points)
 	}))
 }
 
@@ -215,6 +219,7 @@ func (w *World) PlaceOnNearestLane() {
 // with the given controls.
 func (w *World) Update(c Controls, dt float32) {
 	w.Time += dt
+	w.grow()
 	w.Signals.Update(dt)
 	w.Player.Update(c, dt)
 	for _, a := range w.Agents {
@@ -228,8 +233,37 @@ func (w *World) Update(c Controls, dt float32) {
 	w.Judge.Update(w.Player, w.Signals, w.Time, dt)
 }
 
+// GrowRadius is how far ahead of the player the city is brought into
+// existence, in metres. It is comfortably beyond keepRadius, so traffic
+// recycling always has somewhere built to put a car.
+//
+// A renderer needs it too: it is the promise that ground within this distance
+// of the player exists, and the point past which there is nothing to draw.
+const GrowRadius float32 = 700
+
+// grow extends the city around the player. Everything already there is left
+// alone, so this costs nothing once the surroundings exist and only does work
+// when the car reaches somewhere new.
+func (w *World) grow() { w.EnsureBuilt(w.Player.Pos) }
+
+// EnsureBuilt extends the city around a point, whoever is standing there.
+//
+// [World.Update] does this for the player, which covers a world this machine
+// is simulating. A player who has joined somebody else's chase simulates
+// nothing — they send controls and draw the poses that come back — so this is
+// the only thing that extends their copy of the city as the chase leaves the
+// ground it started on.
+func (w *World) EnsureBuilt(at mathx.Vec) {
+	w.City.EnsureAround(at, GrowRadius)
+	w.indexBuildings()
+}
+
+// indexBuildings files the buildings that have appeared since it last ran.
 func (w *World) indexBuildings() {
 	for i, b := range w.City.Buildings {
+		if i < w.indexed {
+			continue
+		}
 		lo := mathx.V(b.Center.X-b.W/2, b.Center.Z-b.D/2)
 		hi := mathx.V(b.Center.X+b.W/2, b.Center.Z+b.D/2)
 		for gx := int(lo.X / w.cellSize); gx <= int(hi.X/w.cellSize); gx++ {
@@ -239,6 +273,7 @@ func (w *World) indexBuildings() {
 			}
 		}
 	}
+	w.indexed = len(w.City.Buildings)
 }
 
 func (w *World) tooClose(p mathx.Vec, r float32) bool {

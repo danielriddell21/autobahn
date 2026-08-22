@@ -130,19 +130,53 @@ func (r *Route) Centreline(offset, spacing float32, count int) []mathx.Vec {
 	return pts
 }
 
+// aheadHops bounds how many lanes a lookahead may cross. The circulating
+// carriageway of a roundabout is cut into chords a few metres long, so a
+// lookahead across one spends most of its hops there. This covers the furthest
+// anything looks — a roadblock, set blockAhead metres up the road — and is
+// otherwise only here to stop a ring being walked forever.
+const aheadHops = 48
+
 func (r *Route) ahead(d float32) mathx.Vec {
-	remain := r.lane.Length - r.s
-	if d <= remain {
-		return r.lane.Point(r.s + d)
+	// Walk lane by lane. Stopping after one hop, as this used to, is enough on
+	// a street but not on a roundabout: every marker past the second chord
+	// would clamp to the same point, and a camera shown one dot where a lane
+	// should be has lost the lane.
+	lane, s := r.lane, r.s
+	turn, hasTurn := r.next, r.hasNext
+	for range aheadHops {
+		remain := lane.Length - s
+		if d <= remain {
+			return lane.Point(s + d)
+		}
+		d -= remain
+		if !hasTurn {
+			return lane.Point(lane.Length)
+		}
+		if d <= turn.Len {
+			return r.c.TurnPoint(lane, turn, d/max(turn.Len, 0.01))
+		}
+		d -= turn.Len
+		lane, s = r.c.Lanes[turn.Lane], 0
+		turn, hasTurn = onward(lane)
 	}
-	d -= remain
-	if !r.hasNext {
-		return r.lane.Point(r.lane.Length)
+	return lane.Point(d)
+}
+
+// onward is the successor a lookahead takes past a lane the route has not
+// planned for yet: straight on where that is offered, and the first turn
+// otherwise. It reads only the lane, because the markers are redrawn every
+// frame and a choice that varied between frames would make them crawl.
+func onward(l *city.Lane) (city.Turn, bool) {
+	if len(l.Succ) == 0 {
+		return city.Turn{}, false
 	}
-	if d <= r.next.Len {
-		return r.c.TurnPoint(r.lane, r.next, d/max(r.next.Len, 0.01))
+	for _, t := range l.Succ {
+		if t.Kind == city.TurnStraight {
+			return t, true
+		}
 	}
-	return r.c.Lanes[r.next.Lane].Point(d - r.next.Len)
+	return l.Succ[0], true
 }
 
 // StopLine returns the position of the stop line the car is approaching, the

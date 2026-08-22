@@ -36,10 +36,12 @@ func (g *Game) drawHUD() {
 	g.drawSpeedo()
 	g.drawScore()
 	g.drawInfractions()
-	if g.showPanel {
-		g.drawAIPanel()
-	}
+	// The camera feed and the autopilot's own readout are both windows onto a
+	// driver that is not there in manual mode.
 	if g.auto {
+		if g.showPanel {
+			g.drawAIPanel()
+		}
 		g.drawAutopilotPanel()
 	}
 	g.drawWanted()
@@ -59,9 +61,6 @@ func (g *Game) drawStatusBar() {
 	panel(12, 8, 232, 44)
 	rl.DrawText("AUTOBAHN", 24, 14, 12, hudDim)
 	rl.DrawText(mode, 24, 28, 20, col)
-	if g.paused {
-		rl.DrawText("PAUSED", 150, 30, 16, hudWarn)
-	}
 }
 
 func (g *Game) drawSpeedo() { g.drawSpeedoFor(g.world.Player) }
@@ -186,7 +185,12 @@ func (g *Game) drawWanted() {
 		rl.DrawText("keep out of sight", x+14, y+32, 12, hudDim)
 		return
 	}
-	rl.DrawText(fmt.Sprintf("%d witnessed", wa.Witnessed), x+14, y+32, 12, hudDim)
+	// Being seen and being phoned in are different things, so say which.
+	seen := fmt.Sprintf("%d witnessed", wa.Witnessed)
+	if wa.Reported > 0 {
+		seen += fmt.Sprintf(", %d reported", wa.Reported)
+	}
+	rl.DrawText(seen, x+14, y+32, 12, hudDim)
 }
 
 func (g *Game) drawAIPanel() {
@@ -282,11 +286,11 @@ func controlBindings() []keymap.Binding {
 		{Key: "Space", Action: "handbrake"},
 		{Key: "Tab", Action: "autopilot"},
 		{Key: "C", Action: "camera"},
-		{Key: "V", Action: "AI camera"},
+		{Key: "V", Action: "AI camera (autopilot)"},
 		{Key: "L", Action: "labels"},
 		{Key: "N", Action: "back on road"},
 		{Key: "R", Action: "restart"},
-		{Key: "P", Action: "pause"},
+		{Key: "Esc", Action: "menu"},
 		{Key: "H", Action: "help"},
 	}
 }

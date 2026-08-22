@@ -47,6 +47,11 @@ func TestLanesSitOnTheLeft(t *testing.T) {
 func TestEveryLaneLeadsSomewhere(t *testing.T) {
 	c := build(11)
 	for _, l := range c.Lanes {
+		if !c.Complete(c.Nodes[l.ToNode]) {
+			// A junction on the frontier: its far side has not been reached,
+			// so its lanes have nowhere to go yet and that is not a fault.
+			continue
+		}
 		if c.Nodes[l.ToNode].Degree() < 2 {
 			continue // a stub at the edge of the grid
 		}
@@ -165,6 +170,9 @@ func TestRoundaboutsAreGenerated(t *testing.T) {
 		t.Fatal("no roundabouts were generated")
 	}
 	for _, n := range rounds {
+		if !c.Complete(n) {
+			continue // still on the frontier; not all its arms exist yet
+		}
 		if !n.IsRoundabout() {
 			t.Errorf("node %d is listed but not marked", n.ID)
 		}
@@ -179,9 +187,22 @@ func TestRoundaboutsAreGenerated(t *testing.T) {
 
 // The circulating carriageway has to be a closed loop, or traffic joining it
 // would run out of road.
+// finishedRoundabout returns a roundabout whose arms all exist. The first one
+// the city lists may still be on the frontier, with no ring laid yet.
+func finishedRoundabout(t *testing.T, c *city.City) *city.Node {
+	t.Helper()
+	for _, n := range c.Roundabouts() {
+		if c.Complete(n) {
+			return n
+		}
+	}
+	t.Fatal("no finished roundabout in this city")
+	return nil
+}
+
 func TestRingIsAClosedLoop(t *testing.T) {
 	c := build(7)
-	n := c.Roundabouts()[0]
+	n := finishedRoundabout(t, c)
 
 	var ring []*city.Lane
 	for _, l := range c.Lanes {
@@ -216,7 +237,7 @@ func TestRingIsAClosedLoop(t *testing.T) {
 
 func TestRoundaboutApproachesGiveWay(t *testing.T) {
 	c := build(7)
-	n := c.Roundabouts()[0]
+	n := finishedRoundabout(t, c)
 
 	var approaches int
 	for _, l := range c.Lanes {
@@ -244,7 +265,7 @@ func TestRoundaboutApproachesGiveWay(t *testing.T) {
 // Every arm has to be reachable, or the roundabout would be a dead end.
 func TestRingLeavesByEveryArm(t *testing.T) {
 	c := build(7)
-	n := c.Roundabouts()[0]
+	n := finishedRoundabout(t, c)
 
 	exits := map[int]bool{}
 	for _, l := range c.Lanes {

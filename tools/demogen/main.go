@@ -109,21 +109,30 @@ func run(cfg config) error {
 		return fmt.Errorf("creating the output directory: %w", err)
 	}
 
+	// A clip that cannot be built does not stop the others. Each one is an
+	// independent run of the game, and half an hour of rendering should not be
+	// thrown away because the last item found a city with nothing to show.
 	var built int
+	var failed []error
 	for _, it := range all {
 		if len(cfg.only) > 0 && !slices.Contains(cfg.only, it.name) {
 			continue
 		}
 		fmt.Printf("building %-10s -> %s\n", it.name, filepath.Join(cfg.out, it.file))
 		if err := it.make(cfg); err != nil {
-			return fmt.Errorf("%s: %w", it.name, err)
+			fmt.Fprintf(os.Stderr, "  failed: %v\n", err)
+			failed = append(failed, fmt.Errorf("%s: %w", it.name, err))
+			continue
 		}
 		built++
 	}
-	if built == 0 {
+	if built == 0 && len(failed) == 0 {
 		return errors.New("nothing matched; try -list")
 	}
 	fmt.Printf("wrote %d file(s) to %s\n", built, cfg.out)
+	if len(failed) > 0 {
+		return fmt.Errorf("%d of %d failed: %w", len(failed), built+len(failed), errors.Join(failed...))
+	}
 	return nil
 }
 
@@ -193,10 +202,17 @@ func clipVision(cfg config) error {
 	})
 }
 
+// junctionSeed offsets the city this clip drives, because the shot needs
+// something the default city does not reliably offer: a signalised junction
+// the autopilot meets, and stops at, within its step budget. Every clip is a
+// real run rather than a staged one, so when a run cannot show the thing the
+// clip is about, the answer is a city that can.
+const junctionSeed = 1
+
 func clipJunction(cfg config) error {
 	// Waits for the autopilot to actually be stopping for something
 	// before it starts recording, which is what demo.Clip's Ready gate is for.
-	return game.WithWindow(cfg.opts(cfg.seed), func(g *game.Game) error {
+	return game.WithWindow(cfg.opts(cfg.seed+junctionSeed), func(g *game.Game) error {
 		g.SetCameraMode(game.CameraChase)
 		rec := cfg.recorder(130, cfg.scale)
 
@@ -237,8 +253,10 @@ func clipPolice(cfg config) error {
 	o.Camera = game.CameraHigh
 
 	return game.WithWindow(o, func(g *game.Game) error {
-		// High enough to take in the units converging on the car.
-		g.SetOverheadHeight(120)
+		// Wide enough to take in the units converging on the car, without
+		// shrinking them to specks. The setting is how much ground to show
+		// either side, so this frames about a hundred and fifty metres.
+		g.SetOverheadHeight(75)
 		rec := cfg.recorder(140, cfg.scale)
 
 		clip := demo.Clip{
@@ -272,10 +290,10 @@ func sheetCity(cfg config) error {
 			}
 			g.SetCameraMode(game.CameraHigh)
 			g.ShowHUD(false)
-			// High enough to take in a district rather than a single street.
+			// Wide enough to take in a district rather than a single street.
 			g.SetOverheadHeight(200)
 			settle(g, 150)
-			cells = append(cells, downscale(g.Snapshot(), cfg.scale))
+			cells = append(cells, demo.Downscale(g.Snapshot(), cfg.scale))
 		}
 		sheet := demo.Montage(cells, 2, 12, color.RGBA{R: 16, G: 18, B: 22, A: 255})
 		return writePNG(cfg.path("city.png"), sheet)
@@ -293,7 +311,7 @@ func sheetCameras(cfg config) error {
 			g.SetCameraMode(m)
 			// One more step so the camera move is reflected in the frame.
 			g.Step(fixedStep)
-			cells = append(cells, downscale(g.Snapshot(), cfg.scale))
+			cells = append(cells, demo.Downscale(g.Snapshot(), cfg.scale))
 		}
 		sheet := demo.Montage(cells, 3, 12, color.RGBA{R: 16, G: 18, B: 22, A: 255})
 		return writePNG(cfg.path("cameras.png"), sheet)
@@ -328,33 +346,4 @@ func writePNG(path string, img image.Image) error {
 		return fmt.Errorf("writing the sheet: %w", err)
 	}
 	return nil
-}
-
-func downscale(src image.Image, factor int) image.Image {
-	// Shrinks a frame by an integer factor with a box filter, so contact
-	// sheet cells are a sensible size without depending on the render resolution.
-	if src == nil {
-		return image.NewRGBA(image.Rect(0, 0, 1, 1))
-	}
-	if factor < 2 {
-		return src
-	}
-	b := src.Bounds()
-	w, h := b.Dx()/factor, b.Dy()/factor
-	dst := image.NewRGBA(image.Rect(0, 0, w, h))
-	for y := range h {
-		for x := range w {
-			var r, g, bl, n uint32
-			for dy := range factor {
-				for dx := range factor {
-					cr, cg, cb, _ := src.At(b.Min.X+x*factor+dx, b.Min.Y+y*factor+dy).RGBA()
-					r, g, bl, n = r+cr>>8, g+cg>>8, bl+cb>>8, n+1
-				}
-			}
-			dst.Set(x, y, color.RGBA{
-				R: uint8(r / n), G: uint8(g / n), B: uint8(bl / n), A: 255,
-			})
-		}
-	}
-	return dst
 }

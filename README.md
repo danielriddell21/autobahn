@@ -15,6 +15,10 @@ colour-coded detection boxes it has to read back out of the pixels.
 
 Both drivers are scored by the same judge, so the comparison is honest.
 
+Two people can play: one hosts a chase and drives the runner, the other joins
+over the network and gives chase in a police car. Set it up from the title
+screen, or with `-host` and `-join`.
+
 ![The autopilot driving the city](docs/media/drive.gif)
 
 *The autopilot at the wheel. The panel in the corner is the image it is reading.*
@@ -46,6 +50,17 @@ Windows no tag is required. The `justfile` picks the right one for you.
 
 Everything is generated in code — geometry, layout, materials. There are no
 asset files, nothing is downloaded at runtime, and the whole thing runs offline.
+
+The city has no edge. It is built outward as you drive into it, a junction at a
+time, and everything about a place is decided from where that place is rather
+than from when you got there — so the town behind you is still the town you
+left, and there is always more road ahead.
+
+The engine underneath is [crucible](https://github.com/danielriddell21/crucible),
+shared with the rest of the family: the city's street plan comes from its
+world generator, the menus from its menu model, the two-player session from
+its netplay package, and the recording flags are the same `-record` every
+other app answers to.
 
 ## Documentation
 

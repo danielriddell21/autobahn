@@ -9,10 +9,14 @@ package game
 import (
 	"fmt"
 	"image"
+	"math"
+	"os"
+	"path/filepath"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 
 	crucihud "github.com/danielriddell21/crucible/hud"
+	"github.com/danielriddell21/crucible/netplay"
 	"github.com/danielriddell21/crucible/record"
 	"github.com/danielriddell21/crucible/status"
 	"github.com/danielriddell21/crucible/telemetry"
@@ -21,7 +25,6 @@ import (
 	"github.com/danielriddell21/autobahn/internal/audio"
 	"github.com/danielriddell21/autobahn/internal/autopilot"
 	"github.com/danielriddell21/autobahn/internal/mathx"
-	"github.com/danielriddell21/autobahn/internal/netplay"
 	"github.com/danielriddell21/autobahn/internal/sim"
 	"github.com/danielriddell21/autobahn/internal/vision"
 )
@@ -37,6 +40,18 @@ const (
 	numCameraModes
 )
 
+// String returns the viewpoint's name, for a settings row to show.
+func (m CameraMode) String() string {
+	switch m {
+	case CameraBonnet:
+		return "bonnet"
+	case CameraHigh:
+		return "overhead"
+	default:
+		return "chase"
+	}
+}
+
 // Options configures a game session.
 type Options struct {
 	Seed      uint64
@@ -49,8 +64,11 @@ type Options struct {
 	Autopilot bool // start with the AI driving
 	// Reckless drives the car along its route at full throttle, ignoring every
 	// rule. It is a development aid for exercising the judge and the police.
-	Reckless  bool
-	ShowPanel bool // show the AI camera panel
+	Reckless bool
+	// ShowPanel draws the AI camera panel while the autopilot is driving. It
+	// never appears in manual driving: it is the autopilot's view of the road,
+	// and the camera is not even run when nothing is reading it.
+	ShowPanel bool
 	Mute      bool // synthesise no sound at all
 	// Chase puts the player in a police car with the autopilot running from
 	// them, on this machine alone. It needs no network: there is only one
@@ -58,23 +76,38 @@ type Options struct {
 	Chase bool
 	// Host makes this machine the authority for a two-player chase against
 	// another person, listening on the given address. Join connects to one.
-	Host        string
-	Join        string
-	Camera      CameraMode
-	Frames      int // when > 0, run this many frames then exit
-	Screenshot  string
-	Stats       bool    // print a session summary on exit
-	Record      string  // capture the drive to this .gif or .mp4 path
-	RecordScale int     // downscale factor for the capture
+	Host       string
+	Join       string
+	Camera     CameraMode
+	Frames     int // when > 0, run this many frames then exit
+	Screenshot string
+	Stats      bool // print a session summary on exit
+	// Rec is where and how to capture the drive. The family's shared --record
+	// flags fill it; see [record.Options.AddStdFlags].
+	Rec         record.Options
 	DebugVision bool    // print camera range estimates against ground truth
 	PerceptionH float32 // perception updates per second
+	// Given names the options the command line asked for by name, so a stored
+	// preference can yield to them. Only the flag package can tell a value that
+	// was given from one that merely defaulted, so whoever parses records it.
+	Given Given
 }
+
+// Given is the set of option names a command line supplied. Build it from
+// [flag.Visit], which reports only the flags that were actually set:
+//
+//	opts.Given = game.Given{}
+//	flag.Visit(func(f *flag.Flag) { opts.Given[f.Name] = true })
+type Given map[string]bool
 
 // DefaultOptions returns the standard session settings.
 func DefaultOptions() Options {
 	return Options{
 		Seed: 7, Traffic: 70, Police: 5, Width: 1280, Height: 720,
 		CamWidth: 420, CamHeight: 236, ShowPanel: true, PerceptionH: 20,
+		// A 1280x720 scene needs downscaling to make a sensible GIF, and half
+		// a minute at sixty frames a second is long enough for any clip.
+		Rec: record.Options{FPS: 30, Scale: 3, Frames: 1800},
 	}
 }
 
@@ -87,8 +120,8 @@ type Game struct {
 	hasShader bool
 
 	camMode CameraMode
-	// overheadHeight is the altitude of the overhead camera, in metres. The
-	// media tool raises it to take in a whole district.
+	// overheadHeight is how much ground the overhead camera shows either side
+	// of the car, in metres. The media tool raises it to take in a district.
 	overheadHeight float32
 	cam            rl.Camera3D
 	camPos         mathx.Vec
@@ -106,10 +139,10 @@ type Game struct {
 	showPanel  bool
 	showLabels bool
 	showHelp   bool
-	paused     bool
 
-	host   *netplay.Host
-	client *netplay.Client
+	// net is the two-player session. It is always present and starts offline,
+	// so nothing here has to check for nil before asking about it.
+	net    *netplay.Session[Snapshot, Input]
 	chase  Chase
 	chaser *sim.Agent
 
@@ -174,9 +207,21 @@ func (g *Game) Summary() Summary {
 	return s
 }
 
+// chaseReady makes sure a chase has a police car in it. The settings screen
+// allows a world with no police at all, which is fine for driving and useless
+// for a chase: nothing crashes, the joining player simply has nothing to
+// control. Raising the count is friendlier than refusing the session.
+func (o Options) chaseReady() Options {
+	o.Police = max(o.Police, 1)
+	return o
+}
+
 // New creates a game with a freshly generated city. The window must already be
 // open, because the AI camera allocates a render texture.
 func New(opts Options) *Game {
+	if opts.Chase || opts.Host != "" || opts.Join != "" {
+		opts = opts.chaseReady()
+	}
 	g := &Game{
 		opts: opts,
 		world: sim.NewWorld(sim.Config{
@@ -187,17 +232,14 @@ func New(opts Options) *Game {
 		auto: opts.Autopilot || opts.Chase, showPanel: opts.ShowPanel,
 		showHUD: true, showLabels: true, overheadHeight: 34,
 		scanner:   vision.NewScanner(),
+		net:       &netplay.Session[Snapshot, Input]{},
 		visionCam: vision.DefaultCamera(opts.CamWidth, opts.CamHeight),
 	}
-	if opts.Record != "" {
+	if opts.Rec.Recording() {
 		// crucible's recorder takes plain image.Image frames, so it works
-		// behind raylib just as well as behind Ebiten.
-		frames := opts.Frames
-		if frames <= 0 || frames > 1800 {
-			frames = 1800
-		}
-		g.recorder = record.NewRecorder(30, max(opts.RecordScale, 1), frames,
-			record.WithFrameDiff())
+		// behind raylib just as well as behind Ebiten, and picks GIF or MP4
+		// from the path's extension.
+		g.recorder = record.New(opts.Rec, record.WithFrameDiff())
 	}
 	g.audio = audio.Open(opts.Mute)
 	g.notices = crucihud.New()
@@ -208,7 +250,7 @@ func New(opts Options) *Game {
 	g.shader = rl.LoadShaderFromMemory(lightingVS, lightingFS)
 	g.hasShader = g.shader.ID != 0
 
-	g.cam = rl.Camera3D{Up: vec3(0, 1, 0), Fovy: 62, Projection: rl.CameraPerspective}
+	g.cam = rl.Camera3D{Up: vec3(0, 1, 0), Fovy: groundFov, Projection: rl.CameraPerspective}
 	g.aiCam = rl.Camera3D{
 		Up: vec3(0, 1, 0), Fovy: g.visionCam.FovY,
 		Projection: rl.CameraPerspective,
@@ -280,11 +322,23 @@ func (g *Game) SetAutopilot(on bool) {
 	g.auto = on
 	g.driver.Reset()
 	g.world.Judge.Reset()
+	// The camera does not run while a person is driving, so the detections in
+	// hand are as old as the manual stint. Throw them away and look again on
+	// the first frame rather than handing the driver a stale view of the road.
+	g.dets, g.perceived = nil, 0
 }
 
 // Networked reports whether this session is one end of a chase against another
 // person, rather than against the AI on this machine.
-func (g *Game) Networked() bool { return g.host != nil || g.client != nil }
+func (g *Game) Networked() bool { return g.net.Online() }
+
+// hosting reports whether this machine owns the simulation. The other end of
+// a two-player chase draws what it is told and simulates nothing.
+func (g *Game) hosting() bool { return g.net.Role() == netplay.Hosting }
+
+// Session exposes the network session, so a lobby screen can start, watch and
+// end it.
+func (g *Game) Session() *netplay.Session[Snapshot, Input] { return g.net }
 
 // Chasing reports whether the player is driving a police car, whoever or
 // whatever is running from them.
@@ -322,9 +376,7 @@ func (g *Game) Step(dt float32) {
 		}
 	}
 
-	if !g.paused {
-		g.world.Update(controls, dt)
-	}
+	g.world.Update(controls, dt)
 	g.updateCameras(dt)
 	g.updateAudio()
 
@@ -400,7 +452,17 @@ func (g *Game) ShowPanel(on bool) { g.showPanel = on }
 // on its own.
 func (g *Game) ShowHUD(on bool) { g.showHUD = on }
 
-// SetOverheadHeight sets the altitude of the overhead camera in metres.
+// Camera fields of view, in degrees.
+const (
+	// groundFov is the lens used from the car: wide, as a driver's view is.
+	groundFov float32 = 62
+	// planFov is the lens used from above. It is narrow so the view
+	// approximates a plan, and the altitude is derived from it.
+	planFov float32 = 20
+)
+
+// SetOverheadHeight sets how much ground the overhead camera shows either side
+// of the car, in metres. The altitude follows from the plan lens.
 func (g *Game) SetOverheadHeight(m float32) { g.overheadHeight = max(m, 8) }
 
 // Driver exposes the autopilot controller, so a caller can gate on what it is
@@ -418,7 +480,11 @@ func (g *Game) SaveRecording(path string) error {
 func (g *Game) perceive(dt float32) {
 	// Perception runs on its own clock, as a real sensor stack would. The
 	// camera image must be produced before the controller reads it.
-	if !g.auto && !g.showPanel {
+	//
+	// Nothing reads it while a person is driving: the panel showing it is the
+	// autopilot's view of the road, and there is no autopilot. Skipping it
+	// saves rendering the scene a second time into an off-screen target.
+	if !g.auto {
 		return
 	}
 	g.perceived += dt
@@ -464,7 +530,7 @@ func (g *Game) stepChase(dt float32) {
 		g.blink, g.blinkT = !g.blink, 0
 	}
 
-	if g.client != nil {
+	if g.net.Role() == netplay.Joining {
 		g.joinChase(dt)
 	} else {
 		g.driveChase(g.runnerControls(dt), dt)
@@ -501,8 +567,6 @@ func (g *Game) handleInput() {
 		g.world.PlaceOnNearestLane()
 	case rl.IsKeyPressed(rl.KeyH):
 		g.showHelp = !g.showHelp
-	case rl.IsKeyPressed(rl.KeyP):
-		g.paused = !g.paused
 	}
 }
 
@@ -543,12 +607,23 @@ func (g *Game) updateCameras(dt float32) {
 	mount := p.Pos.Add(fwd.Mul(1.7))
 	look := mount.Add(fwd.Mul(24))
 
+	if g.camMode != CameraHigh {
+		g.cam.Fovy = groundFov
+	}
 	switch g.camMode {
 	case CameraBonnet:
 		g.cam.Position = vec3(mount.X, 1.45, mount.Z)
 		g.cam.Target = vec3(look.X, 1.25, look.Z)
 	case CameraHigh:
-		g.cam.Position = vec3(p.Pos.X, g.overheadHeight, p.Pos.Z+0.1)
+		// A plan view: a narrow lens a long way up, rather than a wide one
+		// just overhead. With a 62 degree lens at rooftop height the towers
+		// lean out across the streets they stand beside and the layout is
+		// unreadable — which is what made the city contact sheet grey mush.
+		// Pulling back and narrowing keeps each building over its own
+		// footprint.
+		g.cam.Fovy = planFov
+		alt := g.overheadHeight / float32(math.Tan(float64(planFov)*0.5*math.Pi/180))
+		g.cam.Position = vec3(p.Pos.X, alt, p.Pos.Z+0.1)
 		g.cam.Target = vec3(p.Pos.X, 0, p.Pos.Z)
 	default:
 		// Chase camera: trails the car, and swings wider as speed rises.
@@ -618,23 +693,22 @@ func (g *Game) scanAICamera() {
 // A window is still required even when nothing is watching, because the scene
 // is drawn on the GPU; on a headless Linux box run under xvfb-run.
 func WithWindow(opts Options, fn func(*Game) error) error {
-	// A network session is opened before the window, so a bad address fails
-	// immediately rather than after a window has appeared.
-	var host *netplay.Host
-	var client *netplay.Client
-	var err error
+	// A session asked for on the command line is opened before the window, so
+	// a bad address fails immediately rather than after a window has appeared.
+	// Starting one from the lobby instead goes through the same session.
+	session := &netplay.Session[Snapshot, Input]{}
 	switch {
 	case opts.Host != "":
-		if host, err = netplay.Listen(opts.Host); err != nil {
+		if err := session.StartHosting(opts.Host); err != nil {
 			return err
 		}
-		defer func() { _ = host.Close() }()
-		fmt.Println("hosting a chase on", host.Addr())
+		defer session.Leave()
+		fmt.Println("hosting a chase on", session.Addr())
 	case opts.Join != "":
-		if client, err = netplay.Join(opts.Join); err != nil {
+		if err := session.StartJoining(opts.Join); err != nil {
 			return err
 		}
-		defer func() { _ = client.Close() }()
+		defer session.Leave()
 		fmt.Println("joined", opts.Join, "as the police")
 	}
 
@@ -644,7 +718,7 @@ func WithWindow(opts Options, fn func(*Game) error) error {
 	defer rl.CloseWindow()
 
 	g := New(opts)
-	g.host, g.client = host, client
+	g.net = session
 	if g.Networked() {
 		g.chaser = g.world.AssignChaser()
 	}
@@ -652,9 +726,43 @@ func WithWindow(opts Options, fn func(*Game) error) error {
 	return fn(g)
 }
 
-// Run opens a window and drives the game loop until the user quits.
+// Run opens a window and plays until the player quits.
+//
+// An ordinary run opens on the title screen, where the drive, the two-player
+// chase and the settings are chosen. A run that was told what to do on the
+// command line — a fixed frame count, a recording, a screenshot, a session to
+// host or join — goes straight to the wheel instead, because a menu waiting
+// for a keypress is no use to a script or a media build.
 func Run(opts Options) error {
-	return WithWindow(opts, run)
+	if opts.headless() {
+		return WithWindow(opts, run)
+	}
+	return WithWindow(opts, shell)
+}
+
+// headless reports whether the run was told what to do rather than being
+// played, in which case the menus are skipped.
+func (o Options) headless() bool {
+	return o.Frames > 0 || o.Rec.Recording() || o.Screenshot != "" ||
+		o.Host != "" || o.Join != "" || o.Chase || o.Stats
+}
+
+// shell plays through the menu layer.
+func shell(g *Game) error {
+	rl.SetTargetFPS(60)
+
+	// The game the window was opened with is discarded: the shell builds its
+	// own from the player's stored settings once they choose to drive. Only
+	// the network session carries over, so a -host or -join on the command
+	// line still lands in the lobby.
+	sh := NewShell(g.opts)
+	sh.net = g.net
+	defer sh.Close()
+	g.Close()
+
+	for sh.Step(mathx.Clamp(rl.GetFrameTime(), 0.001, 1.0/20)) {
+	}
+	return nil
 }
 
 func run(g *Game) error {
@@ -672,17 +780,36 @@ func run(g *Game) error {
 	}
 
 	if opts.Screenshot != "" {
-		rl.TakeScreenshot(opts.Screenshot)
+		if err := screenshot(opts.Screenshot); err != nil {
+			return err
+		}
 		fmt.Println("wrote", opts.Screenshot)
 	}
-	if opts.Record != "" {
-		if err := g.SaveRecording(opts.Record); err != nil {
+	if opts.Rec.Recording() {
+		if err := g.SaveRecording(opts.Rec.Path); err != nil {
 			return fmt.Errorf("saving the recording: %w", err)
 		}
-		fmt.Println("wrote", opts.Record)
+		fmt.Println("wrote", opts.Rec.Path)
 	}
 	if opts.Stats {
 		printSummary(g.Summary())
+	}
+	return nil
+}
+
+// screenshot writes the current frame and confirms it landed.
+//
+// raylib resolves the path against the working directory and reports failure
+// only to its own log, so an absolute path silently produces nothing while the
+// caller cheerfully announces success. Checking afterwards is the only way to
+// know.
+func screenshot(path string) error {
+	if filepath.IsAbs(path) {
+		return fmt.Errorf("screenshot path %q must be relative to the working directory", path)
+	}
+	rl.TakeScreenshot(path)
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("writing the screenshot to %q: %w", path, err)
 	}
 	return nil
 }

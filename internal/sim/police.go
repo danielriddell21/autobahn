@@ -34,6 +34,17 @@ const (
 	maxWanted = 4
 	// noticeRange is how close a unit must be to see an offence committed.
 	noticeRange float32 = 95
+	// reportWeight is how much an offence nobody saw is worth against
+	// reportThreshold. Being seen is worth more, and is immediate.
+	reportWeight float32 = 0.5
+	// reportThreshold is how much unseen bad driving it takes before somebody
+	// phones it in, in the judge's own penalty points. It sits at roughly two
+	// red lights, three wrong-way stretches, or a long run of wandering off
+	// the carriageway — persistent bad driving, not one lapse.
+	reportThreshold float32 = 55
+	// reportFade is how fast a report is forgotten, in points per second. A
+	// driver who settles down is off the hook in under a minute.
+	reportFade float32 = 1.5
 	// pursuitRange is how far a unit will chase before it gives up.
 	pursuitRange float32 = 520
 	// escapeRange is the distance at which the driver counts as out of sight.
@@ -94,10 +105,13 @@ type Wanted struct {
 	Heat float32
 	// Witnessed counts offences a unit actually saw.
 	Witnessed int
+	// Reported counts offences nobody saw that were called in anyway.
+	Reported int
 	// Stops counts how many times the driver has been pulled over.
 	Stops int
 
 	sinceOffence float32
+	unreported   float32 // unseen offences building toward a call
 	outOfSight   float32
 	heldStill    float32
 	stoppedFor   float32
@@ -109,16 +123,40 @@ func (w *Wanted) Active() bool { return w.Level > 0 }
 // Clear drops the wanted level and ends any pursuit.
 func (w *Wanted) Clear() {
 	w.Level, w.Heat, w.State = 0, 0, PursuitClear
-	w.outOfSight, w.heldStill = 0, 0
+	w.outOfSight, w.heldStill, w.unreported = 0, 0, 0
 }
 
 func (w *Wanted) witness(points int) {
 	// Adds heat for an offence a unit saw, and is what the telemetry
 	// subscription calls.
 	w.Witnessed++
+	w.raise(points)
+}
+
+// raise turns penalty points into police attention, however they were come by.
+func (w *Wanted) raise(points int) {
 	w.Heat += float32(points) * heatPerPoint
 	w.sinceOffence = 0
 	w.Level = min(1+int(w.Heat/heatPerLevel), maxWanted)
+}
+
+// report records an offence no unit saw.
+//
+// Without this a driver on a deserted street is untouchable: with a handful of
+// units wandering a city a kilometre across, most offences happen with nobody
+// in sight, and the response never starts however badly the car is driven.
+// A witness is still worth more and acts at once — this is somebody watching
+// from a window, and it takes a few offences before they pick up the phone.
+func (w *Wanted) report(points int) {
+	w.unreported += float32(points) * reportWeight
+	if w.unreported < reportThreshold {
+		return
+	}
+	// Somebody has called it in. From here it is an ordinary wanted level, so
+	// units are dispatched from wherever they happen to be.
+	w.unreported = 0
+	w.Reported++
+	w.raise(points)
 }
 
 func (w *World) nearestUnit() (float32, bool) {
@@ -149,6 +187,9 @@ func (w *World) witnessed() bool {
 
 func (w *World) updateWanted(dt float32) {
 	wa := &w.Wanted
+	// A report is forgotten if the driving settles down, so one lapse on an
+	// empty street does not summon a car five minutes later.
+	wa.unreported = max(wa.unreported-dt*reportFade, 0)
 	if wa.stoppedFor > 0 {
 		// Hold the "pulled over" state briefly so it can be read, then clear.
 		if wa.stoppedFor -= dt; wa.stoppedFor <= 0 {

@@ -24,7 +24,7 @@ func main() {
 	camH := flag.Int("camheight", opts.CamHeight, "AI camera height in pixels")
 	auto := flag.Bool("autopilot", false, "start with the AI driving")
 	reckless := flag.Bool("reckless", false, "drive the route at full throttle ignoring every rule, to exercise the police")
-	panel := flag.Bool("panel", true, "show the AI camera panel")
+	panel := flag.Bool("panel", true, "show the AI camera panel while the autopilot drives")
 	mute := flag.Bool("mute", false, "synthesise no sound")
 	chase := flag.Bool("chase", false, "drive a police car and chase the autopilot")
 	host := flag.String("host", "", "host a two-player chase on this address, e.g. :7777")
@@ -35,9 +35,15 @@ func main() {
 	shot := flag.String("screenshot", "", "write a screenshot to this path before exiting")
 	stats := flag.Bool("stats", false, "print a session summary on exit")
 	dbg := flag.Bool("debugvision", false, "print camera range estimates against ground truth")
-	rec := flag.String("record", "", "capture the drive to this .gif or .mp4 path")
-	recScale := flag.Int("recordscale", 3, "downscale factor for the capture")
+	// The family's shared recording flags, so -record means the same thing
+	// here as it does in every other app in the family.
+	opts.Rec.AddStdFlags(flag.CommandLine)
 	flag.Parse()
+
+	// Which flags were actually given, so the player's stored settings know
+	// what they may not override.
+	opts.Given = game.Given{}
+	flag.Visit(func(f *flag.Flag) { opts.Given[f.Name] = true })
 
 	opts.Seed = *seed
 	opts.Traffic = *traffic
@@ -70,8 +76,6 @@ func main() {
 	opts.Screenshot = *shot
 	opts.Stats = *stats
 	opts.DebugVision = *dbg
-	opts.Record = *rec
-	opts.RecordScale = *recScale
 
 	if err := game.Run(opts); err != nil {
 		fmt.Fprintln(os.Stderr, "autobahn:", err)

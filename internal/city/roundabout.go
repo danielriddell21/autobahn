@@ -2,7 +2,6 @@ package city
 
 import (
 	"math"
-	"math/rand/v2"
 
 	"github.com/danielriddell21/autobahn/internal/mathx"
 )
@@ -32,37 +31,6 @@ func (n *Node) IsRoundabout() bool { return n.Roundabout }
 
 // RingRadius returns the radius of a roundabout's circulating carriageway.
 func (n *Node) RingRadius() float32 { return n.ringRadius }
-
-func (c *City) chooseRoundabouts(rng *rand.Rand, share float32) {
-	// Promotes a share of the junctions to roundabouts. They are
-	// picked before lanes are built, because a roundabout needs a much larger
-	// junction radius and the approach lanes are trimmed back to it.
-	for _, n := range c.Nodes {
-		if n.Degree() < 3 || rng.Float32() >= share {
-			continue
-		}
-		var widest float32
-		for _, rid := range n.Roads {
-			widest = max(widest, c.Roads[rid].HalfWidth)
-		}
-		n.Roundabout = true
-		n.ringRadius = mathx.Clamp(widest+7, 11, 17)
-		// The approach lanes stop just outside the circulating carriageway.
-		n.Radius = n.ringRadius + 2.5
-	}
-}
-
-func (c *City) buildRings() {
-	// Lays the circulating carriageway of every roundabout. Each ring is
-	// a closed run of short lanes travelling in the direction entering traffic
-	// turns into, which is clockwise seen from above where traffic keeps left.
-	for _, n := range c.Nodes {
-		if !n.Roundabout {
-			continue
-		}
-		c.buildRing(n)
-	}
-}
 
 func (c *City) buildRing(n *Node) {
 	// One synthetic road carries every lane of the ring, so anything that looks

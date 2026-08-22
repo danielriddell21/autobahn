@@ -6,7 +6,11 @@
 // that the vector (1, 0) has an angle of zero.
 package mathx
 
-import "math"
+import (
+	"math"
+
+	"github.com/danielriddell21/crucible/geom"
+)
 
 // Vec is a point or direction on the ground plane.
 type Vec struct{ X, Z float32 }
@@ -103,33 +107,21 @@ func Sign(v float32) float32 {
 // Lerp returns the linear blend from a to b at t.
 func Lerp(a, b, t float32) float32 { return a + (b-a)*t }
 
-// WrapPi folds an angle in radians into the range [-pi, pi].
-func WrapPi(a float32) float32 {
-	const twoPi = 2 * math.Pi
-	a = float32(math.Mod(float64(a), twoPi))
-	if a > math.Pi {
-		a -= twoPi
-	}
-	if a < -math.Pi {
-		a += twoPi
-	}
-	return a
-}
-
-// MoveToward steps current toward target by at most maxDelta.
-func MoveToward(current, target, maxDelta float32) float32 {
-	d := target - current
-	if Abs(d) <= maxDelta {
-		return target
-	}
-	return current + Sign(d)*maxDelta
-}
-
-// Approach smooths current toward target at the given rate, independently of
-// the frame duration dt.
-func Approach(current, target, rate, dt float32) float32 {
-	return current + (target-current)*(1-Exp(-rate*dt))
-}
+// The angle and easing helpers live in crucible, which is generic over the
+// float width, so this package's float32 world uses them without casting.
+// They are re-exported rather than wrapped so the simulation reads in its own
+// vocabulary and there is still only one implementation.
+var (
+	// WrapPi folds an angle in radians into the range [-pi, pi].
+	WrapPi = geom.WrapPi[float32]
+	// AngleDiff returns the signed shortest rotation from b to a.
+	AngleDiff = geom.AngleDiff[float32]
+	// MoveToward steps current toward target by at most maxDelta.
+	MoveToward = geom.MoveToward[float32]
+	// Approach smooths current toward target at the given rate, independently
+	// of the frame duration dt.
+	Approach = geom.Approach[float32]
+)
 
 // Bezier evaluates the quadratic curve through p0 and p2 with control point p1.
 func Bezier(p0, p1, p2 Vec, t float32) Vec {

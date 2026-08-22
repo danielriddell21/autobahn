@@ -75,10 +75,13 @@ var (
 const (
 	cullBuildings float32 = 300
 	cullBlocks    float32 = 320
-	cullMarkings  float32 = 150
-	cullDashes    float32 = 110
-	cullProps     float32 = 130
-	cullCrossing  float32 = 95
+	// apronHeight lifts a roundabout's carriageway just clear of the pavement
+	// slabs it has to cover.
+	apronHeight  float32 = city.KerbHeight + 0.03
+	cullMarkings float32 = 150
+	cullDashes   float32 = 110
+	cullProps    float32 = 130
+	cullCrossing float32 = 95
 )
 
 // lightingVS is the vertex shader used for the whole scene. It matches
@@ -134,7 +137,7 @@ func (g *Game) drawWorld(cam rl.Camera3D, drawPlayer bool) {
 		rl.BeginShaderMode(g.shader)
 	}
 
-	g.drawGround()
+	g.drawGround(eye)
 	g.drawBlocks(eye)
 	g.drawRoundabouts(eye)
 	g.drawMarkings(eye)
@@ -161,24 +164,54 @@ func (g *Game) drawWorld(cam rl.Camera3D, drawPlayer bool) {
 	rl.EndMode3D()
 }
 
-func (g *Game) drawGround() {
+// cullRange is how far from the eye scenery is still drawn. From the car it is
+// the fixed distance the scene was tuned for; from a plan view it grows with
+// the ground being shown, or the layout the view exists to display would be
+// culled away and leave nothing but the asphalt slab.
+func (g *Game) cullRange() float32 {
+	if g.camMode != CameraHigh {
+		return cullBlocks
+	}
+	return max(cullBlocks, g.overheadHeight*2.2)
+}
+
+// groundEdge is how far past the outermost junction the asphalt reaches, in
+// metres. It is enough to carry the pavements at the city's edge and no more,
+// so the town ends in countryside rather than in a bare grey apron.
+const groundEdge float32 = 24
+
+func (g *Game) drawGround(eye mathx.Vec) {
+	// A grass plane under everything, then an asphalt slab over the built-up
+	// ground. The roads are simply the parts of the slab that the pavements do
+	// not cover.
+	//
+	// Both are cut around the eye rather than around the city, because a city
+	// that grows as it is driven has no settled extent. Its bounding box is
+	// also not the shape of what exists: drive east and then north, and the box
+	// covers a whole quadrant nobody has been to. Paving that box would turn
+	// the quadrant into a featureless grey plain.
+	rl.DrawPlane(vec3(eye.X, -0.06, eye.Z), rl.NewVector2(6000, 6000), colGround)
+
 	c := g.world.City
-	// A large grass plane under everything, then an asphalt slab across the
-	// built-up area. The roads are simply the parts of the slab that the
-	// pavements do not cover.
-	rl.DrawPlane(vec3(0, -0.06, 0), rl.NewVector2(6000, 6000), colGround)
-	w := c.Max.X - c.Min.X + 260
-	d := c.Max.Z - c.Min.Z + 260
-	cx := (c.Max.X + c.Min.X) / 2
-	cz := (c.Max.Z + c.Min.Z) / 2
-	rl.DrawPlane(vec3(cx, -0.02, cz), rl.NewVector2(w, d), colAsphalt)
+	// Never reach beyond the radius the city is kept built to, or the slab
+	// would run out over ground that has not been generated yet.
+	r := min(g.cullRange()+groundEdge, sim.GrowRadius)
+	loX := max(eye.X-r, c.Min.X-groundEdge)
+	loZ := max(eye.Z-r, c.Min.Z-groundEdge)
+	hiX := min(eye.X+r, c.Max.X+groundEdge)
+	hiZ := min(eye.Z+r, c.Max.Z+groundEdge)
+	if hiX <= loX || hiZ <= loZ {
+		return
+	}
+	rl.DrawPlane(vec3((loX+hiX)/2, -0.02, (loZ+hiZ)/2),
+		rl.NewVector2(hiX-loX, hiZ-loZ), colAsphalt)
 }
 
 func (g *Game) drawBlocks(eye mathx.Vec) {
 	for _, b := range g.world.City.Blocks {
 		cx := (b.Min.X + b.Max.X) / 2
 		cz := (b.Min.Z + b.Max.Z) / 2
-		if mathx.V(cx, cz).DistTo(eye) > cullBlocks {
+		if mathx.V(cx, cz).DistTo(eye) > g.cullRange() {
 			continue
 		}
 		w := b.Max.X - b.Min.X
@@ -194,27 +227,35 @@ func (g *Game) drawBlocks(eye mathx.Vec) {
 }
 
 func (g *Game) drawRoundabouts(eye mathx.Vec) {
-	// Paints the central island and its kerb. The circulating
-	// carriageway itself needs nothing: the asphalt is already there, and the
-	// pavements simply do not cover it.
+	// Paves the junction and puts the island in the middle of it.
+	//
+	// The block layout insets itself by the junction radius, so the pavement
+	// already clears the carriageway — this is what makes the junction read as
+	// a circle of asphalt rather than a square gap between four blocks.
 	for _, n := range g.world.City.Roundabouts() {
-		if n.Pos.DistTo(eye) > cullBlocks {
+		if n.Pos.DistTo(eye) > g.cullRange() {
 			continue
 		}
-		island := n.RingRadius() - city.LaneWidth*1.6
+		ring := n.RingRadius()
+		x, z := n.Pos.X, n.Pos.Z
+
+		apron := n.Radius
+		rl.DrawCylinderEx(vec3(x, 0, z), vec3(x, apronHeight, z),
+			apron, apron, 36, colAsphalt)
+
+		// The island fills the circle inside the circulating lane, so the
+		// roundabout reads as one rather than as a bollard in a car park.
+		island := ring - city.LaneWidth
 		if island < 2 {
 			continue
 		}
-		base := vec3(n.Pos.X, 0, n.Pos.Z)
-		// A kerbed island with a planted top, as most of them are.
-		rl.DrawCylinderEx(base, vec3(n.Pos.X, city.KerbHeight, n.Pos.Z),
-			island, island, 24, colKerb)
-		rl.DrawCylinderEx(vec3(n.Pos.X, city.KerbHeight, n.Pos.Z),
-			vec3(n.Pos.X, city.KerbHeight+0.02, n.Pos.Z),
-			island-0.6, island-0.6, 24, colPark)
+		top := apronHeight + city.KerbHeight
+		rl.DrawCylinderEx(vec3(x, apronHeight, z), vec3(x, top, z),
+			island, island, 28, colKerb)
+		rl.DrawCylinderEx(vec3(x, top, z), vec3(x, top+0.02, z),
+			island-0.6, island-0.6, 28, colPark)
 		// A low mound so it reads as an island from the driver's seat.
-		rl.DrawCylinderEx(vec3(n.Pos.X, city.KerbHeight, n.Pos.Z),
-			vec3(n.Pos.X, city.KerbHeight+1.1, n.Pos.Z),
+		rl.DrawCylinderEx(vec3(x, top, z), vec3(x, top+1.1, z),
 			island*0.55, island*0.2, 16, colPark)
 	}
 }
@@ -331,7 +372,7 @@ func drawStripe(p mathx.Vec, axis int, length, width float32, col rl.Color) {
 
 func (g *Game) drawBuildings(eye mathx.Vec) {
 	for _, b := range g.world.City.Buildings {
-		if b.Center.DistTo(eye) > cullBuildings {
+		if b.Center.DistTo(eye) > g.cullRange() {
 			continue
 		}
 		shade := buildingShades[int(b.Shade)%len(buildingShades)]

@@ -98,18 +98,23 @@ func TestRedAndAmberStillStopsTraffic(t *testing.T) {
 }
 
 func TestTrafficKeepsToItsLane(t *testing.T) {
+	// Measured against the lane the car is actually on, not the nearest one.
+	// A car circulating a roundabout is closest to an approach lane it is
+	// nowhere near driving on, and judging it by that would call correct
+	// driving a drift.
 	w := world(t)
 	step(w, sim.Controls{}, 12)
 	for _, a := range w.Agents {
 		if a.InJunction() {
 			continue
 		}
-		p := w.City.Project(a.V.Pos)
-		if !p.Valid {
+		l := a.Lane()
+		if l == nil {
 			continue
 		}
-		if p.Dist > w.City.RoadHalfWidth(p.Lane)+1 {
-			t.Errorf("agent %d drifted %.1fm from any lane centreline", a.ID, p.Dist)
+		along := mathx.Clamp(a.V.Pos.Sub(l.A).Dot(l.Fwd), 0, l.Length)
+		if d := l.A.Add(l.Fwd.Mul(along)).DistTo(a.V.Pos); d > w.City.RoadHalfWidth(l)+1 {
+			t.Errorf("agent %d drifted %.1fm from its own lane centreline", a.ID, d)
 		}
 	}
 }
@@ -173,12 +178,19 @@ func TestResetClearsTheScore(t *testing.T) {
 }
 
 func TestCarsDoNotOverlap(t *testing.T) {
+	// Touching is allowed: cars queue bumper to bumper, and the separation
+	// solver settles them at exactly zero depth rather than pushing them
+	// apart forever. What must not happen is one car sitting inside another,
+	// so this bounds the depth rather than forbidding contact. Measured
+	// across eighty seeds, the worst case is 0.000 m.
+	const tolerance = 0.05 // metres
+
 	w := world(t)
 	step(w, sim.Controls{}, 10)
 	for i, a := range w.Agents {
 		for _, b := range w.Agents[i+1:] {
-			if a.V.Box().Overlaps(b.V.Box()) {
-				t.Errorf("agents %d and %d are interpenetrating", a.ID, b.ID)
+			if _, depth, hit := a.V.Box().Penetration(b.V.Box()); hit && depth > tolerance {
+				t.Errorf("agents %d and %d are interpenetrating by %.3f m", a.ID, b.ID, depth)
 			}
 		}
 	}
@@ -221,3 +233,40 @@ func TestGiveWayIsTheCommonControl(t *testing.T) {
 type subscriber func(sim.Infraction)
 
 func (f subscriber) OnEvent(in sim.Infraction) { f(in) }
+
+// TestTheWorldExtendsAsYouDrive is the point of growing the city: nobody
+// should ever reach the end of it.
+func TestTheWorldExtendsAsYouDrive(t *testing.T) {
+	w := sim.NewWorld(sim.Config{Seed: 7, Traffic: 40, Police: 3})
+	before := len(w.City.Lanes)
+
+	// Five simulated minutes of driving badly, which covers ground.
+	step(w, sim.Controls{}, 0) // settle
+	for range 60 * 60 * 5 {
+		w.Update(sim.RecklessControls(w), 1.0/60)
+	}
+
+	if len(w.City.Lanes) <= before {
+		t.Errorf("lanes = %d, was %d; the world never extended", len(w.City.Lanes), before)
+	}
+	// Wherever the car ended up, it is somewhere with roads.
+	if p := w.City.Project(w.Player.Pos); !p.Valid {
+		t.Errorf("the car reached %v, which has no road near it", w.Player.Pos)
+	}
+}
+
+// TestGrowingCostsNothingWhereTheWorldExists guards the frame budget: standing
+// still must not pay for growth over and over.
+func TestGrowingCostsNothingWhereTheWorldExists(t *testing.T) {
+	w := sim.NewWorld(sim.Config{Seed: 7, Traffic: 0, Police: 0})
+	w.Update(sim.Controls{}, 1.0/60)
+	lanes := len(w.City.Lanes)
+
+	allocs := testing.AllocsPerRun(20, func() {
+		w.Update(sim.Controls{}, 1.0/60)
+	})
+	if len(w.City.Lanes) != lanes {
+		t.Errorf("standing still grew the world from %d lanes to %d", lanes, len(w.City.Lanes))
+	}
+	t.Logf("a stationary frame allocates %.0f times", allocs)
+}

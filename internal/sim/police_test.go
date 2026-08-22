@@ -252,3 +252,87 @@ func nearestPolice(w *sim.World) float32 {
 	}
 	return best
 }
+
+// offend reports n collisions with nobody around to see them, which is the
+// path through the judge that a report has to travel. The judge mutes repeats
+// of a kind for a few seconds, so each one is separated by enough time to
+// register.
+func offend(w *sim.World, n int) {
+	for range n {
+		w.Judge.ReportCollision(w.Player, "test", 9, w.Time)
+		w.Update(sim.Controls{}, 3)
+	}
+}
+
+func TestUnseenOffencesAreEventuallyReported(t *testing.T) {
+	// The bug this covers: with a handful of units wandering a city a
+	// kilometre across, most offences happen with nobody in sight, and before
+	// this the response simply never started however badly the car was driven.
+	// A run with no units at all is the extreme case of that.
+	w := sim.NewWorld(sim.Config{Seed: 3, Traffic: 0, Police: 0})
+
+	offend(w, 1)
+	if w.Wanted.Active() {
+		t.Fatal("one unseen offence summoned the police; it should take persistence")
+	}
+
+	// Keep offending and somebody phones it in.
+	for range 20 {
+		offend(w, 1)
+		if w.Wanted.Active() {
+			break
+		}
+	}
+	if !w.Wanted.Active() {
+		t.Fatalf("a run of unseen offences drew no response (heat %.0f)", w.Wanted.Heat)
+	}
+	if w.Wanted.Reported == 0 {
+		t.Error("the call was not recorded as a report")
+	}
+	if w.Wanted.Witnessed != 0 {
+		t.Errorf("witnessed = %d, want 0: nobody saw any of it", w.Wanted.Witnessed)
+	}
+	if w.Wanted.Heat == 0 {
+		t.Error("a report should raise heat the same way a witness does")
+	}
+}
+
+func TestAReportIsForgottenIfTheDrivingSettles(t *testing.T) {
+	w := sim.NewWorld(sim.Config{Seed: 3, Traffic: 0, Police: 0})
+
+	// Just under what it takes to be called in.
+	offend(w, 2)
+	if w.Wanted.Active() {
+		t.Fatal("two offences should not be enough")
+	}
+
+	// Drive cleanly for a minute.
+	for range 60 * 60 {
+		w.Update(sim.Controls{}, 1.0/60)
+	}
+	// The same two offences again must not tip it over: the first pair has
+	// been forgotten.
+	offend(w, 2)
+	if w.Wanted.Active() {
+		t.Error("offences from a minute ago still counted; a report should fade")
+	}
+}
+
+func TestAWitnessedOffenceActsAtOnce(t *testing.T) {
+	// Being seen is worth more than being reported, and does not wait.
+	w := sim.NewWorld(sim.Config{Seed: 3, Traffic: 0, Police: 4})
+	// Put a unit right beside the player so the offence is witnessed.
+	units := w.Police()
+	if len(units) == 0 {
+		t.Skip("no units were placed in this city")
+	}
+	units[0].V.Place(w.Player.Pos, 0)
+
+	offend(w, 1)
+	if !w.Wanted.Active() {
+		t.Error("an offence committed in front of a unit drew no response")
+	}
+	if w.Wanted.Reported != 0 {
+		t.Error("a witnessed offence should not count as a report")
+	}
+}

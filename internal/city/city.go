@@ -11,7 +11,9 @@ package city
 import (
 	"math/rand/v2"
 
-	"github.com/danielriddell21/crucible/rng"
+	"github.com/danielriddell21/crucible/geom"
+	"github.com/danielriddell21/crucible/spatial"
+	"github.com/danielriddell21/crucible/worldgen"
 
 	"github.com/danielriddell21/autobahn/internal/mathx"
 )
@@ -121,6 +123,14 @@ type Node struct {
 	Roundabout bool
 	ringRadius float32
 	ringEntry  map[int]int // road ID to the ring lane it joins
+
+	// How far the junction has got. settled means its shape is final; wired,
+	// that its roads are built, its lanes joined up and its signs standing;
+	// filled, that the block reaching away from it carries its buildings. See
+	// grow.go.
+	settled bool
+	wired   bool
+	filled  bool
 }
 
 // Degree returns the number of roads meeting at the node.
@@ -233,8 +243,19 @@ type City struct {
 	Props     []Prop
 	Min, Max  mathx.Vec
 
-	grid     map[[2]int][]int // spatial buckets of lane IDs
-	cellSize float32
+	// lanes indexes lane IDs by position, so Project narrows to a handful of
+	// candidates instead of sweeping every lane in the city.
+	lanes *spatial.Grid[int]
+
+	// The bookkeeping behind growing outward. lat is the street plan the city
+	// is cut from; the rest records how far each part of it has got, so
+	// nothing is ever built twice or revised once built. See grow.go.
+	params Params
+	lat    *worldgen.Lattice
+	roadOf map[int]int // lattice edge ID to road ID
+	// lastCells is the area the previous growth covered, so asking for it again
+	// costs nothing.
+	lastCells geom.Rect
 }
 
 // Params tunes city generation.
@@ -254,67 +275,38 @@ func DefaultParams(seed uint64) Params {
 	}
 }
 
-// Generate builds a city from the given parameters. The same seed always
-// produces the same city.
+// thinShare is the fraction of streets the generator tries to delete. A grid
+// with every link intact reads as graph paper; losing about one local street
+// in fourteen is enough to break that up without making the place hard to
+// navigate.
+const thinShare = 1.0 / 14
+
+// Generate builds a city of the size the parameters ask for. The same seed
+// always produces the same city.
+//
+// It is the growing city underneath, brought up to its full extent in one
+// call: a world that does not need to extend is simply one nobody grows.
 func Generate(p Params) *City {
-	rng := rng.Stream(p.Seed, StreamLayout)
-	c := &City{Seed: p.Seed, cellSize: 40, grid: map[[2]int][]int{}}
-
-	xs := make([]float32, p.Cols)
-	zs := make([]float32, p.Rows)
-	var x float32
-	for i := range p.Cols {
-		xs[i] = x
-		x += p.MinSpan + rng.Float32()*(p.MaxSpan-p.MinSpan)
-	}
-	var z float32
-	for j := range p.Rows {
-		zs[j] = z
-		z += p.MinSpan + rng.Float32()*(p.MaxSpan-p.MinSpan)
-	}
-	// Centre the city on the origin so the camera starts amongst it.
-	cx, cz := xs[p.Cols-1]/2, zs[p.Rows-1]/2
-	for i := range xs {
-		xs[i] -= cx
-	}
-	for j := range zs {
-		zs[j] -= cz
-	}
-
-	ids := make([][]int, p.Cols)
-	for i := range p.Cols {
-		ids[i] = make([]int, p.Rows)
-		for j := range p.Rows {
-			n := &Node{ID: len(c.Nodes), Pos: mathx.V(xs[i], zs[j]), GridI: i, GridJ: j}
-			ids[i][j] = n.ID
-			c.Nodes = append(c.Nodes, n)
-		}
-	}
-
-	for i := range p.Cols {
-		for j := range p.Rows {
-			if i+1 < p.Cols {
-				c.addRoad(ids[i][j], ids[i+1][j], classFor(i, j, 0), 0)
-			}
-			if j+1 < p.Rows {
-				c.addRoad(ids[i][j], ids[i][j+1], classFor(i, j, 1), 1)
-			}
-		}
-	}
-
-	c.removeSomeRoads(rng)
-	c.computeRadii()
-	c.chooseRoundabouts(rng, p.Roundabouts)
-	c.buildLanes()
-	c.assignControls()
-	c.buildConnectors()
-	c.buildRings()
-	c.placeProps(rng)
-	c.buildBlocks(rng, xs, zs)
-	c.clearRoundabouts()
-	c.indexLanes()
-	c.computeBounds()
+	c := NewGrowing(p)
+	// The lattice is centred on the origin, so half the grid lies either side.
+	span := float32(max(p.Cols, p.Rows)) * (p.MinSpan + p.MaxSpan) / 4
+	c.EnsureAround(mathx.V(0, 0), span)
 	return c
+}
+
+// axisOf maps a lattice edge's direction onto the city's own axis numbering:
+// 0 along X, 1 along Z.
+func axisOf(e *worldgen.LatticeEdge) int {
+	if e.Axis == worldgen.AxisX {
+		return 0
+	}
+	return 1
+}
+
+// latticeClass grades an edge before the city proper exists, which is what
+// lets the thinning pass protect the main roads.
+func latticeClass(l *worldgen.Lattice, e *worldgen.LatticeEdge) RoadClass {
+	return classFor(l.Nodes[e.A].Col, l.Nodes[e.A].Row, axisOf(e))
 }
 
 func classFor(i, j, axis int) RoadClass {
@@ -334,7 +326,7 @@ func classFor(i, j, axis int) RoadClass {
 	}
 }
 
-func (c *City) addRoad(a, b int, cls RoadClass, axis int) {
+func (c *City) addRoad(a, b int, cls RoadClass, axis int) *Road {
 	na, nb := c.Nodes[a], c.Nodes[b]
 	d := nb.Pos.Sub(na.Pos)
 	r := &Road{
@@ -345,74 +337,18 @@ func (c *City) addRoad(a, b int, cls RoadClass, axis int) {
 	c.Roads = append(c.Roads, r)
 	na.Roads = append(na.Roads, r.ID)
 	nb.Roads = append(nb.Roads, r.ID)
+	return r
 }
 
-func (c *City) removeSomeRoads(rng *rand.Rand) {
-	// Deleting a few local roads breaks up the regularity of the grid. Both
-	// endpoints must keep at least three connections, so this never creates a
-	// dead end or a degenerate junction.
-	removed := map[int]bool{}
-	target := len(c.Roads) / 14
-	for _, id := range rng.Perm(len(c.Roads)) {
-		if len(removed) >= target {
-			break
-		}
-		r := c.Roads[id]
-		if r.Class != Local {
-			continue
-		}
-		if c.Nodes[r.A].Degree() <= 3 || c.Nodes[r.B].Degree() <= 3 {
-			continue
-		}
-		removed[id] = true
-		c.detach(c.Nodes[r.A], id)
-		c.detach(c.Nodes[r.B], id)
-	}
-	if len(removed) == 0 {
-		return
-	}
+// halfWidthOf is a road class's carriageway half-width. A junction needs it
+// before any road exists, to work out how wide to be.
+func halfWidthOf(cls RoadClass) float32 { return float32(cls.Lanes()) * LaneWidth }
 
-	// Compact the road slice and remap the IDs the nodes hold.
-	remap := make(map[int]int, len(c.Roads))
-	kept := c.Roads[:0]
-	for _, r := range c.Roads {
-		if removed[r.ID] {
-			continue
-		}
-		remap[r.ID] = len(kept)
-		r.ID = len(kept)
-		kept = append(kept, r)
-	}
-	c.Roads = kept
-	for _, n := range c.Nodes {
-		for k, rid := range n.Roads {
-			n.Roads[k] = remap[rid]
-		}
-	}
-}
-
-func (c *City) detach(n *Node, roadID int) {
-	for k, rid := range n.Roads {
-		if rid == roadID {
-			n.Roads = append(n.Roads[:k], n.Roads[k+1:]...)
-			return
-		}
-	}
-}
-
-func (c *City) computeRadii() {
-	for _, n := range c.Nodes {
-		var r float32
-		for _, rid := range n.Roads {
-			r = max(r, c.Roads[rid].HalfWidth)
-		}
-		n.Radius = r
-	}
-}
-
-func (c *City) buildLanes() {
+// buildRoadLanes lays the lanes along one road, trimmed back to the junction
+// at each end. Both junctions must have settled, or the trim would be wrong.
+func (c *City) buildRoadLanes(r *Road) {
 	side := trafficSide()
-	for _, r := range c.Roads {
+	{
 		na, nb := c.Nodes[r.A], c.Nodes[r.B]
 		// Trim each end back by the junction radius so lanes stop at the
 		// intersection boundary.
@@ -437,6 +373,7 @@ func (c *City) buildLanes() {
 			ab.A, ab.B = startA.Add(shift), endB.Add(shift)
 			ab.finish()
 			c.Lanes = append(c.Lanes, ab)
+			c.indexLane(ab)
 			r.LanesAB = append(r.LanesAB, ab.ID)
 
 			ba := &Lane{
@@ -448,6 +385,7 @@ func (c *City) buildLanes() {
 			ba.A, ba.B = endB.Add(shift), startA.Add(shift)
 			ba.finish()
 			c.Lanes = append(c.Lanes, ba)
+			c.indexLane(ba)
 			r.LanesBA = append(r.LanesBA, ba.ID)
 		}
 	}
@@ -460,69 +398,32 @@ func (l *Lane) finish() {
 	l.Heading = l.Fwd.Angle()
 }
 
-func (c *City) assignControls() {
-	c.assignNodeControls()
-	c.assignLaneControls()
-}
-
-func (c *City) assignNodeControls() {
-	for _, n := range c.Nodes {
-		if n.Roundabout {
-			n.Control = ControlGiveWay
-			continue
-		}
-		if n.Degree() < 3 {
-			n.Control = ControlNone
-			continue
-		}
-		hasArterial := false
-		for _, rid := range n.Roads {
-			if c.Roads[rid].Class == Arterial {
-				hasArterial = true
-				break
-			}
-		}
-		switch {
-		case hasArterial:
-			n.Control = ControlSignal
-			n.Signalised = true
-		case n.ID%7 == 0:
-			// A minority of priority junctions are signed STOP rather than
-			// GIVE WAY, which is roughly how they are distributed in reality.
-			n.Control = ControlStop
-		default:
-			n.Control = ControlGiveWay
-		}
+// assignLaneControl decides how one approach is governed. Its junction must
+// have settled, so that what the other approaches are is already known.
+func (c *City) assignLaneControl(l *Lane) {
+	n := c.Nodes[l.ToNode]
+	r := c.Roads[l.Road]
+	l.Group = r.Axis
+	switch n.Control {
+	case ControlSignal:
+		l.Control = ControlSignal
+		return
+	case ControlNone:
+		l.Control = ControlNone
+		return
 	}
-}
-
-func (c *City) assignLaneControls() {
-	for _, l := range c.Lanes {
-		n := c.Nodes[l.ToNode]
-		r := c.Roads[l.Road]
-		l.Group = r.Axis
-		if n.Control == ControlSignal {
-			l.Control = ControlSignal
-			continue
-		}
-		if n.Control == ControlNone {
-			l.Control = ControlNone
-			continue
-		}
-		// At a priority junction only the minor approaches are signed; the
-		// major road runs through. Where every road is the same class, the
-		// approaches along Z give way to those along X.
-		major := Local
-		for _, rid := range n.Roads {
-			major = max(major, c.Roads[rid].Class)
-		}
-		minor := r.Class < major || (r.Class == major && r.Axis == 1 && sameClassJunction(c, n))
-		if minor {
-			l.Control = n.Control
-		} else {
-			l.Control = ControlNone
-		}
+	// At a priority junction only the minor approaches are signed; the major
+	// road runs through. Where every road is the same class, the approaches
+	// along Z give way to those along X.
+	major := Local
+	for _, rid := range n.Roads {
+		major = max(major, c.Roads[rid].Class)
 	}
+	if r.Class < major || (r.Class == major && r.Axis == 1 && sameClassJunction(c, n)) {
+		l.Control = n.Control
+		return
+	}
+	l.Control = ControlNone
 }
 
 func sameClassJunction(c *City, n *Node) bool {
@@ -535,17 +436,13 @@ func sameClassJunction(c *City, n *Node) bool {
 	return true
 }
 
-func (c *City) buildConnectors() {
-	for _, l := range c.Lanes {
-		n := c.Nodes[l.ToNode]
-		if n.Roundabout {
-			continue // wired by buildRing, once the ring lanes exist
-		}
-		l.Succ = c.preferredTurns(l, n)
-		if len(l.Succ) == 0 {
-			// Fall back to any non-U-turn exit so a vehicle never strands.
-			l.Succ = c.anyTurns(l, n)
-		}
+// connectLane works out where one lane may go at its far end. Every road at
+// that junction must exist, or an exit would be missed and never revisited.
+func (c *City) connectLane(l *Lane, n *Node) {
+	l.Succ = c.preferredTurns(l, n)
+	if len(l.Succ) == 0 {
+		// Fall back to any non-U-turn exit so a vehicle never strands.
+		l.Succ = c.anyTurns(l, n)
 	}
 }
 
@@ -722,45 +619,74 @@ func trafficSide() float32 {
 	return 1
 }
 
-func (c *City) placeProps(rng *rand.Rand) {
+// placeNodeProps puts up the signs and lamps belonging to one junction: the
+// signals and priority signs on its approaches, the speed signs just past it,
+// and the lamps along the arterials leaving it.
+//
+// Everything is hung off a junction rather than swept over the whole city, so
+// a road gets its furniture exactly once — when the junction at its A end is
+// wired — however the city was reached.
+func (c *City) placeNodeProps(n *Node) {
 	side := trafficSide()
+	for _, rid := range n.Roads {
+		r := c.Roads[rid]
+		if r.Ring {
+			continue
+		}
+		for _, lid := range c.approachLanes(r, n.ID) {
+			c.placeApproachProp(c.Lanes[lid], r, side)
+		}
+		// The furniture along a road belongs to the junction it starts from,
+		// so it is not put up twice from either end.
+		if r.A == n.ID {
+			c.placeRoadProps(r, side)
+		}
+	}
+}
 
-	// One signal or sign per approach, mounted at the kerb by the stop line.
+// placeApproachProp puts the signal or sign governing one approach at its
+// stop line.
+func (c *City) placeApproachProp(l *Lane, r *Road, side float32) {
+	if l.Index != 0 {
+		return
+	}
 	// The offset is measured from the road centreline rather than from the
 	// lane, so a sign lands just inside the kerb instead of drifting out past
 	// it on a wide road, where it would leave the camera's view on approach.
-	for _, l := range c.Lanes {
-		if l.Index != 0 {
-			continue
-		}
-		r := c.Roads[l.Road]
-		pos := kerbside(l, r, 1.2, side)
-		switch l.Control {
-		case ControlSignal:
-			c.Props = append(c.Props, Prop{
-				Kind: PropTrafficLight, Pos: pos, Heading: l.Heading,
-				Node: l.ToNode, Group: l.Group, Height: 3.4,
-			})
-		case ControlStop:
-			c.Props = append(c.Props, Prop{
-				Kind: PropStopSign, Pos: pos, Heading: l.Heading,
-				Node: l.ToNode, Group: l.Group, Height: 2.2,
-			})
-		case ControlGiveWay:
-			c.Props = append(c.Props, Prop{
-				Kind: PropGiveWaySign, Pos: pos, Heading: l.Heading,
-				Node: l.ToNode, Group: l.Group, Height: 2.2,
-			})
-		}
+	pos := kerbside(l, r, 1.2, side)
+	switch l.Control {
+	case ControlSignal:
+		c.Props = append(c.Props, Prop{
+			Kind: PropTrafficLight, Pos: pos, Heading: l.Heading,
+			Node: l.ToNode, Group: l.Group, Height: 3.4,
+		})
+	case ControlStop:
+		c.Props = append(c.Props, Prop{
+			Kind: PropStopSign, Pos: pos, Heading: l.Heading,
+			Node: l.ToNode, Group: l.Group, Height: 2.2,
+		})
+	case ControlGiveWay:
+		c.Props = append(c.Props, Prop{
+			Kind: PropGiveWaySign, Pos: pos, Heading: l.Heading,
+			Node: l.ToNode, Group: l.Group, Height: 2.2,
+		})
 	}
+}
+
+// placeRoadProps puts the speed signs and street lamps along one road.
+func (c *City) placeRoadProps(r *Road, side float32) {
+	na, nb := c.Nodes[r.A], c.Nodes[r.B]
 
 	// Speed limit signs shortly after a junction, so a driver sees the limit
 	// for the road they have just joined.
-	for _, l := range c.Lanes {
-		if l.Index != 0 || l.Length < 30 || rng.Float32() > 0.55 {
+	for i, lid := range append(append([]int{}, r.LanesAB...), r.LanesBA...) {
+		l := c.Lanes[lid]
+		if l.Index != 0 || l.Length < 30 {
 			continue
 		}
-		r := c.Roads[l.Road]
+		if cellValue(c.Seed, speedSignSalt, na.GridI, na.GridJ, i) > speedSignShare {
+			continue
+		}
 		pos := kerbsideAt(l, r, l.A.Add(l.Fwd.Mul(10)), 1.2, side)
 		c.Props = append(c.Props, Prop{
 			Kind: PropSpeedSign, Pos: pos, Heading: l.Heading,
@@ -768,69 +694,57 @@ func (c *City) placeProps(rng *rand.Rand) {
 		})
 	}
 
-	for _, r := range c.Roads {
-		if r.Class != Arterial {
-			continue
-		}
-		na, nb := c.Nodes[r.A], c.Nodes[r.B]
-		for d := na.Radius + 12; d < r.Length-nb.Radius-6; d += 32 {
-			p := na.Pos.Add(r.Dir.Mul(d)).Add(r.Dir.Right().Mul(r.HalfWidth + 1.2))
-			c.Props = append(c.Props, Prop{Kind: PropStreetLamp, Pos: p, Heading: r.Dir.Angle(), Height: 6})
-		}
+	if r.Class != Arterial {
+		return
+	}
+	for d := na.Radius + 12; d < r.Length-nb.Radius-6; d += 32 {
+		p := na.Pos.Add(r.Dir.Mul(d)).Add(r.Dir.Right().Mul(r.HalfWidth + 1.2))
+		c.Props = append(c.Props, Prop{Kind: PropStreetLamp, Pos: p, Heading: r.Dir.Angle(), Height: 6})
 	}
 }
 
-func (c *City) buildBlocks(rng *rand.Rand, xs, zs []float32) {
-	// A block is inset from its grid lines by the widest road half-width on
-	// each side, so buildings never overlap a carriageway.
-	hwCol := make([]float32, len(xs))
-	hwRow := make([]float32, len(zs))
-	for _, r := range c.Roads {
-		if r.Ring {
-			continue
-		}
-		if r.Axis == 1 {
-			i := c.Nodes[r.A].GridI
-			hwCol[i] = max(hwCol[i], r.HalfWidth)
-		} else {
-			j := c.Nodes[r.A].GridJ
-			hwRow[j] = max(hwRow[j], r.HalfWidth)
-		}
-	}
-	for i := range hwCol {
-		hwCol[i] = max(hwCol[i], LaneWidth)
-	}
-	for j := range hwRow {
-		hwRow[j] = max(hwRow[j], LaneWidth)
+// fillCell lays the block between four junctions: its pavement, and the
+// buildings around its edge.
+//
+// The inset is the widest carriageway on each side, so nothing overlaps a
+// road. A roundabout is wider than the road that made it, which the inset
+// cannot express — the renderer paves over the difference.
+func (c *City) fillCell(col, row int, corners [4]*Node) {
+	lo := corners[0].Pos
+	hi := corners[3].Pos
+	insetX := max(corners[0].Radius, corners[2].Radius, LaneWidth)
+	insetZ := max(corners[0].Radius, corners[1].Radius, LaneWidth)
+	farX := max(corners[1].Radius, corners[3].Radius, LaneWidth)
+	farZ := max(corners[2].Radius, corners[3].Radius, LaneWidth)
+
+	lo = mathx.V(lo.X+insetX, lo.Z+insetZ)
+	hi = mathx.V(hi.X-farX, hi.Z-farZ)
+	if hi.X-lo.X < 14 || hi.Z-lo.Z < 14 {
+		return
 	}
 
-	var maxDist float32 = 1
-	for _, n := range c.Nodes {
-		maxDist = max(maxDist, n.Pos.Len())
+	park := cellChance(c.Seed, parkSalt, col, row) < parkShare
+	c.Blocks = append(c.Blocks, Block{Min: lo, Max: hi, Park: park})
+	if park {
+		return
 	}
-
-	for i := 0; i+1 < len(xs); i++ {
-		for j := 0; j+1 < len(zs); j++ {
-			lo := mathx.V(xs[i]+hwCol[i], zs[j]+hwRow[j])
-			hi := mathx.V(xs[i+1]-hwCol[i+1], zs[j+1]-hwRow[j+1])
-			if hi.X-lo.X < 14 || hi.Z-lo.Z < 14 {
-				continue
-			}
-			park := rng.Float32() < 0.10
-			c.Blocks = append(c.Blocks, Block{Min: lo, Max: hi, Park: park})
-			if park {
-				continue
-			}
-			centre := mathx.V((lo.X+hi.X)/2, (lo.Z+hi.Z)/2)
-			c.fillBlock(rng, lo, hi, 1-mathx.Clamp(centre.Len()/maxDist, 0, 1))
-		}
-	}
+	// downtown runs 0 at the edge of a district to 1 at its middle, and drives
+	// how tall the towers get. It is a function of where the block is rather
+	// than of how far it happens to be from the furthest node generated so
+	// far, which in a growing city would change as the world extended.
+	centre := mathx.V((lo.X+hi.X)/2, (lo.Z+hi.Z)/2)
+	downtown := 1 - mathx.Clamp(centre.Len()/downtownFalloff, 0, 1)
+	c.fillBlock(col, row, lo, hi, downtown)
 }
 
-func (c *City) fillBlock(rng *rand.Rand, lo, hi mathx.Vec, downtown float32) {
-	// Buildings line the perimeter of the block facing the street, leaving the
-	// interior empty. downtown runs 0 at the edge of the city to 1 at its
-	// centre, and drives how tall the towers get.
+// fillBlock lines the perimeter of a block with buildings facing the street,
+// leaving the interior empty. downtown runs 0 at the edge of a district to 1
+// at its middle, and drives how tall the towers get.
+//
+// Every draw comes from the block's own cell rather than from a running
+// stream, so a block put up an hour into a drive is the one that would have
+// been there from the start.
+func (c *City) fillBlock(col, row int, lo, hi mathx.Vec, downtown float32) {
 	x0, z0 := lo.X+PavementWidth, lo.Z+PavementWidth
 	x1, z1 := hi.X-PavementWidth, hi.Z-PavementWidth
 	if x1-x0 < 10 || z1-z0 < 10 {
@@ -841,22 +755,29 @@ func (c *City) fillBlock(rng *rand.Rand, lo, hi mathx.Vec, downtown float32) {
 		depth = min((x1-x0)/2, (z1-z0)/2)
 	}
 
+	// draw hands out this block's numbers, one per call, so the sequence is
+	// fixed by the cell rather than by how many blocks came before it.
+	n := 0
+	draw := func() float32 {
+		n++
+		return cellValue(c.Seed, buildingSalt, col, row, n)
+	}
 	add := func(cx, cz, w, d float32) {
 		if w < 5 || d < 5 {
 			return
 		}
-		h := 7 + rng.Float32()*10 + downtown*downtown*(18+rng.Float32()*58)
+		h := 7 + draw()*10 + downtown*downtown*(18+draw()*58)
 		c.Buildings = append(c.Buildings, Building{
 			Center: mathx.V(cx, cz), W: w, D: d, Height: h,
-			Shade:  uint8(rng.IntN(6)),
+			Shade:  uint8(draw() * 6),
 			Floors: max(1, int(h/3.2)),
 		})
 	}
 
 	for _, zc := range [2]float32{z0 + depth/2, z1 - depth/2} {
 		for x := x0; x < x1-4; {
-			w := min(11+rng.Float32()*15, x1-x)
-			if rng.Float32() >= 0.12 { // occasional gap: an alley or courtyard
+			w := min(11+draw()*15, x1-x)
+			if draw() >= alleyShare { // occasional gap: an alley or courtyard
 				add(x+w/2, zc, w-1.2, depth)
 			}
 			x += w
@@ -865,29 +786,34 @@ func (c *City) fillBlock(rng *rand.Rand, lo, hi mathx.Vec, downtown float32) {
 	// The side strips skip the corners already covered above.
 	for _, xc := range [2]float32{x0 + depth/2, x1 - depth/2} {
 		for z := z0 + depth; z < z1-depth-4; {
-			d := min(11+rng.Float32()*15, z1-depth-z)
-			if rng.Float32() >= 0.12 {
+			d := min(11+draw()*15, z1-depth-z)
+			if draw() >= alleyShare {
 				add(xc, z+d/2, depth, d-1.2)
 			}
 			z += d
 		}
 	}
+	c.clearRoundabouts(col, row)
 }
 
-func (c *City) clearRoundabouts() {
-	// A roundabout is far wider than an ordinary junction, so a block laid out
-	// against the road widths alone can overlap one. Drop anything standing in
-	// the carriageway.
+// clearRoundabouts drops any building of the cell just filled that stands in a
+// roundabout's carriageway. A roundabout is far wider than the road that made
+// it, and the block inset is worked out from road widths alone, so a block
+// against one can overlap it.
+func (c *City) clearRoundabouts(col, row int) {
+	corners, ok := c.cellCorners(col, row)
+	if !ok {
+		return
+	}
 	kept := c.Buildings[:0]
 	for _, b := range c.Buildings {
 		clash := false
-		for _, n := range c.Nodes {
+		for _, n := range corners {
 			if !n.Roundabout {
 				continue
 			}
 			if b.Center.DistTo(n.Pos) < n.ringRadius+6+max(b.W, b.D)/2 {
 				clash = true
-				break
 			}
 		}
 		if !clash {
@@ -908,29 +834,25 @@ func (c *City) Roundabouts() []*Node {
 	return out
 }
 
-func (c *City) indexLanes() {
-	for _, l := range c.Lanes {
-		steps := int(l.Length/c.cellSize) + 1
-		for i := 0; i <= steps; i++ {
-			p := l.Point(float32(i) / float32(steps) * l.Length)
-			key := [2]int{int(p.X / c.cellSize), int(p.Z / c.cellSize)}
-			if b := c.grid[key]; len(b) == 0 || b[len(b)-1] != l.ID {
-				c.grid[key] = append(b, l.ID)
-			}
-		}
-	}
+// laneCellSize is the spatial index's cell size in metres. It is a little
+// under the shortest block, so a lookup lands on a cell holding the lanes
+// around it rather than half the district.
+const laneCellSize = 40
+
+// ground converts a world position to the plane crucible's spatial grid works
+// in. The simulation carries float32 on XZ; the engine is float64 on XY.
+func ground(p mathx.Vec) geom.Vec2 {
+	return geom.Vec2{X: float64(p.X), Y: float64(p.Z)}
 }
 
-func (c *City) computeBounds() {
-	if len(c.Nodes) == 0 {
-		return
-	}
-	c.Min, c.Max = c.Nodes[0].Pos, c.Nodes[0].Pos
-	for _, n := range c.Nodes {
-		c.Min.X = min(c.Min.X, n.Pos.X)
-		c.Min.Z = min(c.Min.Z, n.Pos.Z)
-		c.Max.X = max(c.Max.X, n.Pos.X)
-		c.Max.Z = max(c.Max.Z, n.Pos.Z)
+// indexLane files one lane in the spatial index. A lane is a line, not a
+// point, so it is walked and filed in every cell it crosses; InsertOnce
+// collapses the steps that land in the same one.
+func (c *City) indexLane(l *Lane) {
+	steps := int(l.Length/laneCellSize) + 1
+	for i := 0; i <= steps; i++ {
+		p := l.Point(float32(i) / float32(steps) * l.Length)
+		spatial.InsertOnce(c.lanes, ground(p), l.ID)
 	}
 }
 
@@ -947,22 +869,17 @@ type LaneProjection struct {
 // LaneProjection with Valid false is returned when no lane is close enough.
 func (c *City) Project(p mathx.Vec) LaneProjection {
 	best := LaneProjection{Dist: 1e9}
-	ci, cj := int(p.X/c.cellSize), int(p.Z/c.cellSize)
-	for di := -1; di <= 1; di++ {
-		for dj := -1; dj <= 1; dj++ {
-			for _, id := range c.grid[[2]int{ci + di, cj + dj}] {
-				l := c.Lanes[id]
-				s := mathx.Clamp(p.Sub(l.A).Dot(l.Fwd), 0, l.Length)
-				on := l.A.Add(l.Fwd.Mul(s))
-				if d := on.DistTo(p); d < best.Dist {
-					best = LaneProjection{
-						Lane: l, S: s, Dist: d, Valid: true,
-						Lateral: p.Sub(on).Dot(l.Fwd.Right()),
-					}
-				}
+	c.lanes.Near(ground(p), laneCellSize, func(id int) {
+		l := c.Lanes[id]
+		s := mathx.Clamp(p.Sub(l.A).Dot(l.Fwd), 0, l.Length)
+		on := l.A.Add(l.Fwd.Mul(s))
+		if d := on.DistTo(p); d < best.Dist {
+			best = LaneProjection{
+				Lane: l, S: s, Dist: d, Valid: true,
+				Lateral: p.Sub(on).Dot(l.Fwd.Right()),
 			}
 		}
-	}
+	})
 	return best
 }
 

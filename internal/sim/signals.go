@@ -1,8 +1,6 @@
 package sim
 
 import (
-	"math/rand/v2"
-
 	"github.com/danielriddell21/autobahn/internal/city"
 )
 
@@ -47,19 +45,33 @@ const (
 // junction runs the same fixed cycle with its own offset, so the city does not
 // pulse in unison.
 type Signals struct {
-	offsets map[int]float32
-	clock   float32
+	city  *city.City
+	seed  uint64
+	clock float32
 }
 
-// NewSignals builds the controller for every signalised node in c.
-func NewSignals(c *city.City, rng *rand.Rand) *Signals {
-	s := &Signals{offsets: make(map[int]float32)}
-	for _, n := range c.Nodes {
-		if n.Signalised {
-			s.offsets[n.ID] = rng.Float32() * fullCycle
-		}
+// NewSignals builds the controller for a city's signalised junctions. It holds
+// no per-junction state, so junctions that appear later are driven the moment
+// they exist.
+func NewSignals(c *city.City, seed uint64) *Signals {
+	return &Signals{city: c, seed: seed}
+}
+
+// signalSalt keeps a junction's place in the cycle from correlating with the
+// other decisions taken about it.
+const signalSalt = 0x7f4a
+
+// offsetOf returns how far through its cycle a junction's signals are.
+//
+// It is worked out from where the junction is rather than drawn once at
+// startup, because in a city that grows there is no startup: a junction
+// reached an hour into a drive has to be showing what it would have been
+// showing all along.
+func (s *Signals) offsetOf(node int) float32 {
+	if node < 0 || node >= len(s.city.Nodes) {
+		return 0
 	}
-	return s
+	return s.city.Nodes[node].Chance(s.seed, signalSalt) * fullCycle
 }
 
 // Update advances the signal clock by dt seconds.
@@ -68,11 +80,10 @@ func (s *Signals) Update(dt float32) { s.clock += dt }
 // State returns the aspect shown to the given phase group at a node. Group 0
 // is the X-axis approaches and group 1 the Z-axis approaches.
 func (s *Signals) State(node, group int) SignalState {
-	offset, ok := s.offsets[node]
-	if !ok {
+	if node < 0 || node >= len(s.city.Nodes) || !s.city.Nodes[node].Signalised {
 		return SignalGreen // unsignalised junctions never show an aspect
 	}
-	t := mod(s.clock+offset, fullCycle)
+	t := mod(s.clock+s.offsetOf(node), fullCycle)
 	// The first half of the cycle serves group 0, the second half group 1.
 	serving := 0
 	if t >= halfCycle {

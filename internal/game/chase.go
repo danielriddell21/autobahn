@@ -6,7 +6,6 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 
 	"github.com/danielriddell21/autobahn/internal/mathx"
-	"github.com/danielriddell21/autobahn/internal/netplay"
 	"github.com/danielriddell21/autobahn/internal/sim"
 )
 
@@ -40,25 +39,25 @@ func (g *Game) driveChase(runner sim.Controls, dt float32) {
 	// else is watching. The police car is driven by whoever is here: the person
 	// at this keyboard, or the one who joined over the network.
 	switch {
-	case g.host == nil && g.chaser != nil:
+	case !g.hosting() && g.chaser != nil:
 		g.chaser.Manual = true
 		g.chaser.SetInput(g.chaserControls())
-	case g.host != nil:
+	case g.hosting():
 		g.applyRemote()
 	}
 
-	if !g.paused && !g.chase.Over {
+	if !g.chase.Over {
 		g.world.Update(runner, dt)
 		g.chase.Elapsed += dt
 		g.judgeChase()
 	}
-	if g.host != nil {
+	if g.hosting() {
 		g.publish()
 	}
 }
 
 func (g *Game) applyRemote() {
-	if in, joined := g.host.Input(); joined && g.chaser != nil {
+	if in, joined := g.net.Input(); joined && g.chaser != nil {
 		g.chaser.SetInput(sim.Controls{
 			Throttle: in.Throttle, Brake: in.Brake, Steer: in.Steer,
 			Handbrake: in.Handbrake, Reverse: in.Reverse,
@@ -84,15 +83,15 @@ func (g *Game) publish() {
 	// Snapshots go out on their own clock, well below the frame rate: the
 	// chase does not need sixty updates a second to read correctly.
 	g.sinceSnapshot += g.lastDT
-	if g.sinceSnapshot < 1.0/netplay.SnapshotRate {
+	if g.sinceSnapshot < 1.0/SnapshotRate {
 		return
 	}
 	g.sinceSnapshot = 0
 
-	s := netplay.Snapshot{
+	s := Snapshot{
 		Clock:  g.world.Time,
 		Runner: poseOf(g.world.Player, false),
-		Agents: make([]netplay.Pose, 0, len(g.world.Agents)),
+		Agents: make([]Pose, 0, len(g.world.Agents)),
 		Chaser: -1,
 
 		WantedLevel: g.world.Wanted.Level,
@@ -107,10 +106,10 @@ func (g *Game) publish() {
 			s.Chaser = i
 		}
 	}
-	g.host.Send(s)
+	g.net.Send(s)
 }
 
-func ease(v *sim.Vehicle, p netplay.Pose, dt float32) {
+func ease(v *sim.Vehicle, p Pose, dt float32) {
 	// Snapshots arrive twenty times a second and frames are drawn sixty, so
 	// snapping to each one makes every remote car judder. Sliding toward the
 	// host's pose instead costs a few centimetres of accuracy and looks like
@@ -127,19 +126,19 @@ func ease(v *sim.Vehicle, p netplay.Pose, dt float32) {
 		mathx.Approach(v.Pos.Z, target.Z, rate, dt),
 	)
 	// Yaw is eased the short way round, so a car crossing north does not spin.
-	yaw := v.Yaw + mathx.WrapPi(p.Yaw-v.Yaw)*mathx.Clamp(rate*dt, 0, 1)
+	yaw := v.Yaw + mathx.AngleDiff(p.Yaw, v.Yaw)*mathx.Clamp(rate*dt, 0, 1)
 	sim.ApplyPose(v, eased.X, eased.Z, yaw, p.Speed)
 }
 
-func poseOf(v *sim.Vehicle, pursuing bool) netplay.Pose {
+func poseOf(v *sim.Vehicle, pursuing bool) Pose {
 	var flags uint8
 	if pursuing {
-		flags |= netplay.FlagPursuing
+		flags |= FlagPursuing
 	}
 	if v.Brake > 0.05 {
-		flags |= netplay.FlagBraking
+		flags |= FlagBraking
 	}
-	return netplay.Pose{
+	return Pose{
 		X: v.Pos.X, Z: v.Pos.Z, Yaw: v.Yaw, Speed: v.Speed(), Flags: flags,
 	}
 }
@@ -148,17 +147,20 @@ func (g *Game) joinChase(dt float32) {
 	// Sends this player's controls and adopts the world the host sends
 	// back. Nothing is simulated here beyond the cameras.
 	in := g.chaserControls()
-	g.client.Send(netplay.Input{
+	g.net.SendInput(Input{
 		Throttle: in.Throttle, Brake: in.Brake, Steer: in.Steer,
 		Handbrake: in.Handbrake, Reverse: in.Reverse,
 	})
 
-	if s, ok := g.client.Snapshot(); ok {
+	if s, ok := g.net.Snapshot(); ok {
 		g.adopt(s, dt)
 	}
+	// Nothing here runs the simulation, so this is the only thing that extends
+	// the city as the chase drives off the ground it started on.
+	g.world.EnsureBuilt(g.chaseSubject().Pos)
 }
 
-func (g *Game) adopt(s netplay.Snapshot, dt float32) {
+func (g *Game) adopt(s Snapshot, dt float32) {
 	// The city is identical at both ends because it came from the same seed, so
 	// only the moving parts are taken from the host.
 	g.world.Signals.SetClock(s.Clock)
@@ -171,7 +173,7 @@ func (g *Game) adopt(s netplay.Snapshot, dt float32) {
 		}
 		a := g.world.Agents[i]
 		ease(a.V, p, dt)
-		a.SetPursuing(p.Flags&netplay.FlagPursuing != 0)
+		a.SetPursuing(p.Flags&FlagPursuing != 0)
 	}
 	if s.Chaser >= 0 && s.Chaser < len(g.world.Agents) {
 		g.chaser = g.world.Agents[s.Chaser]
@@ -211,7 +213,7 @@ func (g *Game) chaseSubject() *sim.Vehicle {
 	// when hosting, the police unit when joined.
 	// Whoever is at this keyboard is in the police car, unless they are the
 	// runner at the host of a two-player game.
-	if g.chaser != nil && (g.client != nil || g.host == nil) {
+	if g.chaser != nil && !g.hosting() {
 		return g.chaser.V
 	}
 	return g.world.Player
@@ -229,7 +231,7 @@ func (g *Game) drawChaseHUD() {
 	panel(x, 8, w, 58)
 
 	role, col := "RUNNER", hudAccent
-	if g.client != nil || g.host == nil {
+	if !g.hosting() {
 		role, col = "POLICE", hudBad
 	}
 	rl.DrawText(role, x+16, 14, 14, col)
@@ -253,23 +255,18 @@ func (g *Game) drawChaseHUD() {
 }
 
 func (g *Game) drawLinkState() {
-	var text string
-	var col rl.Color
-
-	switch {
-	case g.host != nil && !g.host.Joined():
-		text, col = "waiting for a player on "+g.host.Addr(), hudWarn
-	case g.host != nil:
-		text, col = "player connected", hudGood
-	case g.client != nil && g.client.Err() != nil:
-		text, col = "connection lost: "+g.client.Err().Error(), hudBad
-	case g.client != nil:
-		if _, ok := g.client.Snapshot(); !ok {
-			text, col = "waiting for the host", hudWarn
-		}
-	}
-	if text == "" {
+	if !g.net.Online() {
 		return
+	}
+	// crucible's session already words this for a player to read; all that is
+	// left is deciding how alarming it looks.
+	text := g.net.Status()
+	col := hudWarn
+	switch {
+	case g.net.Err() != nil:
+		col = hudBad
+	case g.net.Peered():
+		col = hudGood
 	}
 	w := rl.MeasureText(text, 12) + 28
 	x := int32(g.opts.Width)/2 - w/2

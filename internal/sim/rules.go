@@ -190,7 +190,7 @@ func (j *Judge) Update(v *Vehicle, sig *Signals, now, dt float32) {
 	}
 	j.lane = proj.Lane
 	j.limit = proj.Lane.SpeedLimit
-	j.onRoad = proj.Dist <= j.city.RoadHalfWidth(proj.Lane)+0.4
+	j.onRoad = proj.Dist <= j.city.RoadHalfWidth(proj.Lane)+0.4 || onRoundabout(j.city, v.Pos)
 	j.signal, j.hasSignal = SignalGreen, false
 	if proj.Lane.Control == city.ControlSignal {
 		j.signal, j.hasSignal = sig.LaneState(proj.Lane), true
@@ -234,6 +234,23 @@ func (j *Judge) checkDirection(v *Vehicle, proj city.LaneProjection, speed, now,
 		return
 	}
 	j.wrongTimer = 0
+}
+
+// onRoundabout reports whether a position is on a roundabout's circulating
+// carriageway.
+//
+// The judge finds the road under a car by taking the nearest lane centreline,
+// which is the wrong answer on a roundabout: a car going round it is nearer to
+// an approach lane it is nowhere near driving on, so correct driving reads as
+// several metres off the carriageway. Circulating traffic is judged by the
+// junction it is in instead.
+func onRoundabout(c *city.City, p mathx.Vec) bool {
+	for _, n := range c.Roundabouts() {
+		if d := n.Pos.DistTo(p); d < n.RingRadius()+city.LaneWidth {
+			return true
+		}
+	}
+	return false
 }
 
 func (j *Judge) checkOffRoad(v *Vehicle, proj city.LaneProjection, speed, now, dt float32) {
