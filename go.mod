@@ -4,7 +4,7 @@ go 1.26.4
 
 require (
 	github.com/danielriddell21/crucible v0.15.3-0.20260811181752-4c0faaaa2085
-	github.com/gen2brain/raylib-go/raylib v0.60.0
+	github.com/gen2brain/raylib-go/raylib v0.60.1
 )
 
 require (
