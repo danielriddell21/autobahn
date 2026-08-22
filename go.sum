@@ -2,8 +2,8 @@ github.com/danielriddell21/crucible v0.15.3-0.20260811181752-4c0faaaa2085 h1:RTN
 github.com/danielriddell21/crucible v0.15.3-0.20260811181752-4c0faaaa2085/go.mod h1:zkFMgFhLCROS3nlwxK5exTI1KulRc+AuUj8ZY4SGkj4=
 github.com/ebitengine/purego v0.10.0 h1:QIw4xfpWT6GWTzaW5XEKy3HXoqrJGx1ijYHzTF0/ISU=
 github.com/ebitengine/purego v0.10.0/go.mod h1:iIjxzd6CiRiOG0UyXP+V1+jWqUXVjPKLAI0mRfJZTmQ=
-github.com/gen2brain/raylib-go/raylib v0.60.0 h1:KsP7W3EMkmb9zztivdgbh1bXR78pEuqP6jeUR8GCbEA=
-github.com/gen2brain/raylib-go/raylib v0.60.0/go.mod h1:puAMU7Zcx6VJ6pcZSSs3gGFPyFvJuTwQlfm4KzeoXy8=
+github.com/gen2brain/raylib-go/raylib v0.60.1 h1:bZ9fRMOeIasK5Z9fNL8lnNVbCv9LevGIN//+gdvP+Zc=
+github.com/gen2brain/raylib-go/raylib v0.60.1/go.mod h1:puAMU7Zcx6VJ6pcZSSs3gGFPyFvJuTwQlfm4KzeoXy8=
 github.com/jupiterrider/ffi v0.7.0 h1:RKsl6Ascal+3kyAqR5Qcbp83LceQMLc1VZbPfHWoNzs=
 github.com/jupiterrider/ffi v0.7.0/go.mod h1:9dauhpOfNqrqk28fxuu0kkdeFtT9Qr4vbfigiuIXN7c=
 github.com/spf13/pflag v1.0.10 h1:4EBh2KAYBwaONj6b2Ye1GiHfwjqyROoF4RwYO+vPwFk=
