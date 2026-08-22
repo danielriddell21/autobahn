@@ -103,77 +103,100 @@ func (p projector) project(w mathx.Vec3) (x, y float32, ok bool) {
 // standing on a stop line breaks that line into fragments — the same occlusion
 // a real detector would have to cope with.
 func Layout(w *sim.World, v View) []Box {
-	p := newProjector(v)
-	eye := v.Position.Ground()
-	fwd := p.fwd.Ground().Norm()
-
-	visible := func(at mathx.Vec, limit float32) bool {
-		rel := at.Sub(eye)
-		return rel.Dot(fwd) > 1.5 && rel.Len() < limit
-	}
-
-	var out []Box
-	add := func(b Box, ok bool) {
-		if ok {
-			out = append(out, b)
-		}
-	}
+	pr := newProjector(v)
+	lo := &layout{p: pr, eye: v.Position.Ground(), fwd: pr.fwd.Ground().Norm()}
 
 	// Lane guidance first, so anything solid paints over it.
+	lo.laneMarkers(w)
+	lo.stopLine(w)
+	lo.props(w)
+	lo.vehicles(w)
+	return lo.out
+}
+
+type layout struct {
+	p        projector
+	eye, fwd mathx.Vec
+	out      []Box
+}
+
+func (lo *layout) visible(at mathx.Vec, limit float32) bool {
+	rel := at.Sub(lo.eye)
+	return rel.Dot(lo.fwd) > 1.5 && rel.Len() < limit
+}
+
+func (lo *layout) add(b Box, ok bool) {
+	if ok {
+		lo.out = append(lo.out, b)
+	}
+}
+
+func (lo *layout) laneMarkers(w *sim.World) {
 	for i, pt := range w.Route.Centreline(4, laneSpacing, int(laneRange/laneSpacing)) {
-		if !visible(pt, laneRange) {
+		if !lo.visible(pt, laneRange) {
 			continue
 		}
 		cl := vision.ClassLaneMarker
 		if i%2 == 1 {
 			cl = vision.ClassLaneMarkerAlt
 		}
-		add(boxOf(p, cl, pt, laneMarkerRise, laneMarkerSize, laneMarkerRise, laneMarkerSize, 0))
+		lo.add(boxOf(lo.p, cl, pt, laneMarkerRise, laneMarkerSize, laneMarkerRise, laneMarkerSize, 0))
 	}
+}
 
-	if at, ctrl, ok := w.Route.StopLine(stopLineRange); ok && ctrl != city.ControlNone && visible(at, stopLineRange) {
-		if l := w.Route.Lane(); l != nil {
-			hw := w.City.RoadHalfWidth(l)
-			add(boxOf(p, vision.ClassStopLine, at, 0.9, hw*0.5, 0.9, 0.3, l.Heading))
-		}
+func (lo *layout) stopLine(w *sim.World) {
+	at, ctrl, ok := w.Route.StopLine(stopLineRange)
+	if !ok || ctrl == city.ControlNone || !lo.visible(at, stopLineRange) {
+		return
 	}
+	l := w.Route.Lane()
+	if l == nil {
+		return
+	}
+	hw := w.City.RoadHalfWidth(l)
+	lo.add(boxOf(lo.p, vision.ClassStopLine, at, 0.9, hw*0.5, 0.9, 0.3, l.Heading))
+}
 
+func (lo *layout) props(w *sim.World) {
 	for _, prop := range w.City.Props {
-		if !visible(prop.Pos, propRange) {
-			continue
-		}
-		// A prop's heading is the direction of the traffic it governs, so the one
-		// meant for this car points the way the car is going.
-		//
-		// Signals are the exception, and are taken from either direction. The
-		// head at your own stop line disappears over the bonnet once you have
-		// pulled up at it, and a driver who could see nothing else would have no
-		// way of knowing when the light changed. Real junctions answer that with
-		// a secondary head across the junction, which is precisely the one
-		// facing the other way — same road, same phase group, same aspect. Signs
-		// have no secondary, so the ones facing away belong to somebody else.
-		facing := mathx.FromAngle(prop.Heading).Dot(fwd)
-		if prop.Kind == city.PropTrafficLight {
-			if mathx.Abs(facing) < 0.25 {
-				continue // a signal across the junction, governing other traffic
-			}
-		} else if facing < 0.25 {
+		if !lo.visible(prop.Pos, propRange) || !lo.propFacesUs(prop) {
 			continue
 		}
 		switch prop.Kind {
 		case city.PropTrafficLight:
-			add(boxOf(p, signalClass(w, prop), prop.Pos, prop.Height-0.55, 0.55, 0.85, 0.3, prop.Heading))
+			lo.add(boxOf(lo.p, signalClass(w, prop), prop.Pos, prop.Height-0.55, 0.55, 0.85, 0.3, prop.Heading))
 		case city.PropStopSign:
-			add(boxOf(p, vision.ClassStopSign, prop.Pos, prop.Height-0.42, 0.5, 0.5, 0.12, prop.Heading))
+			lo.add(boxOf(lo.p, vision.ClassStopSign, prop.Pos, prop.Height-0.42, 0.5, 0.5, 0.12, prop.Heading))
 		case city.PropGiveWaySign:
-			add(boxOf(p, vision.ClassGiveWay, prop.Pos, prop.Height-0.42, 0.5, 0.5, 0.12, prop.Heading))
+			lo.add(boxOf(lo.p, vision.ClassGiveWay, prop.Pos, prop.Height-0.42, 0.5, 0.5, 0.12, prop.Heading))
 		case city.PropSpeedSign:
-			add(boxOf(p, speedClass(prop.Limit), prop.Pos, prop.Height-0.4, 0.45, 0.55, 0.12, prop.Heading))
+			lo.add(boxOf(lo.p, speedClass(prop.Limit), prop.Pos, prop.Height-0.4, 0.45, 0.55, 0.12, prop.Heading))
 		}
 	}
+}
 
+func (lo *layout) propFacesUs(prop city.Prop) bool {
+	// A prop's heading is the direction of the traffic it governs, so the one
+	// meant for this car points the way the car is going.
+	//
+	// Signals are the exception, and are taken from either direction. The
+	// head at your own stop line disappears over the bonnet once you have
+	// pulled up at it, and a driver who could see nothing else would have no
+	// way of knowing when the light changed. Real junctions answer that with
+	// a secondary head across the junction, which is precisely the one
+	// facing the other way — same road, same phase group, same aspect. Signs
+	// have no secondary, so the ones facing away belong to somebody else.
+	facing := mathx.FromAngle(prop.Heading).Dot(lo.fwd)
+	if prop.Kind == city.PropTrafficLight {
+		// A signal across the junction governs other traffic.
+		return mathx.Abs(facing) >= 0.25
+	}
+	return facing >= 0.25
+}
+
+func (lo *layout) vehicles(w *sim.World) {
 	for _, a := range w.Agents {
-		if !visible(a.V.Pos, vehicleRange) {
+		if !lo.visible(a.V.Pos, vehicleRange) {
 			continue
 		}
 		cl := vision.ClassVehicle
@@ -181,9 +204,8 @@ func Layout(w *sim.World, v View) []Box {
 			cl = vision.ClassPolice
 		}
 		s := a.V.Spec
-		add(boxOf(p, cl, a.V.Pos, s.Height/2, s.HalfWidth, s.Height/2, s.HalfLength, a.V.Yaw))
+		lo.add(boxOf(lo.p, cl, a.V.Pos, s.Height/2, s.HalfWidth, s.Height/2, s.HalfLength, a.V.Yaw))
 	}
-	return out
 }
 
 func signalClass(w *sim.World, prop city.Prop) vision.Class {

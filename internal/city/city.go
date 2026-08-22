@@ -461,6 +461,11 @@ func (l *Lane) finish() {
 }
 
 func (c *City) assignControls() {
+	c.assignNodeControls()
+	c.assignLaneControls()
+}
+
+func (c *City) assignNodeControls() {
 	for _, n := range c.Nodes {
 		if n.Roundabout {
 			n.Control = ControlGiveWay
@@ -489,7 +494,9 @@ func (c *City) assignControls() {
 			n.Control = ControlGiveWay
 		}
 	}
+}
 
+func (c *City) assignLaneControls() {
 	for _, l := range c.Lanes {
 		n := c.Nodes[l.ToNode]
 		r := c.Roads[l.Road]
@@ -534,40 +541,51 @@ func (c *City) buildConnectors() {
 		if n.Roundabout {
 			continue // wired by buildRing, once the ring lanes exist
 		}
-		fromLanes := c.Roads[l.Road].Class.Lanes()
-		for _, rid := range n.Roads {
-			if rid == l.Road {
-				continue // no U-turns
-			}
-			r := c.Roads[rid]
-			for _, oid := range c.exitLanes(r, n.ID) {
-				o := c.Lanes[oid]
-				kind := turnKind(l.Fwd, o.Fwd)
-				if !turnAllowed(kind, l.Index, fromLanes) {
-					continue
-				}
-				// Keep the lane index stable where the counts allow, so cars
-				// do not weave across the carriageway at every junction.
-				want := preferredExitIndex(kind, l.Index, r.Class.Lanes())
-				if o.Index != want {
-					continue
-				}
-				l.Succ = append(l.Succ, c.makeTurn(l, o, kind, n))
-			}
-		}
+		l.Succ = c.preferredTurns(l, n)
 		if len(l.Succ) == 0 {
 			// Fall back to any non-U-turn exit so a vehicle never strands.
-			for _, rid := range n.Roads {
-				if rid == l.Road {
-					continue
-				}
-				for _, oid := range c.exitLanes(c.Roads[rid], n.ID) {
-					o := c.Lanes[oid]
-					l.Succ = append(l.Succ, c.makeTurn(l, o, turnKind(l.Fwd, o.Fwd), n))
-				}
-			}
+			l.Succ = c.anyTurns(l, n)
 		}
 	}
+}
+
+func (c *City) preferredTurns(l *Lane, n *Node) []Turn {
+	fromLanes := c.Roads[l.Road].Class.Lanes()
+	var out []Turn
+	for _, rid := range n.Roads {
+		if rid == l.Road {
+			continue // no U-turns
+		}
+		r := c.Roads[rid]
+		for _, oid := range c.exitLanes(r, n.ID) {
+			o := c.Lanes[oid]
+			kind := turnKind(l.Fwd, o.Fwd)
+			if !turnAllowed(kind, l.Index, fromLanes) {
+				continue
+			}
+			// Keep the lane index stable where the counts allow, so cars
+			// do not weave across the carriageway at every junction.
+			if o.Index != preferredExitIndex(kind, l.Index, r.Class.Lanes()) {
+				continue
+			}
+			out = append(out, c.makeTurn(l, o, kind, n))
+		}
+	}
+	return out
+}
+
+func (c *City) anyTurns(l *Lane, n *Node) []Turn {
+	var out []Turn
+	for _, rid := range n.Roads {
+		if rid == l.Road {
+			continue
+		}
+		for _, oid := range c.exitLanes(c.Roads[rid], n.ID) {
+			o := c.Lanes[oid]
+			out = append(out, c.makeTurn(l, o, turnKind(l.Fwd, o.Fwd), n))
+		}
+	}
+	return out
 }
 
 func (c *City) exitLanes(r *Road, node int) []int {
