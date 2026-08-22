@@ -1,5 +1,5 @@
-github.com/danielriddell21/crucible v0.15.3-0.20260811181752-4c0faaaa2085 h1:RTNUGPs2m2h6wMn14ubNgR5bj5HytHxUIWg80oHI9rE=
-github.com/danielriddell21/crucible v0.15.3-0.20260811181752-4c0faaaa2085/go.mod h1:zkFMgFhLCROS3nlwxK5exTI1KulRc+AuUj8ZY4SGkj4=
+github.com/danielriddell21/crucible v1.0.0 h1:18j/R9Vj6rPH2yBuw6y0/7YdhGYcJUqWQLiauQwJ9RY=
+github.com/danielriddell21/crucible v1.0.0/go.mod h1:zkFMgFhLCROS3nlwxK5exTI1KulRc+AuUj8ZY4SGkj4=
 github.com/ebitengine/purego v0.10.0 h1:QIw4xfpWT6GWTzaW5XEKy3HXoqrJGx1ijYHzTF0/ISU=
 github.com/ebitengine/purego v0.10.0/go.mod h1:iIjxzd6CiRiOG0UyXP+V1+jWqUXVjPKLAI0mRfJZTmQ=
 github.com/gen2brain/raylib-go/raylib v0.60.0 h1:KsP7W3EMkmb9zztivdgbh1bXR78pEuqP6jeUR8GCbEA=
