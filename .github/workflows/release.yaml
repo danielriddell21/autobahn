@@ -5,13 +5,104 @@ on:
     tags: ["v*"]
 
 jobs:
-  goreleaser:
-    # macOS so the cgo darwin binary can be built natively; raylib needs cgo on
-    # every platform and a Linux clang cannot cross-build a darwin binary.
-    uses: danielriddell21/github-actions/.github/workflows/release.yaml@v1
+  release:
+    name: letsgo
+    # Only this job publishes; the cask job writes to the tap, not here.
     permissions:
       contents: write
-    with:
-      runs-on: macos-latest
-    secrets:
-      tap-app-private-key: ${{ secrets.TAP_APP_PRIVATE_KEY }}
+    # ubuntu, where the GoReleaser job needed macos: the build no longer uses
+    # cgo, so there is no darwin toolchain to have natively.
+    runs-on: ubuntu-latest
+    steps:
+      # No fetch-depth: 0. letsgo falls back to the GitHub compare API when the
+      # changelog needs history a shallow clone does not have. fetch-tags is
+      # still needed: the tag being released has to be present for letsgo to
+      # read the version from it.
+      - uses: actions/checkout@v7
+        with:
+          fetch-tags: true
+
+      # The Go version changes the bytes of the binaries, so it is pinned by
+      # go.mod rather than floating on `stable`.
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: false
+
+      # The letsgo version is pinned rather than left to the action's default:
+      # letsgo decides the archive layout and the linker flags, so it is a
+      # build input, and a release built by a version nobody chose is a
+      # release nobody can reproduce.
+      - uses: danielriddell21/letsgo-action@v1
+        id: release
+        with:
+          version: v0.5.0
+
+  cask:
+    name: cask
+    needs: [release]
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      # letsgo writes formulas, not casks. letsgo-cask reads the release that
+      # was just published and writes one; it answers no hook and runs after
+      # the release is over, so there is nothing for it to pin and nothing it
+      # can do to the bytes.
+      - name: Install letsgo-cask
+        run: |
+          set -euo pipefail
+          version=v0.2.0
+          base=https://github.com/danielriddell21/letsgo-plugins/releases/download/$version
+          curl --proto '=https' --tlsv1.2 -fsSL "$base/letsgo-cask_${version#v}_linux_amd64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin letsgo-cask
+
+      - name: Fetch the release manifest
+        env:
+          GH_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          curl --proto '=https' --tlsv1.2 -fsSL -o letsgo.json \
+            "https://github.com/${{ github.repository }}/releases/download/${GH_TAG}/letsgo.json"
+
+      # A workflow token cannot write to another repository, so the tap needs
+      # an App token scoped to it.
+      - uses: actions/create-github-app-token@v3
+        id: token
+        with:
+          app-id: ${{ vars.TAP_APP_ID }}
+          private-key: ${{ secrets.TAP_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: homebrew-tap
+
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository_owner }}/homebrew-tap
+          token: ${{ steps.token.outputs.token }}
+          path: tap
+
+      - name: Write the cask
+        run: |
+          set -euo pipefail
+          letsgo-cask letsgo.json \
+            --repo "${{ github.repository }}" \
+            --desc "A 3D driving game with a camera-only autopilot" \
+            --license MIT \
+            --caveats "autobahn opens a raylib window and is macOS-only; on Linux/Windows, build from source with -tags x11." \
+            -o tap/Casks/autobahn.rb
+
+      - name: Commit it
+        working-directory: tap
+        env:
+          GH_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- Casks/autobahn.rb; then
+            echo "cask unchanged"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/autobahn.rb
+          git commit -m "autobahn ${GH_TAG}"
+          git push
