@@ -1,6 +1,6 @@
 module github.com/danielriddell21/autobahn
 
-go 1.26.4
+go 1.27.1
 
 require (
 	github.com/danielriddell21/crucible v0.15.3-0.20260811181752-4c0faaaa2085
