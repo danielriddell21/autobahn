@@ -37,7 +37,7 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - uses: danielriddell21/github-actions/.github/actions/setup-raylib@v1
+      - uses: danielriddell21/github-actions/.github/actions/setup-raylib@v2
 
       - name: Check the autopilot sees only vision and mathx
         run: |
@@ -61,7 +61,7 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - uses: danielriddell21/github-actions/.github/actions/setup-raylib@v1
+      - uses: danielriddell21/github-actions/.github/actions/setup-raylib@v2
 
       - name: Score the autopilot across 16 cities
         run: go run ./tools/eval -seeds 16 -seconds 60 -max-points 40
