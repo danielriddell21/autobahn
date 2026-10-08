@@ -12,6 +12,8 @@ jobs:
     permissions:
       contents: read
     with:
+      # A release candidate; promote.yaml publishes the stable version.
+      pre: true
       raylib: true
       build-tags: x11
       vet: true
