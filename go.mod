@@ -3,7 +3,7 @@ module github.com/danielriddell21/autobahn
 go 1.27.1
 
 require (
-	github.com/danielriddell21/crucible v1.0.0
+	github.com/danielriddell21/crucible v1.0.1
 	github.com/gen2brain/raylib-go/raylib v0.60.1
 )
 
