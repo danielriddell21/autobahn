@@ -301,6 +301,7 @@ func (g *Game) chaseCamera(dt float32) {
 			mathx.Approach(g.camPos.Z, want.Z, 7, dt),
 		)
 	}
+	g.cam.Fovy = g.speedLens(v, dt)
 	g.cam.Position = vec3(g.camPos.X, 4.3, g.camPos.Z)
 	ahead := v.Pos.Add(fwd.Mul(9))
 	g.cam.Target = vec3(ahead.X, 1.0, ahead.Z)

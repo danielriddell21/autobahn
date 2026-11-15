@@ -175,3 +175,26 @@ func TestAChaseAlwaysHasAPoliceCar(t *testing.T) {
 		t.Errorf("Police = %d, want the requested 6", got)
 	}
 }
+
+func TestClampRepairsATimeOfDayThatDoesNotExist(t *testing.T) {
+	s := DefaultSettings()
+	s.Time = 99
+	s.clamp()
+	if s.Time != TimeDay {
+		t.Errorf("Time = %v after clamping, want day", s.Time)
+	}
+}
+
+func TestTheStoredTimeOfDayYieldsToTheCommandLine(t *testing.T) {
+	s := DefaultSettings()
+	s.Time = TimeNight
+
+	if got := s.applyTo(DefaultOptions()); got.Time != TimeNight {
+		t.Errorf("Time = %v, want the stored night", got.Time)
+	}
+	o := DefaultOptions()
+	o.Time, o.Given = TimeDusk, Given{"time": true}
+	if got := s.applyTo(o); got.Time != TimeDusk {
+		t.Errorf("Time = %v, want the dusk the command line asked for", got.Time)
+	}
+}

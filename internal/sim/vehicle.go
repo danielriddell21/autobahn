@@ -19,6 +19,8 @@ type Controls struct {
 	Steer     float32 // -1 (full left) .. +1 (full right)
 	Handbrake bool
 	Reverse   bool
+	// Boost burns nitrous for as long as there is any left.
+	Boost bool
 }
 
 // Spec is the fixed physical description of a vehicle.
@@ -94,6 +96,46 @@ type Vehicle struct {
 	Slip float32
 	// Odometer accumulates distance travelled, in metres.
 	Odometer float32
+	// Nitro is how much nitrous is left, from 0 to 1. Traffic carries none.
+	Nitro float32
+	// Boosting is set while it is being burned.
+	Boosting bool
+}
+
+// Nitrous tuning.
+const (
+	nitroBurn   float32 = 3.6  // seconds a full bottle lasts
+	nitroRefill float32 = 16   // seconds to refill one, driving normally
+	nitroDrift  float32 = 4.5  // seconds to refill one, held in a slide
+	nitroPower  float32 = 1.6  // engine force while burning
+	nitroSpeed  float32 = 1.16 // top speed while burning
+	nitroSlide  float32 = 0.2  // rear slip that counts as a slide, radians
+	// nitroFloor is what an empty bottle is left holding, so that a car which
+	// carries nitrous can be told from one that never did.
+	nitroFloor float32 = 1e-4
+)
+
+// burn spends or refills the nitrous, and returns how much the engine and the
+// top speed are raised by this step.
+func (v *Vehicle) burn(c Controls, dt float32) (power, top float32) {
+	if v.Nitro <= 0 {
+		v.Boosting = false
+		return 1, 1 // traffic carries none
+	}
+	v.Boosting = c.Boost && v.Nitro > nitroFloor && c.Throttle > 0 && !c.Reverse
+	if v.Boosting {
+		v.Nitro = max(v.Nitro-dt/nitroBurn, nitroFloor)
+		return nitroPower, nitroSpeed
+	}
+	if !c.Boost {
+		rate := 1 / nitroRefill
+		if v.Slip > nitroSlide && v.Speed() > 10 {
+			// A slide earns it back far faster than driving in a straight line.
+			rate = 1 / nitroDrift
+		}
+		v.Nitro = min(v.Nitro+dt*rate, 1)
+	}
+	return 1, 1
 }
 
 // NewVehicle returns a vehicle at rest at the given pose.
@@ -152,7 +194,8 @@ func (v *Vehicle) Update(c Controls, dt float32) {
 	case c.Reverse:
 		drive = -c.Throttle * s.EngineForce * s.ReverseFrac
 	default:
-		drive = c.Throttle * s.EngineForce * mathx.Clamp(1-vLong/s.MaxSpeed, 0, 1)
+		power, top := v.burn(c, dt)
+		drive = c.Throttle * s.EngineForce * power * mathx.Clamp(1-vLong/(s.MaxSpeed*top), 0, 1)
 	}
 	brake := c.Brake * s.BrakeForce
 	if v.Handbrake {

@@ -88,6 +88,12 @@ demo-list:
 soak frames="1800":
     {{go}} run -tags "{{tags}}" ./cmd/autobahn -autopilot -frames {{frames}} -stats
 
-# full gate: lint + test + build + boundary. all must pass before committing
+# fail if the autopilot has got worse: the gate CI holds a change to
+[group('test')]
+gate:
+    {{go}} run ./tools/eval -seeds 24 -seconds 60 -max-points 12
+
+# full gate: lint + test + build + boundary + the autopilot gate. all must pass
+# before committing
 [group('dev')]
-ci: lint test build boundary eval
+ci: lint test build boundary gate

@@ -40,6 +40,8 @@ type Agent struct {
 	Style Style
 	// Role separates ambient traffic from police units.
 	Role Role
+	// Unit is the kind of police unit this is, for an agent that is one.
+	Unit UnitKind
 
 	lane    *city.Lane
 	s       float32
@@ -51,8 +53,40 @@ type Agent struct {
 	// stoppedAt records the node where this agent has already made its
 	// mandatory stop, so it does not stop again on the same approach.
 	stoppedAt int
-	// pursuing is set on a police unit running to a call.
+	// ringSkip is how many exits the agent still passes before it leaves the
+	// roundabout it is on or about to join.
+	ringSkip int
+	// waited is how long the agent has been held at a line waiting for a gap.
+	// A driver who has waited long enough edges out, which is what stops a
+	// junction where everybody is being polite from staying shut for ever.
+	waited float32
+	// yielding is set while the agent is being held at a line by other traffic
+	// rather than by a signal or a sign.
+	yielding bool
+	// dazed counts down after a hard knock. A driver who has just been hit
+	// does nothing but brake, and is not dragged back into lane as if nothing
+	// had happened.
+	dazed float32
+	// pursuing is set on a police unit running to a call, and rank is its
+	// place among the units on that call, nearest first.
 	pursuing bool
+	rank     int
+	// free is set while a unit has left the lane graph to drive straight at
+	// the car it is chasing.
+	free bool
+	// sidestep is how far to the right of its route the agent is currently
+	// driving, in metres, and sidestepWant where that is heading. It is how a
+	// driver gets round something stopped in the road, pulls in for a siren,
+	// or overtakes on a call.
+	sidestep, sidestepWant float32
+	// backing is how much longer a unit in close pursuit will reverse for.
+	backing float32
+	// stuck is how long the agent has been held up by something that is not
+	// moving. Once that is long enough it commits to going round: passing is
+	// how much longer it stays out, and passSide which side it went.
+	stuck    float32
+	passing  float32
+	passSide float32
 	rng      *rand.Rand
 
 	// Manual hands the car to a human. A driven agent takes its controls from
@@ -140,6 +174,23 @@ func NewPoliceUnit(id int, c *city.City, lane *city.Lane, s float32, rng *rand.R
 	return a
 }
 
+// SetUnit makes a police unit one of the given kind, with the car that goes
+// with it.
+func (a *Agent) SetUnit(k UnitKind) {
+	a.Unit = k
+	switch k {
+	case UnitInterceptor:
+		a.Body = BodyOf(Saloon)
+	case UnitHeavy:
+		a.Body = BodyOf(Van)
+		a.Body.RoofFrac, a.Body.RoofRise = 0.62, 0.62
+	default:
+		a.Body = BodyOf(Estate)
+	}
+	a.Body.Spec = UnitSpec(k)
+	a.V.Spec = a.Body.Spec
+}
+
 func (a *Agent) chooseNext(c *city.City) {
 	a.chooseNextToward(c, mathx.Vec{}, false)
 }
@@ -148,6 +199,7 @@ func (a *Agent) chooseNextToward(c *city.City, target mathx.Vec, chasing bool) {
 	// A unit on a call heads for its target; everyone else prefers to carry
 	// straight on, so traffic forms recognisable flows along the arterials
 	// instead of turning at random.
+	a.waited = 0
 	if chasing {
 		if t, ok := a.pursuitTurn(c, target); ok {
 			a.next, a.hasNext = t, true
@@ -156,6 +208,18 @@ func (a *Agent) chooseNextToward(c *city.City, target mathx.Vec, chasing bool) {
 	}
 	if len(a.lane.Succ) == 0 {
 		a.hasNext = false
+		return
+	}
+	a.hasNext = true
+	if c.Roads[a.lane.Road].Ring {
+		a.next = a.ringTurn()
+		return
+	}
+	if c.Nodes[a.lane.ToNode].IsRoundabout() {
+		// The exit is chosen on the way in, as a driver chooses it, so the car
+		// goes round with a purpose instead of rolling a die at every exit.
+		a.ringSkip = a.rng.IntN(max(c.Nodes[a.lane.ToNode].Degree()-1, 1))
+		a.next = a.lane.Succ[0]
 		return
 	}
 	var straight []city.Turn
@@ -169,33 +233,86 @@ func (a *Agent) chooseNextToward(c *city.City, target mathx.Vec, chasing bool) {
 	} else {
 		a.next = a.lane.Succ[a.rng.IntN(len(a.lane.Succ))]
 	}
-	a.hasNext = true
 }
+
+// ringTurn carries on round a roundabout until the chosen exit comes up.
+func (a *Agent) ringTurn() city.Turn {
+	round := a.lane.Succ[0]
+	var exits []city.Turn
+	for _, t := range a.lane.Succ {
+		if t.Kind == city.TurnStraight {
+			round = t
+		} else {
+			exits = append(exits, t)
+		}
+	}
+	if len(exits) == 0 {
+		return round
+	}
+	if a.ringSkip > 0 {
+		a.ringSkip--
+		return round
+	}
+	return exits[a.rng.IntN(len(exits))]
+}
+
+// routeHops bounds how many lanes a lookahead along an agent's route may
+// cross. A roundabout is cut into chords a few metres long, so a lookahead
+// that stopped at the next lane would see no further than the bonnet there.
+const routeHops = 12
 
 func (a *Agent) routePoint(c *city.City, ahead float32) mathx.Vec {
 	// Walk forward along the route, crossing from the current lane onto its
-	// connector and then onto the following lane as needed.
+	// connector and then onto the lanes that follow. Past the turn already
+	// chosen the walk carries straight on, which is the best guess there is.
+	lane, turn, hasTurn := a.lane, a.next, a.hasNext
 	if a.inTurn {
-		remain := (1 - a.u) * max(a.next.Len, 0.01)
+		remain := (1 - a.u) * max(turn.Len, 0.01)
 		if ahead <= remain {
-			return c.TurnPoint(a.lane, a.next, a.u+ahead/max(a.next.Len, 0.01))
+			return c.TurnPoint(lane, turn, a.u+ahead/max(turn.Len, 0.01))
 		}
-		nl := c.Lanes[a.next.Lane]
-		return nl.Point(ahead - remain)
+		ahead -= remain
+		lane = c.Lanes[turn.Lane]
+		turn, hasTurn = onward(lane)
+	} else {
+		remain := lane.Length - a.s
+		if ahead <= remain {
+			return lane.Point(a.s + ahead)
+		}
+		ahead -= remain
 	}
-	remain := a.lane.Length - a.s
-	if ahead <= remain {
-		return a.lane.Point(a.s + ahead)
+	for range routeHops {
+		// Here the walk stands at the end of lane, about to take turn.
+		if !hasTurn {
+			return lane.Point(lane.Length)
+		}
+		if ahead <= turn.Len {
+			return c.TurnPoint(lane, turn, ahead/max(turn.Len, 0.01))
+		}
+		ahead -= turn.Len
+		lane = c.Lanes[turn.Lane]
+		if ahead <= lane.Length {
+			return lane.Point(ahead)
+		}
+		ahead -= lane.Length
+		turn, hasTurn = onward(lane)
 	}
-	ahead -= remain
-	if !a.hasNext {
-		return a.lane.Point(a.lane.Length)
+	return lane.Point(lane.Length)
+}
+
+// onward is the successor a lookahead takes past a lane nobody has planned
+// for yet: straight on where that is offered, and the first turn otherwise. It
+// reads only the lane, so the answer is the same every time it is asked.
+func onward(l *city.Lane) (city.Turn, bool) {
+	if len(l.Succ) == 0 {
+		return city.Turn{}, false
 	}
-	if ahead <= a.next.Len {
-		return c.TurnPoint(a.lane, a.next, ahead/max(a.next.Len, 0.01))
+	for _, t := range l.Succ {
+		if t.Kind == city.TurnStraight {
+			return t, true
+		}
 	}
-	nl := c.Lanes[a.next.Lane]
-	return nl.Point(ahead - a.next.Len)
+	return l.Succ[0], true
 }
 
 func (a *Agent) advanceRoute(c *city.City, chase mathx.Vec, dt float32) {
@@ -212,7 +329,10 @@ func (a *Agent) advanceRoute(c *city.City, chase mathx.Vec, dt float32) {
 		}
 		return
 	}
-	a.s += step
+	// Odometry alone drifts: a car that has been shunted, or has cut a corner,
+	// is further along than its wheels say. Where it actually is wins, or the
+	// route would trail behind the car and drag it backwards.
+	a.s = max(a.s+step, min(a.V.Pos.Sub(a.lane.A).Dot(a.lane.Fwd), a.lane.Length))
 	if a.s >= a.lane.Length {
 		if !a.hasNext {
 			// Nowhere to go: park the agent for the respawner to recycle.
@@ -226,29 +346,13 @@ func (a *Agent) advanceRoute(c *city.City, chase mathx.Vec, dt float32) {
 
 func (a *Agent) drive(w *World, dt float32) {
 	c := w.City
-	if a.Blocking {
-		// Parked across the road, and staying there.
-		a.V.Update(Controls{Brake: 1}, dt)
-		return
-	}
-	if a.Manual {
-		a.V.Update(a.Input, dt)
-		return
-	}
-	if a.lane == nil {
+	if a.idle(c, dt) || (a.pursuing && a.engage(w, dt)) {
 		return
 	}
 
 	st := a.style()
 	speed := max(a.V.ForwardSpeed(), 0)
-	limit := st.TargetSpeed(a.lane.SpeedLimit)
-	if a.pursuing {
-		// A unit on a call is not held to the posted limit.
-		limit = min(st.TargetSpeed(mathx.MPH(45)), a.V.Spec.MaxSpeed)
-	}
-	if a.inTurn && a.next.Kind != city.TurnStraight {
-		limit = min(limit, st.CornerSpeed())
-	}
+	limit := a.cruise(w, st)
 
 	if a.pursuing && a.hasNext && !a.inTurn && a.lane.Length-a.s < 45 {
 		a.chooseNextToward(c, w.interceptOf(a), true)
@@ -256,15 +360,28 @@ func (a *Agent) drive(w *World, dt float32) {
 
 	accel := idmFree(st, speed, limit)
 
-	// Yield to whatever is directly in front, whether that is another agent or
-	// the player.
-	if gap, lead, ok := w.leaderFor(a); ok {
-		accel = min(accel, idmFollow(st, speed, lead, gap))
+	// Slow for the turn before reaching it, not half-way round.
+	if !a.inTurn && a.hasNext {
+		accel = min(accel, slowFor(st, speed, turnSpeed(a.next, st), a.lane.Length-a.s))
 	}
 
+	// Yield to whatever is directly in front, whether that is another agent or
+	// the player.
+	gap, lead, ahead := w.leaderFor(a)
+	if ahead != nil {
+		accel = min(accel, idmFollow(st, speed, lead, gap))
+	}
+	a.goRound(ahead, gap, lead, speed, dt)
+
 	// Junction rules produce a virtual obstacle at the stop line.
+	a.yielding = false
 	if d, stop := a.junctionStop(w); stop {
 		accel = min(accel, idmFollow(st, speed, 0, max(d, 0.05)))
+		// Only waiting for a gap wears a driver's patience down. Nobody edges
+		// out through a red light because it has been red a long time.
+		if a.yielding && speed < 0.5 {
+			a.waited += dt
+		}
 	}
 
 	a.applyLongitudinal(st, accel, speed)
@@ -274,6 +391,187 @@ func (a *Agent) drive(w *World, dt float32) {
 	}, dt)
 	a.advanceRoute(c, w.Player.Pos, dt)
 	a.snapToRoute(c, dt)
+}
+
+// Getting round things, in metres and seconds.
+const (
+	// stuckTime is how long a driver sits behind something stationary before
+	// deciding it is not going to move.
+	stuckTime float32 = 3.5
+	// passWidth is how far out a driver pulls to get round it, and
+	// overtakeWidth how far a unit on a call pulls out to pass traffic.
+	passWidth     float32 = 2.7
+	overtakeWidth float32 = 3.5
+	// sidestepRate is how fast a driver moves across the road, in m/s.
+	sidestepRate float32 = 2.4
+	// passTime is how long a driver stays out once committed to going round
+	// something, in seconds: long enough to get past a car from a standstill.
+	passTime float32 = 7
+)
+
+// goRound decides whether to pull out round whatever is in front.
+//
+// Ordinary traffic does it only for something that has plainly stopped for
+// good — a crashed car, somebody parked in the road — and only after sitting
+// behind it for a while. A unit on a call does it for anything slower than it
+// wants to be going, at once.
+func (a *Agent) goRound(ahead *Vehicle, gap, lead, speed, dt float32) {
+	switch {
+	case a.passing > 0:
+		// Committed: hold the line out until the obstruction is behind.
+		a.passing -= dt
+		a.sidestepWant = a.passSide * passWidth
+	case ahead != nil && a.pursuing && gap < 30 && lead < max(speed-2, 3):
+		a.sidestepWant = overtakeWidth
+	case ahead != nil && !a.inTurn && !a.yielding && lead < 0.3 && speed < 0.5 && gap < 9:
+		a.waitBehind(ahead, dt)
+	default:
+		a.stuck = 0
+	}
+	// A car that is barely moving can only edge across.
+	rate := mathx.Clamp(0.8+speed*0.5, 0.8, sidestepRate)
+	a.sidestep = mathx.MoveToward(a.sidestep, a.sidestepWant, rate*dt)
+}
+
+// waitBehind counts the time spent sat behind something stationary, and
+// commits to pulling out round it once that has gone on long enough.
+func (a *Agent) waitBehind(ahead *Vehicle, dt float32) {
+	if a.stuck += dt; a.stuck <= stuckTime {
+		return
+	}
+	// Pull out on whichever side the obstruction is not.
+	a.passSide = 1
+	if ahead.Pos.Sub(a.V.Pos).Cross(a.V.Forward()) < -0.3 {
+		a.passSide = -1
+	}
+	a.passing, a.stuck = passTime, 0
+}
+
+// pathPoint is routePoint moved across the road by the agent's sidestep.
+func (a *Agent) pathPoint(c *city.City, ahead float32) mathx.Vec {
+	p := a.routePoint(c, ahead)
+	if a.sidestep == 0 {
+		return p
+	}
+	along := a.routePoint(c, ahead+1.5).Sub(p)
+	if along.Len() < 0.1 {
+		return p
+	}
+	return p.Add(along.Norm().Right().Mul(a.sidestep))
+}
+
+// idle handles an agent that is not driving its route this step, and reports
+// whether that was the case: one parked in a roadblock, one a person is
+// driving, or one that has just been hit.
+func (a *Agent) idle(c *city.City, dt float32) bool {
+	switch {
+	case a.Blocking:
+		// Parked across the road, and staying there.
+		a.V.Update(Controls{Brake: 1}, dt)
+	case a.Manual:
+		a.V.Update(a.Input, dt)
+	case a.lane == nil:
+	case a.dazed > 0:
+		// Just been hit: stand on the brake and let the car go where the
+		// impact sent it, then pick the road up again from wherever that is.
+		a.V.Update(Controls{Brake: 0.7}, dt)
+		if a.dazed -= dt; a.dazed <= 0 {
+			a.rejoin(c)
+		}
+	default:
+		return false
+	}
+	return true
+}
+
+// cruise is the speed a driver wants on the stretch of road they are on, with
+// nothing in the way.
+func (a *Agent) cruise(w *World, st Style) float32 {
+	c := w.City
+	limit := st.TargetSpeed(a.lane.SpeedLimit)
+	if a.pursuing {
+		// A unit on a call is not held to the posted limit.
+		limit = min(st.TargetSpeed(mathx.MPH(52)), a.V.Spec.MaxSpeed)
+	}
+	a.sidestepWant = 0
+	if w.sirenBehind(a) {
+		// Lights in the mirror: pull in to the kerb and stop.
+		limit, a.sidestepWant = 0, -1.7
+	}
+	if c.Roads[a.lane.Road].Ring {
+		limit = min(limit, ringSpeed(c.Nodes[a.lane.ToNode], st))
+	}
+	if a.inTurn {
+		limit = min(limit, turnSpeed(a.next, st))
+	}
+	return limit
+}
+
+// dazeTime is how long a driver is out of it after a hard knock, in seconds,
+// and dazeImpact the closing speed that counts as one, in m/s. A police driver
+// is expecting it, and takes a good deal more.
+const (
+	dazeTime         float32 = 2.2
+	dazeImpact       float32 = 4.0
+	dazeImpactPolice float32 = 10.0
+)
+
+// Knock tells an agent it has been hit at the given closing speed.
+func (a *Agent) knock(impact float32) {
+	limit := dazeImpact
+	if a.Role == RolePolice {
+		limit = dazeImpactPolice
+	}
+	if impact >= limit && !a.Manual && !a.Blocking {
+		a.dazed = dazeTime
+	}
+}
+
+// rejoin puts an agent back on the lane graph from wherever it has ended up.
+func (a *Agent) rejoin(c *city.City) {
+	proj := c.ProjectAlong(a.V.Pos, a.V.Forward())
+	if !proj.Valid {
+		if proj = c.Project(a.V.Pos); !proj.Valid {
+			return
+		}
+	}
+	a.lane, a.s = proj.Lane, proj.S
+	a.inTurn, a.u = false, 0
+	a.stoppedAt = -1
+	a.sidestep, a.sidestepWant, a.stuck, a.passing = 0, 0, 0, 0
+	a.chooseNext(c)
+}
+
+// cornerGrip is the sideways acceleration traffic takes a bend at, in m/s^2.
+const cornerGrip float32 = 3.0
+
+// turnSpeed is how fast a driver takes a connector, from how tightly it curves.
+func turnSpeed(t city.Turn, st Style) float32 {
+	if t.Kind == city.TurnStraight {
+		return 1e6
+	}
+	// A quarter circle of this length has this radius, near enough.
+	radius := t.Len * 2 / 3.14159
+	return min(mathx.Sqrt(cornerGrip*radius)*st.CornerBias, st.CornerSpeed())
+}
+
+// ringSpeed is how fast a driver goes round a roundabout.
+func ringSpeed(n *city.Node, st Style) float32 {
+	return mathx.Sqrt(cornerGrip*n.RingRadius()) * st.CornerBias
+}
+
+// slowFor is the acceleration that brings a driver down to a target speed by
+// the time a point ahead is reached, and no constraint until braking for it
+// needs to begin.
+func slowFor(st Style, speed, target, dist float32) float32 {
+	if speed <= target {
+		return 1e6
+	}
+	need := (speed*speed - target*target) / (2 * max(dist, 0.5))
+	if need < st.Decel*0.45 {
+		return 1e6 // plenty of room yet
+	}
+	return -need
 }
 
 func (a *Agent) applyLongitudinal(st Style, accel, speed float32) {
@@ -294,7 +592,7 @@ func (a *Agent) applySteering(c *city.City, speed float32) {
 	// Pure pursuit toward a point further along the route; the lookahead grows
 	// with speed so fast cars steer smoothly.
 	look := mathx.Clamp(4.5+0.85*speed, 5.5, 20)
-	target := a.routePoint(c, look)
+	target := a.pathPoint(c, look)
 	rel := target.Sub(a.V.Pos)
 	fwd := a.V.Forward()
 	alpha := mathx.Atan2(rel.Dot(fwd.Right()), rel.Dot(fwd))
@@ -305,16 +603,46 @@ func (a *Agent) applySteering(c *city.City, speed float32) {
 
 func (a *Agent) snapToRoute(c *city.City, dt float32) {
 	// Ambient traffic must not drift out of lane over time. Nudge the car back
-	// onto its route line gently enough that the correction is invisible.
-	want := a.routePoint(c, 0.1)
-	off := want.Sub(a.V.Pos)
+	// onto its route line gently enough that the correction is invisible, and
+	// ease its nose round to match, so it comes out of a turn pointing down
+	// the road rather than across it.
+	//
+	// Only the sideways error is corrected. Pulling the car along the route as
+	// well would move it with its brakes on, and a car held at a red light
+	// would be drawn over the line a few millimetres at a time.
+	here := a.routePoint(c, 0)
+	along := a.routePoint(c, 2.2).Sub(here)
+	if along.Len() < 0.5 {
+		return
+	}
+	dir := along.Norm()
+	off := here.Add(dir.Right().Mul(a.sidestep)).Sub(a.V.Pos)
+	off = off.Sub(dir.Mul(off.Dot(dir)))
 	if d := off.Len(); d > 0.05 {
-		a.V.Pos = a.V.Pos.Add(off.Norm().Mul(min(d, d*3.5*dt)))
+		a.V.Pos = a.V.Pos.Add(off.Mul(min(1, 3.5*dt)))
+	}
+	if a.V.Speed() > 0.5 {
+		err := mathx.AngleDiff(dir.Angle(), a.V.Yaw)
+		a.V.Yaw = mathx.WrapPi(a.V.Yaw + err*mathx.Clamp(2.5*dt, 0, 1))
 	}
 }
 
+// Junction approach ranges, in metres.
+const (
+	// yieldRange is how far from the line a driver starts judging the gap.
+	yieldRange float32 = 28
+	// waitLimit is how long a driver waits for one before edging out, in
+	// seconds.
+	waitLimit float32 = 14
+)
+
 func (a *Agent) junctionStop(w *World) (dist float32, stop bool) {
 	if a.inTurn || !a.hasNext {
+		return 0, false
+	}
+	// Traffic already on a roundabout has priority over everything joining it,
+	// so it has nothing to stop for but the car in front.
+	if w.City.Roads[a.lane.Road].Ring {
 		return 0, false
 	}
 	d := a.lane.Length - a.s
@@ -325,7 +653,7 @@ func (a *Agent) junctionStop(w *World) (dist float32, stop bool) {
 	style := a.style()
 	// A unit on a blue-light run may pass a red, but slows to do it safely.
 	if a.pursuing {
-		if d < 18 && w.junctionBlocked(a) {
+		if d < 18 && w.boxConflict(a, w.City.Nodes[a.lane.ToNode]) {
 			return d, true
 		}
 		return 0, false
@@ -335,9 +663,10 @@ func (a *Agent) junctionStop(w *World) (dist float32, stop bool) {
 		return d, true
 	}
 
-	// Even on a green light, do not enter a junction that is already occupied,
-	// and give way when turning across oncoming traffic.
-	if d < 14 && w.junctionBlocked(a) {
+	// Even with the right to go, do not drive into something: wait for a gap
+	// in whatever has priority, and for the way out to be clear.
+	if d < yieldRange && w.mustYield(a) {
+		a.yielding = true
 		return d, true
 	}
 	return 0, false
@@ -349,10 +678,6 @@ func (a *Agent) controlStop(w *World, style Style, d float32) bool {
 		return a.signalStop(w, style, d)
 	case city.ControlStop:
 		return a.signStop(d)
-	case city.ControlGiveWay:
-		// No halt is required, but the approach is taken slowly and the car
-		// waits for a gap when the junction is not clear.
-		return d < 26 && w.junctionBlocked(a)
 	}
 	return false
 }

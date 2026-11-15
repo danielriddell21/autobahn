@@ -52,7 +52,7 @@ func main() {
 		from     = flag.Uint64("from", 1, "first seed")
 		seconds  = flag.Float64("seconds", 90, "simulated seconds per city")
 		traffic  = flag.Int("traffic", 70, "ambient traffic cars")
-		police   = flag.Int("police", 5, "patrolling police units")
+		police   = flag.Int("police", 7, "patrolling police units")
 		hz       = flag.Float64("perception", 20, "perception updates per second")
 		width    = flag.Int("camwidth", 420, "camera width in pixels")
 		height   = flag.Int("camheight", 236, "camera height in pixels")

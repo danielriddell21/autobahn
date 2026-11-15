@@ -204,3 +204,29 @@ func TestGeneratePathStillWorks(t *testing.T) {
 		t.Error("nothing drivable at the origin")
 	}
 }
+
+// TestGrowthNeverRenumbersABuilding holds the city to a promise the simulation
+// relies on: a building, once built, keeps its place in the list.
+//
+// The world files buildings by index so a car can find the ones near it. When
+// filling a block beside a roundabout cleared buildings out of blocks already
+// finished, every building after them moved down a place, and cars began
+// hitting walls that were standing somewhere else.
+func TestGrowthNeverRenumbersABuilding(t *testing.T) {
+	c := city.NewGrowing(city.DefaultParams(16))
+	c.EnsureAround(mathx.V(0, 0), 250)
+	before := append([]city.Building(nil), c.Buildings...)
+
+	// Drive off in four directions, growing the city each time.
+	for _, at := range []mathx.Vec{{X: 400}, {Z: 400}, {X: -400}, {Z: -400}, {X: 700, Z: 700}} {
+		c.EnsureAround(at, 300)
+	}
+	if len(c.Buildings) <= len(before) {
+		t.Fatal("growing the city added no buildings")
+	}
+	for i, b := range before {
+		if c.Buildings[i] != b {
+			t.Fatalf("building %d was %+v and is now %+v", i, b, c.Buildings[i])
+		}
+	}
+}

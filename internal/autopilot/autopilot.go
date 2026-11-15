@@ -28,32 +28,62 @@ type Command struct {
 // is actually read.
 const defaultLimit float32 = 30 * 0.44704
 
-// Vehicle geometry the autopilot knows about its own car.
+// Vehicle geometry and performance the autopilot knows about its own car. This
+// is calibration, the same thing a real controller is told about the vehicle
+// it is fitted to, and none of it is read from the simulation.
 const (
-	wheelbase   float32 = 2.7
-	maxSteer    float32 = 0.60
+	wheelbase float32 = 2.7
+	maxSteer  float32 = 0.60
+	// lensToAxle is how far the camera sits ahead of the rear axle. Pure
+	// pursuit steers the rear axle onto an arc, so a point ranged from the lens
+	// is this much further away than it looks.
+	lensToAxle float32 = 3.05
+	// topSpeed sets how much steering authority the car loses with speed.
+	topSpeed float32 = 62
+	// brakeDecel is what full brake pressure achieves, in m/s^2.
+	brakeDecel float32 = 10.7
+
 	comfortStop float32 = 2.7 // comfortable deceleration, m/s^2
 	hardStop    float32 = 6.5
 )
 
 // Behaviour tuning.
 const (
-	laneCorridor float32 = 2.4 // half-width for "in my lane", metres
-	stopBuffer   float32 = 3.4 // stop this far before the line, metres
-	followGap    float32 = 6.0 // standstill gap to the car in front
-	headway      float32 = 1.5 // desired time gap, seconds
+	stopBuffer   float32 = 2.2 // stop with the lens this far before the line, metres
+	followGap    float32 = 4.5 // standstill gap to the car in front, from the lens
+	followDecel  float32 = 3.0 // the braking a queue ahead is planned around
 	stopWaitTime float32 = 1.1 // pause at a stop sign, seconds
 	giveWaySpeed float32 = 4.0 // crawl speed at a give way line, m/s
-	aspectMemory float32 = 2.5 // how long a signal aspect is trusted, seconds
+	// aspectMemory is how long a signal aspect is trusted once no head is in
+	// view, and aspectHold how long a stopping aspect is trusted by a car
+	// already standing at the line, which has nothing to gain by guessing.
+	aspectMemory float32 = 2.5
+	aspectHold   float32 = 30
 	// junctionCreep is the fastest a junction is approached when the signal
 	// ahead has not been confirmed green. A light can change while the car is
 	// closing on it, so arriving at a speed it cannot stop from is what causes
 	// a car to be caught out in the dilemma zone.
 	junctionCreep float32 = 9.5 // m/s, about 21 mph
 	junctionWatch float32 = 38  // start being careful this far out, metres
+	// junctionClear is how far past a stop line a signal with no line of its
+	// own is disregarded. Turning through a junction swings the camera across
+	// the far-side heads of the road being joined, and those govern traffic
+	// that is waiting, not a car already through.
+	junctionClear float32 = 30
+	// patience is how long the car waits for a gap at a give way before it
+	// edges out, and nudge how long it then keeps going. Without it a queue on
+	// the far side of the junction holds it for ever.
+	patience float32 = 7
+	nudge    float32 = 3
 
-	cornerSlowdown float32 = 2.1
-	steerGain      float32 = 1.15
+	// cornerGrip is the sideways acceleration a bend is taken at, m/s^2.
+	cornerGrip  float32 = 2.6
+	cornerDecel float32 = 3.4
+	cornerFloor float32 = 3.6 // never plan a bend slower than this, m/s
+	steerGain   float32 = 1.1
+
+	blindCreep float32 = 3.5 // m/s with no lane in view
+	blindStop  float32 = 3.0 // seconds blind before giving up and stopping
 )
 
 // State is what the controller is currently doing, surfaced for the HUD.
@@ -107,18 +137,30 @@ type Driver struct {
 	Detections int
 
 	steer float32
-	// redMemory holds a stopping aspect briefly after the signal leaves the
-	// camera's view, which happens on the final approach because the head is
-	// mounted at the kerb and passes outside the lens.
-	redMemory float32
+	// curve is the curvature of the arc currently being steered, 1/m.
+	curve float32
+
 	// stopDist dead-reckons the stop line's range once it is no longer visible,
 	// using the car's own odometry, exactly as a tracker would.
 	stopDist     float32
 	haveStopDist bool
-	stopTimer    float32
-	stopArmed    bool
-	stopHeld     bool
-	blindTimer   float32
+	// aspect is the last signal aspect seen governing the junction ahead, and
+	// aspectAge how long ago that was.
+	aspect    vision.Class
+	aspectAge float32
+	// sign is the priority sign seen governing the junction ahead. It is
+	// remembered until the line is crossed, because the sign itself passes out
+	// of the lens on the final approach.
+	sign vision.Class
+	// clearRun is how much further the car has to travel before a signal with
+	// no stop line of its own is believed again.
+	clearRun float32
+
+	stopTimer  float32
+	stopHeld   bool
+	stopDone   bool
+	waited     float32
+	blindTimer float32
 }
 
 // New returns a driver calibrated to the given camera.
@@ -128,16 +170,24 @@ func New(cam vision.Camera) *Driver {
 
 // Reset clears the driver's memory.
 func (d *Driver) Reset() {
-	d.steer, d.stopTimer = 0, 0
-	d.stopArmed, d.stopHeld = false, false
-	d.redMemory, d.stopDist, d.haveStopDist = 0, 0, false
-	d.SeenLimit = defaultLimit
+	*d = Driver{cam: d.cam, SeenLimit: defaultLimit, State: StateSearching}
 }
+
+// targetKind is why the car may have to slow down.
+type targetKind int
+
+const (
+	targetControl targetKind = iota // a signal, sign or line
+	targetVehicle
+	targetBend
+)
 
 // target is one thing the car may have to slow down or stop for.
 type target struct {
+	kind  targetKind
 	dist  float32 // metres ahead
 	speed float32 // the speed to be doing on arrival
+	decel float32 // the braking it is planned around; zero means comfortable
 	why   string
 }
 
@@ -147,45 +197,59 @@ func (d *Driver) Drive(dets []vision.Detection, speed, dt float32) Command {
 	d.Detections = len(dets)
 
 	lane := d.lanePoints(dets)
-	d.readSigns(dets)
+	d.readSigns(dets, lane)
 
 	cmd := Command{}
 	cmd.Steer = d.steerFor(lane, speed, dt)
 
-	limit := d.SeenLimit
-	governed := limit
-	if c := cornerLimit(lane); c < governed {
-		governed = c
-	}
-
-	// Collect everything that constrains speed, then obey the tightest.
-	targets := d.hazards(dets, lane, speed, dt)
+	cruise := d.SeenLimit
 	d.State = StateCruise
 	d.Reason = "clear road"
 	if len(lane) == 0 {
-		// Without lane markers the car has no idea where the road goes.
+		// Without lane markers the car has no idea where the road goes. It
+		// creeps for a moment in case they come back, then gives up and stops.
 		d.blindTimer += dt
 		if d.blindTimer > 0.3 {
 			d.State = StateSearching
 			d.Reason = "no lane markers in view"
-			governed = min(governed, 4)
+			cruise = min(cruise, blindCreep)
+		}
+		if d.blindTimer > blindStop {
+			cruise = 0
 		}
 	} else {
 		d.blindTimer = 0
 	}
 
+	// Collect everything that constrains speed, then obey the tightest.
+	targets := d.bendTargets(lane)
+	targets = append(targets, d.vehicleTargets(dets, lane)...)
+	targets = append(targets, d.junctionTargets(dets, lane, speed, dt)...)
+
+	governed, need := cruise, float32(0)
 	for _, t := range targets {
-		if v := approachSpeed(t.dist, t.speed); v < governed {
-			governed = v
-			d.Reason = t.why
-			switch {
-			case t.speed > 0.1:
-				d.State = StateFollow
-			case t.dist < 6 && speed < 0.6:
-				d.State = StateHalted
-			default:
-				d.State = StateSlowing
-			}
+		decel := t.decel
+		if decel == 0 {
+			decel = comfortStop
+		}
+		if speed > t.speed {
+			need = max(need, (speed*speed-t.speed*t.speed)/(2*max(t.dist, 0.3)))
+		}
+		v := approachSpeed(t.dist, t.speed, decel)
+		if v >= governed {
+			continue
+		}
+		governed = v
+		d.Reason = t.why
+		switch {
+		case t.kind == targetBend:
+			d.State = StateCruise
+		case t.dist < 6 && speed < 0.6:
+			d.State = StateHalted
+		case t.kind == targetVehicle:
+			d.State = StateFollow
+		default:
+			d.State = StateSlowing
 		}
 	}
 	if d.stopHeld {
@@ -195,13 +259,13 @@ func (d *Driver) Drive(dets []vision.Detection, speed, dt float32) Command {
 	}
 
 	d.TargetSpeed = max(governed, 0)
-	applyLongitudinal(&cmd, speed, d.TargetSpeed)
+	applyLongitudinal(&cmd, speed, d.TargetSpeed, need)
 	return cmd
 }
 
 // lanePoint is a lane marker resolved into vehicle-relative ground coordinates.
 type lanePoint struct {
-	dist    float32 // metres ahead
+	dist    float32 // metres ahead of the lens
 	lateral float32 // metres right of straight ahead
 }
 
@@ -262,90 +326,177 @@ func gap(a, b lanePoint) float32 {
 	return sqrt(dx*dx + dz*dz)
 }
 
-func (d *Driver) readSigns(dets []vision.Detection) {
-	// Take the largest speed sign in view: the nearest one dominates, and the
-	// limit persists after the sign leaves the frame.
-	best := 0
+// Speed sign reading limits, in metres.
+const (
+	signRange    float32 = 45 // a sign further off than this is not ours yet
+	signCorridor float32 = 14 // nor is one this far to the side of the lane
+)
+
+func (d *Driver) readSigns(dets []vision.Detection, lane []lanePoint) {
+	// Take the nearest speed sign standing beside the road being driven, and
+	// keep its limit after it leaves the frame. A sign a long way off, or well
+	// to one side, belongs to a road the car is not on: the same camera that
+	// reads this street's sign can see the next street's across a park.
+	best := signRange
 	for _, det := range dets {
 		v, ok := det.Class.SpeedValue()
 		if !ok {
 			continue
 		}
-		if det.Pixels > best {
-			best, d.SeenLimit = det.Pixels, v
+		dist := d.cam.RangeAtHeight(det.MinY, vision.SpeedSignTopHeight)
+		lateral := dist * tan(d.cam.Bearing(det.CenterX()))
+		if dist >= best || abs(lateral-laneLateralAt(lane, dist)) > signCorridor {
+			continue
 		}
+		best, d.SeenLimit = dist, v
 	}
 }
 
 func (d *Driver) steerFor(lane []lanePoint, speed, dt float32) float32 {
 	if len(lane) == 0 {
-		// Hold the last command briefly rather than snapping straight.
-		d.steer *= 0.9
+		// Keep turning the way the road was last seen to go. The markers are
+		// usually lost off the side of the frame in a tight turn, and
+		// straightening up is the one thing guaranteed not to find them again.
 		return d.steer
 	}
-	look := clamp(5.5+0.85*speed, 7, 24)
-	// Measure the lookahead along the chain rather than straight out from the
-	// car, so a curve is followed round instead of cut across.
-	tgt := lane[len(lane)-1]
-	travelled := lane[0].dist
-	for i, p := range lane {
-		if i > 0 {
-			travelled += gap(lane[i-1], p)
-		}
-		if travelled >= look {
-			tgt = p
-			break
-		}
-	}
-	// Pure pursuit: the steer angle that puts the car on an arc through the
-	// lookahead point.
-	alpha := float32(math.Atan2(float64(tgt.lateral), float64(tgt.dist)))
-	angle := float32(math.Atan2(
-		float64(2*wheelbase*sin(alpha)), float64(max(tgt.dist, 1))))
+	look := clamp(3.5+0.6*speed, 6.5, 20)
+	tgt := lookahead(lane, look)
+
+	// Pure pursuit: the arc through the rear axle and the lookahead point,
+	// tangent to the car's heading, and the wheel angle that drives it.
+	x, y := tgt.dist+lensToAxle, tgt.lateral
+	d.curve = 2 * y / (x*x + y*y)
+	angle := float32(math.Atan(float64(wheelbase * d.curve)))
+
+	// The car turns its wheels less at speed, so ask for more to get the same.
+	authority := clamp(1-speed/(topSpeed*1.5), 0.32, 1)
 
 	d.LaneOffset = lane[0].lateral
-	want := clamp(angle*steerGain/maxSteer, -1, 1)
+	want := clamp(angle*steerGain/(maxSteer*authority), -1, 1)
 	// Smooth so the wheel does not chatter on noisy detections.
 	d.steer += (want - d.steer) * clamp(12*dt, 0, 1)
 	return d.steer
 }
 
-func (d *Driver) hazards(dets []vision.Detection, lane []lanePoint, speed, dt float32) []target {
-	out := d.vehicleTargets(dets, lane, speed)
-
-	a := d.scanAspects(dets)
-	d.carryStopLine(&a, speed, dt)
-	d.applyAspectMemory(&a, dt)
-
-	// A stop line painted on the road is often hidden by the car waiting on it.
-	// When a signal is showing but its line cannot be seen, range the signal
-	// head itself, whose mounting height is known.
-	if !a.haveLine {
-		if dd, ok := d.signalDistance(dets); ok {
-			a.lineDist, a.haveLine = dd, true
+// lookahead returns the point a given distance along the chain of markers,
+// measured from the rear axle and interpolated between markers so the target
+// slides smoothly instead of jumping from one to the next.
+func lookahead(lane []lanePoint, look float32) lanePoint {
+	prev := lanePoint{dist: -lensToAxle}
+	var travelled float32
+	for _, p := range lane {
+		step := gap(prev, p)
+		if travelled+step >= look && step > 0.01 {
+			t := (look - travelled) / step
+			return lanePoint{
+				dist:    prev.dist + (p.dist-prev.dist)*t,
+				lateral: prev.lateral + (p.lateral-prev.lateral)*t,
+			}
 		}
+		travelled += step
+		prev = p
 	}
+	return lane[len(lane)-1]
+}
 
-	out = append(out, d.controlTargets(&a, dets, speed, dt)...)
+// Bend detection limits.
+const (
+	bendRange   float32 = 48   // markers beyond this are too coarsely ranged to trust
+	bendSegment float32 = 2.5  // the shortest run between markers worth measuring
+	bendAngle   float32 = 0.11 // the smallest change of direction that is a bend, rad
+)
 
-	if a.green || (!a.red && !a.amber && !a.stopSign && !a.giveWay) {
-		// Once the way is clear the memory of a stop is discharged.
-		if !a.stopSign {
-			d.stopArmed = false
+func (d *Driver) bendTargets(lane []lanePoint) []target {
+	// Reads how sharply the lane turns from the chain of markers, and plans to
+	// be going slowly enough by the time each bend arrives. A junction turn and
+	// a roundabout both show up this way; nothing else tells the car one is
+	// coming.
+	var out []target
+	if c := abs(d.curve); c > 0.02 && len(lane) > 0 {
+		// The arc being steered right now is a bend too.
+		out = append(out, target{
+			kind: targetBend, speed: bendSpeed(c), decel: cornerDecel, why: "in a bend",
+		})
+	}
+	var travelled float32
+	for i := 1; i+1 < len(lane); i++ {
+		a, b, c := lane[i-1], lane[i], lane[i+1]
+		in, onward := gap(a, b), gap(b, c)
+		travelled += in
+		if b.dist > bendRange {
+			break
 		}
+		if in < bendSegment || onward < bendSegment {
+			continue
+		}
+		turn := abs(wrapPi(heading(b, c) - heading(a, b)))
+		if turn < bendAngle {
+			continue
+		}
+		out = append(out, target{
+			kind: targetBend, dist: max(lane[0].dist+travelled-in/2, 0),
+			speed: bendSpeed(turn / ((in + onward) / 2)), decel: cornerDecel,
+			why: "bend ahead",
+		})
 	}
 	return out
 }
 
-// aspects is what the camera can currently say about the junction ahead.
-type aspects struct {
-	red, amber, green bool
-	stopSign, giveWay bool
-	lineDist          float32
-	haveLine          bool
+func bendSpeed(curvature float32) float32 {
+	return max(sqrt(cornerGrip/curvature), cornerFloor)
 }
 
-func (d *Driver) vehicleTargets(dets []vision.Detection, lane []lanePoint, speed float32) []target {
+func heading(a, b lanePoint) float32 {
+	return float32(math.Atan2(float64(b.lateral-a.lateral), float64(b.dist-a.dist)))
+}
+
+// clearance is how far to the side of the lane centre the nearest edge of a
+// vehicle may be and still be in the way, in metres: half the car's own width
+// and a margin. It opens slightly with range, where bearings are coarser, but
+// never as far as the oncoming lane.
+func clearance(dist float32) float32 {
+	if dist < 8 {
+		return 1.6
+	}
+	return 1.45 + dist*0.02
+}
+
+// Vehicle box interpretation, in metres.
+const (
+	endOnWidth  float32 = 2.2 // the widest a car looks from directly behind
+	sideOnDepth float32 = 3.0 // how much further off the far corners of one seen side-on are
+)
+
+// inPath reports whether a vehicle detection overlaps the car's own path, and
+// how far away it is.
+//
+// The test is on the edges of the box rather than its centre. A car seen at an
+// angle, or cut off by the side of the frame, has a box whose centre says very
+// little about where the car is, but the edge nearest the lane is always the
+// part that matters.
+func (d *Driver) inPath(det vision.Detection, lane []lanePoint) (float32, bool) {
+	dist := d.cam.GroundDistance(det.MaxY)
+	if dist <= 0 || dist > 75 {
+		return 0, false
+	}
+	lo, hi := det.Base()
+	tl, tr := tan(d.cam.Bearing(lo)), tan(d.cam.Bearing(hi))
+	// The bottom of the box ranges the nearest corner, but its sides are set
+	// by whichever corners stick out furthest, and on a car seen side-on those
+	// are further away. Ranging the sides from the near corner would pull a
+	// car in the next lane across into this one, so a box too wide to be a
+	// car seen end-on, or one cut off by the frame, has its sides pushed back.
+	depth := clamp(dist*(tr-tl)-endOnWidth, 0, sideOnDepth)
+	if lo <= 1 || hi >= float32(d.cam.Width-2) {
+		depth = sideOnDepth
+	}
+	left, right := (dist+depth)*tl, (dist+depth)*tr
+	centre := laneLateralAt(lane, dist)
+	room := clearance(dist)
+	return dist, left < centre+room && right > centre-room
+}
+
+func (d *Driver) vehicleTargets(dets []vision.Detection, lane []lanePoint) []target {
 	var out []target
 	// The car in front. A vehicle box's bottom edge is where its tyres meet
 	// the road, which is the usable range cue.
@@ -353,157 +504,212 @@ func (d *Driver) vehicleTargets(dets []vision.Detection, lane []lanePoint, speed
 		if !vision.IsVehicle(det.Class) {
 			continue
 		}
-		dist := d.cam.GroundDistance(det.MaxY)
-		if dist <= 0 || dist > 70 {
+		dist, blocking := d.inPath(det, lane)
+		if !blocking {
 			continue
 		}
-		lateral := dist * tan(d.cam.Bearing(det.CenterX()))
-		// Only cars roughly in our own lane matter, and the corridor widens
-		// with distance to allow for curvature.
-		if abs(lateral-laneLateralAt(lane, dist)) > laneCorridor+dist*0.05 {
-			continue
-		}
-		gap := dist - followGap
+		// With no tracking between frames there is no telling how fast the car
+		// ahead is going, so plan to be able to stop short of where it is now.
+		// Behind moving traffic that settles into a gap that grows with speed;
+		// behind a queue it stops.
 		out = append(out, target{
-			dist: max(gap, 0), speed: max(speed-closingEstimate(gap, speed), 0),
+			kind: targetVehicle, dist: max(dist-followGap, 0), decel: followDecel,
 			why: fmt.Sprintf("vehicle %.0fm ahead", dist),
 		})
 	}
 	return out
 }
 
-func (d *Driver) scanAspects(dets []vision.Detection) aspects {
-	// Signals and signs, positioned by the stop line when it is visible.
-	lineDist, haveLine := d.stopLineDistance(dets)
-	a := aspects{lineDist: lineDist, haveLine: haveLine}
-	for _, det := range dets {
-		switch det.Class {
-		case vision.ClassLightRed, vision.ClassLightRedAmber:
-			// Red and amber together still means stop: it only warns that
-			// green is coming.
-			a.red = true
-		case vision.ClassLightAmber:
-			a.amber = true
-		case vision.ClassLightGreen:
-			a.green = true
-		case vision.ClassStopSign, vision.ClassGiveWay:
-			if det.Class == vision.ClassGiveWay {
-				a.giveWay = true
-			} else {
-				a.stopSign = true
-			}
-			if !a.haveLine {
-				if dd := d.cam.GroundDistance(det.MaxY); dd > 0 && dd < 60 {
-					a.lineDist, a.haveLine = dd, true
-				}
-			}
-		}
+func (d *Driver) junctionTargets(dets []vision.Detection, lane []lanePoint, speed, dt float32) []target {
+	stopAt, haveStop := d.locateLine(dets, speed, dt)
+	stopAt, haveStop = d.readSignal(dets, stopAt, haveStop, speed, dt)
+	stopAt, haveStop = d.readPrioritySign(dets, stopAt, haveStop)
+	if !haveStop {
+		d.stopHeld = false
+		return nil
 	}
-	return a
-}
 
-func (d *Driver) carryStopLine(a *aspects, speed, dt float32) {
-	// Carry the stop line forward on odometry while it is in view, so it
-	// survives being hidden by the car in front or leaving the frame.
-	if d.haveStopDist {
-		d.stopDist -= speed * dt
-		if d.stopDist < -2 {
-			d.haveStopDist = false
-		}
-	}
-	if a.haveLine {
-		d.stopDist, d.haveStopDist = a.lineDist, true
-	}
-}
-
-func (d *Driver) applyAspectMemory(a *aspects, dt float32) {
-	// A signal seen a moment ago still governs this junction even once it has
-	// slipped out of frame. Seeing green cancels the memory at once.
+	stop := max(stopAt-stopBuffer, 0)
+	var out []target
 	switch {
-	case a.green:
-		d.redMemory = 0
-	case a.red || a.amber:
-		d.redMemory = aspectMemory
-	case d.redMemory > 0:
-		d.redMemory -= dt
-		if !a.haveLine && d.haveStopDist && d.stopDist > 0 {
-			a.lineDist, a.haveLine = d.stopDist, true
+	case d.aspect == vision.ClassLightRed || d.aspect == vision.ClassLightRedAmber:
+		// Red and amber together still means stop: it only warns that green is
+		// coming.
+		out = append(out, target{dist: stop, why: "red light"})
+	case d.aspect == vision.ClassLightAmber:
+		if !committed(speed, stopAt) {
+			out = append(out, target{dist: stop, why: "amber light"})
 		}
-		// A remembered signal governs the junction it was seen at. A give way
-		// line belongs to a different junction entirely — a roundabout, most
-		// likely — so it must not revive the memory.
-		a.red = a.red || (a.haveLine && !a.giveWay)
+	case d.aspect == vision.ClassLightGreen:
+		return nil
+	case d.sign == vision.ClassStopSign && !d.stopDone:
+		d.haltAtStopSign(stopAt, speed, dt)
+		if !d.stopHeld {
+			out = append(out, target{dist: stop, why: "stop sign"})
+		}
+	case d.sign != vision.ClassNone:
+		out = append(out, d.giveWay(dets, lane, stop, stopAt, speed, dt)...)
 	}
-}
 
-func (d *Driver) controlTargets(a *aspects, dets []vision.Detection, speed, dt float32) []target {
-	out := d.stopTargets(a, dets, speed, dt)
 	// Approach an unconfirmed junction at a speed the car can stop from, unless
 	// the line is already too close to stop for at all.
-	if a.haveLine && !a.green && a.lineDist < junctionWatch && !committed(speed, a.lineDist) {
-		out = append(out, target{
-			dist: max(a.lineDist-stopBuffer, 0), speed: junctionCreep,
-			why: "approaching a junction",
-		})
+	if stopAt < junctionWatch && !committed(speed, stopAt) {
+		out = append(out, target{dist: stop, speed: junctionCreep, why: "approaching a junction"})
 	}
 	return out
 }
 
-func (d *Driver) stopTargets(a *aspects, dets []vision.Detection, speed, dt float32) []target {
-	if !a.haveLine {
-		return nil
+// locateLine finds the stop line ahead, by sight while it is in view and by
+// odometry once it is not, and notices when the car has driven over it.
+func (d *Driver) locateLine(dets []vision.Detection, speed, dt float32) (float32, bool) {
+	if d.clearRun > 0 {
+		d.clearRun -= speed * dt
 	}
-	stop := max(a.lineDist-stopBuffer, 0)
-	switch {
-	case a.red:
-		return []target{{dist: stop, why: "red light"}}
-	case a.amber && !committed(speed, a.lineDist):
-		return []target{{dist: stop, why: "amber light"}}
-	case a.stopSign:
-		d.handleStopSign(a.lineDist, speed, dt)
-		if !d.stopHeld && d.stopArmed {
-			return []target{{dist: stop, why: "stop sign"}}
+	if d.haveStopDist {
+		// Carry the line forward on odometry, so it survives being hidden by
+		// the car in front or passing under the bonnet.
+		if d.stopDist -= speed * dt; d.stopDist < -1 {
+			d.crossedLine()
 		}
-	case a.giveWay:
-		// A give way sign needs no halt, only a slow approach and a stop if
-		// something is crossing.
-		out := []target{{dist: stop, speed: giveWaySpeed, why: "give way"}}
-		if crossingTraffic(d.cam, dets, a.lineDist) {
-			out = append(out, target{dist: stop, why: "giving way to traffic"})
-		}
-		return out
 	}
-	return nil
+	if dd, ok := d.stopLineDistance(dets); ok {
+		d.stopDist, d.haveStopDist = dd, true
+	}
+	return d.stopDist, d.haveStopDist
 }
 
-func (d *Driver) handleStopSign(lineDist, speed, dt float32) {
-	// A stop sign has to be obeyed with a genuine halt, then a short pause
-	// before moving off again.
-	if !d.stopArmed && !d.stopHeld {
-		d.stopArmed = true
-	}
-	if d.stopArmed && lineDist < stopBuffer+2.2 && speed < 0.6 {
-		d.stopArmed, d.stopHeld, d.stopTimer = false, true, 0
-	}
-	if d.stopHeld {
-		if d.stopTimer += dt; d.stopTimer >= stopWaitTime {
-			d.stopHeld = false
-		}
-	}
+// crossedLine discharges everything remembered about the junction just entered.
+func (d *Driver) crossedLine() {
+	d.haveStopDist = false
+	d.aspect, d.sign = vision.ClassNone, vision.ClassNone
+	d.stopHeld, d.stopDone = false, false
+	d.waited = 0
+	d.clearRun = junctionClear
 }
 
-func (d *Driver) signalDistance(dets []vision.Detection) (float32, bool) {
-	best, found := float32(1e9), false
+// Signal association limits, in metres either side of the stop line. The
+// primary head stands at the line and the secondary across the junction.
+const (
+	signalBefore float32 = 5
+	signalBeyond float32 = 36
+)
+
+// nearestHead finds the nearest signal head that could govern the junction
+// ahead, and how far off it is. With a stop line to pin it to, a head has to
+// stand at that line or across the junction from it to count.
+func (d *Driver) nearestHead(dets []vision.Detection, stopAt float32, haveStop bool) (vision.Class, float32) {
+	best, bestDist := vision.ClassNone, float32(1e9)
 	for _, det := range dets {
 		if !det.Class.StopsTraffic() && det.Class != vision.ClassLightGreen {
 			continue
 		}
 		dd := d.cam.RangeAtHeight(det.MaxY, vision.SignalHeadHeight)
-		if dd > 0 && dd < 95 && dd < best {
-			best, found = dd, true
+		if dd <= 0 || dd > 95 || dd >= bestDist {
+			continue
+		}
+		if haveStop && (dd < stopAt-signalBefore || dd > stopAt+signalBeyond) {
+			continue // a head at some other junction
+		}
+		best, bestDist = det.Class, dd
+	}
+	return best, bestDist
+}
+
+// readSignal finds the signal governing the junction ahead and remembers its
+// aspect. With no stop line to pin it to, the nearest head is taken to stand at
+// its own.
+func (d *Driver) readSignal(dets []vision.Detection, stopAt float32, haveStop bool, speed, dt float32) (float32, bool) {
+	best, bestDist := d.nearestHead(dets, stopAt, haveStop)
+	switch {
+	case best != vision.ClassNone && haveStop:
+		d.aspect, d.aspectAge = best, 0
+	case best != vision.ClassNone && d.clearRun <= 0:
+		// A stop line is often hidden by the car waiting on it, so range the
+		// signal head itself, whose mounting height is known.
+		d.aspect, d.aspectAge = best, 0
+		stopAt, haveStop = bestDist+1, true
+	default:
+		d.forgetAspect(haveStop, speed, dt)
+	}
+	return stopAt, haveStop
+}
+
+// forgetAspect ages the aspect last seen while no head is in view. What was
+// last seen still stands for a moment, and for much longer if the car is
+// already waiting at the line.
+func (d *Driver) forgetAspect(haveStop bool, speed, dt float32) {
+	d.aspectAge += dt
+	limit := aspectMemory
+	if speed < 0.6 && d.aspect.StopsTraffic() {
+		limit = aspectHold
+	}
+	if d.aspectAge > limit || !haveStop {
+		d.aspect = vision.ClassNone
+	}
+}
+
+// signReach is how far either side of the stop line a priority sign may stand
+// and still be the one governing it, in metres.
+const signReach float32 = 8
+
+// readPrioritySign notices a stop or give way sign at the junction ahead.
+func (d *Driver) readPrioritySign(dets []vision.Detection, stopAt float32, haveStop bool) (float32, bool) {
+	for _, det := range dets {
+		if det.Class != vision.ClassStopSign && det.Class != vision.ClassGiveWay {
+			continue
+		}
+		dd := d.cam.RangeAtHeight(det.MinY, vision.SignTopHeight)
+		if dd <= 0 || dd > 70 {
+			continue
+		}
+		switch {
+		case haveStop && abs(dd-stopAt) < signReach:
+			d.sign = det.Class
+		case !haveStop && d.clearRun <= 0:
+			// The line is hidden, so the sign stands in for it.
+			d.sign = det.Class
+			stopAt, haveStop = dd+1, true
 		}
 	}
-	return best, found
+	if !haveStop {
+		d.sign = vision.ClassNone
+	}
+	return stopAt, haveStop
+}
+
+func (d *Driver) haltAtStopSign(stopAt, speed, dt float32) {
+	// A stop sign has to be obeyed with a genuine halt, then a short pause
+	// before moving off again.
+	if !d.stopHeld && stopAt < stopBuffer+1.2 && speed < 0.4 {
+		d.stopHeld, d.stopTimer = true, 0
+	}
+	if d.stopHeld {
+		if d.stopTimer += dt; d.stopTimer >= stopWaitTime {
+			d.stopHeld, d.stopDone = false, true
+		}
+	}
+}
+
+func (d *Driver) giveWay(dets []vision.Detection, lane []lanePoint, stop, stopAt, speed, dt float32) []target {
+	// A give way needs no halt, only a slow approach and a stop if something
+	// is crossing. A stop sign that has been obeyed is the same thing.
+	out := make([]target, 0, 2)
+	out = append(out, target{dist: stop, speed: giveWaySpeed, why: "give way"})
+	if !d.crossingTraffic(dets, lane, stopAt) {
+		d.waited = 0
+		return out
+	}
+	if speed < 0.6 {
+		d.waited += dt
+	}
+	if d.waited > patience {
+		// Nothing has cleared, so it is probably a queue rather than traffic.
+		if d.waited > patience+nudge {
+			d.waited = 0
+		}
+		return out
+	}
+	return append(out, target{dist: stop, why: "giving way to traffic"})
 }
 
 func (d *Driver) stopLineDistance(dets []vision.Detection) (float32, bool) {
@@ -519,18 +725,23 @@ func (d *Driver) stopLineDistance(dets []vision.Detection) (float32, bool) {
 	return best, found
 }
 
-func crossingTraffic(cam vision.Camera, dets []vision.Detection, lineDist float32) bool {
+// crossReach is how far beyond a give way line traffic is watched for, in
+// metres. It has to take in the far side of a roundabout, because that is
+// where the car that will arrive at the entry is coming from.
+const crossReach float32 = 34
+
+func (d *Driver) crossingTraffic(dets []vision.Detection, lane []lanePoint, lineDist float32) bool {
 	// Anything detected off to the side at roughly the distance of the give way
 	// line is traffic on the road being joined.
 	for _, det := range dets {
 		if !vision.IsVehicle(det.Class) {
 			continue
 		}
-		dist := cam.GroundDistance(det.MaxY)
-		if dist <= 0 || dist > lineDist+22 {
+		dist, blocking := d.inPath(det, lane)
+		if dist <= 0 || dist < lineDist-4 || dist > lineDist+crossReach {
 			continue
 		}
-		if abs(dist*tan(cam.Bearing(det.CenterX()))) > laneCorridor {
+		if !blocking {
 			return true
 		}
 	}
@@ -557,32 +768,13 @@ func laneLateralAt(lane []lanePoint, dist float32) float32 {
 	return prev.lateral
 }
 
-func cornerLimit(lane []lanePoint) float32 {
-	// Estimate how sharply the lane bends ahead and cap the speed accordingly.
-	if len(lane) < 3 {
-		return 1e6
-	}
-	far := lane[len(lane)-1]
-	if far.dist < 6 {
-		return 1e6
-	}
-	// Lateral displacement over range approximates how tightly the road turns.
-	// On a ring the far end of the chain swings a long way off the centreline,
-	// which is what pulls the speed down for a roundabout.
-	curve := abs(far.lateral) / far.dist
-	if curve < 0.06 {
-		return 1e6
-	}
-	return max(4.5, 22/(1+cornerSlowdown*curve*10))
-}
-
-func approachSpeed(dist, final float32) float32 {
+func approachSpeed(dist, final, decel float32) float32 {
 	// The fastest speed from which the car can still reach `final` by the time
-	// it has travelled `dist`, at a comfortable rate.
+	// it has travelled `dist`, braking at the given rate.
 	if dist <= 0.05 {
 		return final
 	}
-	return sqrt(final*final + 2*comfortStop*dist)
+	return sqrt(final*final + 2*decel*dist)
 }
 
 func committed(speed, lineDist float32) bool {
@@ -594,33 +786,39 @@ func committed(speed, lineDist float32) bool {
 	return speed*speed/(2*d) > hardStop
 }
 
-func closingEstimate(gap, speed float32) float32 {
-	// Without frame-to-frame tracking, assume a lead car that is close is
-	// slower than us, which biases the controller toward caution.
-	if gap > 25 {
-		return 0
-	}
-	return min(speed, (25-gap)/25*speed*0.5)
-}
-
-func applyLongitudinal(cmd *Command, speed, target float32) {
+func applyLongitudinal(cmd *Command, speed, target, need float32) {
 	err := target - speed
 	switch {
 	case err > 0.4:
-		cmd.Throttle = clamp(err/6, 0.12, 1)
+		cmd.Throttle = clamp(err/5, 0.12, 1)
 	case err < -0.25:
 		// Scale braking with how far over the target we are.
 		cmd.Brake = clamp(-err/(hardStop*0.6), 0.06, 1)
-		if target < 0.3 && speed < 1.2 {
-			cmd.Brake = 1 // hold firmly at a standstill
-		}
 	default:
 		cmd.Throttle = clamp(err, 0, 0.25)
 	}
+	// Riding the braking curve down to a stop, the error stays near zero while
+	// the brakes still have real work to do, so feed in what the curve needs.
+	if err < 0.3 && need > 0.6 {
+		cmd.Throttle = 0
+		cmd.Brake = max(cmd.Brake, clamp(need/brakeDecel, 0, 1))
+	}
+	if target < 0.3 && speed < 1.2 {
+		cmd.Throttle, cmd.Brake = 0, 1 // hold firmly at a standstill
+	}
+}
+
+func wrapPi(a float32) float32 {
+	for a > math.Pi {
+		a -= 2 * math.Pi
+	}
+	for a < -math.Pi {
+		a += 2 * math.Pi
+	}
+	return a
 }
 
 func clamp(v, lo, hi float32) float32 { return min(max(v, lo), hi) }
 func abs(v float32) float32           { return float32(math.Abs(float64(v))) }
 func sqrt(v float32) float32          { return float32(math.Sqrt(float64(v))) }
-func sin(v float32) float32           { return float32(math.Sin(float64(v))) }
 func tan(v float32) float32           { return float32(math.Tan(float64(v))) }

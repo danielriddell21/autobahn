@@ -9,6 +9,7 @@
 package city
 
 import (
+	"math"
 	"math/rand/v2"
 
 	"github.com/danielriddell21/crucible/geom"
@@ -33,6 +34,11 @@ const (
 	LaneWidth     float32 = 3.6
 	PavementWidth float32 = 4.0
 	KerbHeight    float32 = 0.18
+	// KerbRadius is how far the kerb is rounded back at a street corner. It
+	// is what gives a turn toward the kerb a radius a car can actually drive:
+	// with square corners the kerbside lane would have to turn inside its own
+	// length.
+	KerbRadius float32 = 6.0
 )
 
 // RoadClass determines a road's lane count, speed limit and priority at
@@ -123,6 +129,9 @@ type Node struct {
 	Roundabout bool
 	ringRadius float32
 	ringEntry  map[int]int // road ID to the ring lane it joins
+	// ringEntryAngle is the angle round the ring at which each road's traffic
+	// joins it.
+	ringEntryAngle map[int]float32
 
 	// How far the junction has got. settled means its shape is final; wired,
 	// that its roads are built, its lanes joined up and its signs standing;
@@ -204,6 +213,100 @@ type Building struct {
 type Block struct {
 	Min, Max mathx.Vec
 	Park     bool
+	// Corners says how each corner is cut back for the junction it faces, in
+	// the order (Min.X, Min.Z), (Max.X, Min.Z), (Min.X, Max.Z), (Max.X, Max.Z).
+	Corners [4]Corner
+}
+
+// Corner is how one corner of a block gives way to the junction beside it.
+type Corner struct {
+	// Radius rounds the kerb at an ordinary street corner. It is zero where
+	// the block runs on flush into its neighbour because no street divides
+	// them.
+	Radius float32
+	// Bite is the radius of carriageway cleared around a roundabout standing
+	// at Centre, which takes a scoop out of the block. It is zero anywhere
+	// else.
+	Bite   float32
+	Centre mathx.Vec
+}
+
+// arcStep is the longest straight piece a curved kerb is drawn with, in metres.
+const arcStep float32 = 1.5
+
+// Outline returns the kerb line of the block as a closed polygon, wound from
+// the Min corner round through (Max.X, Min.Z). It is star-shaped about the
+// middle of the block, so a fan from there fills it.
+func (b Block) Outline() []mathx.Vec {
+	// The four corners in winding order, with the block-space directions that
+	// lead into and out of each.
+	order := [4]struct {
+		at      mathx.Vec
+		in, out mathx.Vec
+		corner  Corner
+	}{
+		{mathx.V(b.Min.X, b.Min.Z), mathx.V(0, -1), mathx.V(1, 0), b.Corners[0]},
+		{mathx.V(b.Max.X, b.Min.Z), mathx.V(1, 0), mathx.V(0, 1), b.Corners[1]},
+		{mathx.V(b.Max.X, b.Max.Z), mathx.V(0, 1), mathx.V(-1, 0), b.Corners[3]},
+		{mathx.V(b.Min.X, b.Max.Z), mathx.V(-1, 0), mathx.V(0, -1), b.Corners[2]},
+	}
+	var out []mathx.Vec
+	for _, c := range order {
+		switch {
+		case c.corner.Bite > 0:
+			out = appendBite(out, c.at, c.in, c.out, c.corner)
+		case c.corner.Radius > 0:
+			out = appendFillet(out, c.at, c.in, c.out, c.corner.Radius)
+		default:
+			out = append(out, c.at)
+		}
+	}
+	return out
+}
+
+// appendFillet rounds a convex corner. in is the direction the outline arrives
+// along and out the one it leaves by.
+func appendFillet(pts []mathx.Vec, at, in, out mathx.Vec, r float32) []mathx.Vec {
+	centre := at.Sub(in.Mul(r)).Add(out.Mul(r))
+	steps := max(int(r*math.Pi/2/arcStep), 2)
+	for i := 0; i <= steps; i++ {
+		// Sweep from the point short of the corner round to the point past it.
+		t := float32(i) / float32(steps) * math.Pi / 2
+		pts = append(pts, centre.Add(in.Mul(r*mathx.Sin(t))).Sub(out.Mul(r*mathx.Cos(t))))
+	}
+	return pts
+}
+
+// appendBite follows the edge of a roundabout where it cuts into a corner.
+func appendBite(pts []mathx.Vec, at, in, out mathx.Vec, c Corner) []mathx.Vec {
+	// Where the circle crosses the edge arriving at the corner and the edge
+	// leaving it. The roundabout sits outside the block, beyond the corner.
+	rel := c.Centre.Sub(at)
+	along := func(dir mathx.Vec) (float32, bool) {
+		// Distance from the corner, back into the block along -dir, at which
+		// the edge leaves the circle.
+		off := rel.Cross(dir) // how far the centre is from the edge's line
+		if mathx.Abs(off) >= c.Bite {
+			return 0, false
+		}
+		reach := mathx.Sqrt(c.Bite*c.Bite-off*off) - rel.Dot(dir)
+		return reach, reach > 0
+	}
+	back, okIn := along(in)
+	fwd, okOut := along(out.Mul(-1))
+	if !okIn || !okOut {
+		return append(pts, at) // the roundabout does not reach this corner
+	}
+	from := at.Sub(in.Mul(back))
+	to := at.Add(out.Mul(fwd))
+	a0 := from.Sub(c.Centre).Angle()
+	sweep := mathx.AngleDiff(to.Sub(c.Centre).Angle(), a0)
+	steps := max(int(mathx.Abs(sweep)*c.Bite/arcStep), 2)
+	for i := 0; i <= steps; i++ {
+		a := a0 + sweep*float32(i)/float32(steps)
+		pts = append(pts, c.Centre.Add(mathx.FromAngle(a).Mul(c.Bite)))
+	}
+	return pts
 }
 
 // PropKind identifies a piece of roadside furniture.
@@ -520,56 +623,47 @@ func turnKind(from, to mathx.Vec) TurnKind {
 	}
 }
 
+// kerbTurn is the turn made toward the kerb, without crossing the oncoming
+// stream: left where traffic keeps left.
+func kerbTurn() TurnKind {
+	if DriveOnLeft {
+		return TurnLeft
+	}
+	return TurnRight
+}
+
 func turnAllowed(k TurnKind, fromIdx, fromLanes int) bool {
-	// On a single-lane approach every movement is permitted. On a wider one,
-	// left turns are made from the inside lane and right turns from the
-	// outside lane.
+	// On a single-lane approach every movement is permitted. On a wider one
+	// the turn toward the kerb is made from the kerbside lane and the turn
+	// across the road from the lane beside the centreline, so neither cuts
+	// across the other. Lane 0 is the innermost whichever side traffic keeps
+	// to, which makes the kerbside lane the last.
 	if fromLanes == 1 {
 		return true
 	}
-	// The turn away from the centreline is made from the outside lane and the
-	// turn across the road from the inside one.
-	nearside, offside := fromLanes-1, 0
-	if DriveOnLeft {
-		nearside, offside = 0, fromLanes-1
-	}
 	switch k {
-	case TurnLeft:
-		if DriveOnLeft {
-			return fromIdx == nearside
-		}
-		return fromIdx == offside
-	case TurnRight:
-		if DriveOnLeft {
-			return fromIdx == offside
-		}
-		return fromIdx == nearside
-	default:
+	case TurnStraight:
 		return true
+	case kerbTurn():
+		return fromIdx == fromLanes-1
+	default:
+		return fromIdx == 0
 	}
 }
 
 func preferredExitIndex(k TurnKind, fromIdx, toLanes int) int {
+	// A turn finishes in the lane that matches the one it started from: kerb
+	// lane to kerb lane, centre lane to centre lane.
 	if toLanes == 1 {
 		return 0
 	}
-	nearside, offside := toLanes-1, 0
-	if DriveOnLeft {
-		nearside, offside = 0, toLanes-1
-	}
 	switch k {
-	case TurnLeft:
-		if DriveOnLeft {
-			return nearside
-		}
-		return offside
-	case TurnRight:
-		if DriveOnLeft {
-			return offside
-		}
-		return nearside
-	default:
+	case TurnStraight:
 		return min(fromIdx, toLanes-1)
+	case kerbTurn():
+		return toLanes - 1
+	default:
+		return 0
 	}
 }
 
@@ -660,6 +754,14 @@ func (c *City) placeApproachProp(l *Lane, r *Road, side float32) {
 			Kind: PropTrafficLight, Pos: pos, Heading: l.Heading,
 			Node: l.ToNode, Group: l.Group, Height: 3.4,
 		})
+		// And a secondary head on the far side of the junction, repeating the
+		// same aspect. The primary passes out of sight of a driver who has
+		// pulled up at the line beneath it, so without this nobody waiting at
+		// the front of a queue could see the light change.
+		c.Props = append(c.Props, Prop{
+			Kind: PropTrafficLight, Pos: c.farSide(l, r, side), Heading: l.Heading,
+			Node: l.ToNode, Group: l.Group, Height: 3.4,
+		})
 	case ControlStop:
 		c.Props = append(c.Props, Prop{
 			Kind: PropStopSign, Pos: pos, Heading: l.Heading,
@@ -673,18 +775,42 @@ func (c *City) placeApproachProp(l *Lane, r *Road, side float32) {
 	}
 }
 
+// farSide is where the secondary signal head for an approach stands: across
+// the junction, on the pavement.
+func (c *City) farSide(l *Lane, r *Road, side float32) mathx.Vec {
+	n := c.Nodes[l.ToNode]
+	var cross float32
+	onward := false
+	for _, rid := range n.Roads {
+		o := c.Roads[rid]
+		switch {
+		case o.ID == r.ID:
+		case o.Axis == r.Axis:
+			onward = true
+		default:
+			cross = max(cross, o.HalfWidth)
+		}
+	}
+	if onward {
+		// The road carries on, so the head stands beside it just past the box.
+		return kerbsideAt(l, r, l.B.Add(l.Fwd.Mul(2*n.Radius+1.5)), 1.2, side)
+	}
+	// The road ends here, so the head faces straight back down it from the
+	// pavement on the far side of the street it meets.
+	centre := l.B.Add(l.Fwd.Mul(n.Radius))
+	return centre.Add(l.Fwd.Mul(cross + 1.2))
+}
+
 // placeRoadProps puts the speed signs and street lamps along one road.
 func (c *City) placeRoadProps(r *Road, side float32) {
 	na, nb := c.Nodes[r.A], c.Nodes[r.B]
 
-	// Speed limit signs shortly after a junction, so a driver sees the limit
-	// for the road they have just joined.
-	for i, lid := range append(append([]int{}, r.LanesAB...), r.LanesBA...) {
+	// A speed limit sign shortly after every junction, so a driver sees the
+	// limit for the road they have just joined. A limit that changed with no
+	// sign to say so could not be obeyed by anybody driving on what they see.
+	for _, lid := range append(append([]int{}, r.LanesAB...), r.LanesBA...) {
 		l := c.Lanes[lid]
 		if l.Index != 0 || l.Length < 30 {
-			continue
-		}
-		if cellValue(c.Seed, speedSignSalt, na.GridI, na.GridJ, i) > speedSignShare {
 			continue
 		}
 		pos := kerbsideAt(l, r, l.A.Add(l.Fwd.Mul(10)), 1.2, side)
@@ -706,25 +832,35 @@ func (c *City) placeRoadProps(r *Road, side float32) {
 // fillCell lays the block between four junctions: its pavement, and the
 // buildings around its edge.
 //
-// The inset is the widest carriageway on each side, so nothing overlaps a
-// road. A roundabout is wider than the road that made it, which the inset
-// cannot express — the renderer paves over the difference.
+// Each side is set back by the half-width of the street running along it, so
+// the kerb is where the carriageway ends. A side with no street — one the
+// plan thinned away — is not set back at all, and the block runs on flush
+// into its neighbour instead of leaving a strip of road nobody can drive.
 func (c *City) fillCell(col, row int, corners [4]*Node) {
-	lo := corners[0].Pos
-	hi := corners[3].Pos
-	insetX := max(corners[0].Radius, corners[2].Radius, LaneWidth)
-	insetZ := max(corners[0].Radius, corners[1].Radius, LaneWidth)
-	farX := max(corners[1].Radius, corners[3].Radius, LaneWidth)
-	farZ := max(corners[2].Radius, corners[3].Radius, LaneWidth)
+	west := c.streetHalfWidth(corners[0], corners[2])
+	east := c.streetHalfWidth(corners[1], corners[3])
+	north := c.streetHalfWidth(corners[0], corners[1])
+	south := c.streetHalfWidth(corners[2], corners[3])
 
-	lo = mathx.V(lo.X+insetX, lo.Z+insetZ)
-	hi = mathx.V(hi.X-farX, hi.Z-farZ)
+	lo := mathx.V(corners[0].Pos.X+west, corners[0].Pos.Z+north)
+	hi := mathx.V(corners[3].Pos.X-east, corners[3].Pos.Z-south)
 	if hi.X-lo.X < 14 || hi.Z-lo.Z < 14 {
 		return
 	}
 
 	park := cellChance(c.Seed, parkSalt, col, row) < parkShare
-	c.Blocks = append(c.Blocks, Block{Min: lo, Max: hi, Park: park})
+	block := Block{Min: lo, Max: hi, Park: park}
+	// Each corner faces one junction, and is cut back to suit it.
+	sides := [4][2]float32{{west, north}, {east, north}, {west, south}, {east, south}}
+	for i, n := range corners {
+		switch {
+		case n.Roundabout:
+			block.Corners[i] = Corner{Bite: n.ringRadius + ringVerge, Centre: n.Pos}
+		case sides[i][0] > 0 && sides[i][1] > 0:
+			block.Corners[i] = Corner{Radius: KerbRadius}
+		}
+	}
+	c.Blocks = append(c.Blocks, block)
 	if park {
 		return
 	}
@@ -735,6 +871,19 @@ func (c *City) fillCell(col, row int, corners [4]*Node) {
 	centre := mathx.V((lo.X+hi.X)/2, (lo.Z+hi.Z)/2)
 	downtown := 1 - mathx.Clamp(centre.Len()/downtownFalloff, 0, 1)
 	c.fillBlock(col, row, lo, hi, downtown)
+}
+
+// streetHalfWidth is the carriageway half-width of the street joining two
+// neighbouring junctions, or zero if the plan has none there. It reads the
+// plan rather than the roads, which may not all be built when a block is.
+func (c *City) streetHalfWidth(a, b *Node) float32 {
+	for _, id := range c.lat.Nodes[a.ID].Edges {
+		e := c.lat.Edges[id]
+		if c.lat.Other(e, a.ID) == b.ID {
+			return halfWidthOf(latticeClass(c.lat, e))
+		}
+	}
+	return 0
 }
 
 // fillBlock lines the perimeter of a block with buildings facing the street,
@@ -754,6 +903,8 @@ func (c *City) fillBlock(col, row int, lo, hi mathx.Vec, downtown float32) {
 	if depth < 6 {
 		depth = min((x1-x0)/2, (z1-z0)/2)
 	}
+
+	first := len(c.Buildings)
 
 	// draw hands out this block's numbers, one per call, so the sequence is
 	// fixed by the cell rather than by how many blocks came before it.
@@ -793,26 +944,30 @@ func (c *City) fillBlock(col, row int, lo, hi mathx.Vec, downtown float32) {
 			z += d
 		}
 	}
-	c.clearRoundabouts(col, row)
+	c.clearRoundabouts(col, row, first)
 }
 
 // clearRoundabouts drops any building of the cell just filled that stands in a
-// roundabout's carriageway. A roundabout is far wider than the road that made
-// it, and the block inset is worked out from road widths alone, so a block
-// against one can overlap it.
-func (c *City) clearRoundabouts(col, row int) {
+// roundabout's carriageway, or on the pavement around it. A roundabout is far
+// wider than the roads meeting at it, and takes a scoop out of each block.
+//
+// Only the buildings from first onward are looked at: the ones this cell has
+// just added. Everything before them belongs to cells already finished, and
+// taking one of those away would both revise what is built and renumber every
+// building after it, under the feet of anything holding an index.
+func (c *City) clearRoundabouts(col, row, first int) {
 	corners, ok := c.cellCorners(col, row)
 	if !ok {
 		return
 	}
-	kept := c.Buildings[:0]
-	for _, b := range c.Buildings {
+	kept := c.Buildings[:first]
+	for _, b := range c.Buildings[first:] {
 		clash := false
 		for _, n := range corners {
 			if !n.Roundabout {
 				continue
 			}
-			if b.Center.DistTo(n.Pos) < n.ringRadius+6+max(b.W, b.D)/2 {
+			if b.Center.DistTo(n.Pos) < n.ringRadius+ringVerge+PavementWidth+max(b.W, b.D)/2 {
 				clash = true
 			}
 		}
@@ -881,6 +1036,45 @@ func (c *City) Project(p mathx.Vec) LaneProjection {
 		}
 	})
 	return best
+}
+
+// headingAgreement is how closely a lane has to run the way a car is pointing
+// for [City.ProjectAlong] to count it as going the car's way.
+const headingAgreement float32 = 0.3
+
+// ProjectAlong is [City.Project] restricted to lanes running roughly the way
+// fwd points. It answers "which lane am I driving along" rather than "which
+// lane is nearest", which differ whenever the oncoming lane is the closer one.
+func (c *City) ProjectAlong(p, fwd mathx.Vec) LaneProjection {
+	best := LaneProjection{Dist: 1e9}
+	c.lanes.Near(ground(p), laneCellSize, func(id int) {
+		l := c.Lanes[id]
+		if l.Fwd.Dot(fwd) < headingAgreement {
+			return
+		}
+		s := mathx.Clamp(p.Sub(l.A).Dot(l.Fwd), 0, l.Length)
+		on := l.A.Add(l.Fwd.Mul(s))
+		if d := on.DistTo(p); d < best.Dist {
+			best = LaneProjection{
+				Lane: l, S: s, Dist: d, Valid: true,
+				Lateral: p.Sub(on).Dot(l.Fwd.Right()),
+			}
+		}
+	})
+	return best
+}
+
+// InJunction reports whether a point lies in the box of a junction at either
+// end of a lane. Lanes stop at the edge of the box, so inside it the nearest
+// lane says nothing about where a car should be or which way it should face.
+func (c *City) InJunction(p mathx.Vec, l *Lane) bool {
+	for _, id := range [2]int{l.FromNode, l.ToNode} {
+		n := c.Nodes[id]
+		if !n.Roundabout && p.DistTo(n.Pos) <= n.Radius {
+			return true
+		}
+	}
+	return false
 }
 
 // RoadHalfWidth returns the carriageway half-width of the road carrying l.

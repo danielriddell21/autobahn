@@ -2,6 +2,7 @@ package sim
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/danielriddell21/crucible/ring"
 	"github.com/danielriddell21/crucible/telemetry"
@@ -95,6 +96,7 @@ type Judge struct {
 	lane      *city.Lane
 	limit     float32
 	onRoad    bool
+	inBox     bool // inside a junction, where lanes say nothing
 	signal    SignalState
 	hasSignal bool
 
@@ -190,7 +192,9 @@ func (j *Judge) Update(v *Vehicle, sig *Signals, now, dt float32) {
 	}
 	j.lane = proj.Lane
 	j.limit = proj.Lane.SpeedLimit
-	j.onRoad = proj.Dist <= j.city.RoadHalfWidth(proj.Lane)+0.4 || onRoundabout(j.city, v.Pos)
+	j.inBox = j.city.InJunction(v.Pos, proj.Lane)
+	j.onRoad = proj.Dist <= j.city.RoadHalfWidth(proj.Lane)+0.4 || j.inBox ||
+		onRoundabout(j.city, v.Pos)
 	j.signal, j.hasSignal = SignalGreen, false
 	if proj.Lane.Control == city.ControlSignal {
 		j.signal, j.hasSignal = sig.LaneState(proj.Lane), true
@@ -222,7 +226,10 @@ func (j *Judge) checkSpeed(v *Vehicle, speed, now, dt float32) {
 func (j *Judge) checkDirection(v *Vehicle, proj city.LaneProjection, speed, now, dt float32) {
 	// The nearest lane is the one the car occupies. Travelling against it means
 	// the car is on the wrong side of the road.
-	if speed > 3 && v.Vel.Dot(proj.Lane.Fwd) < -0.5*speed && j.onRoad {
+	// Inside a junction that says nothing: a car turning right crosses the end
+	// of the lane coming the other way, pointing against it, and is exactly
+	// where it should be.
+	if speed > 3 && v.Vel.Dot(proj.Lane.Fwd) < -0.5*speed && j.onRoad && !j.inBox {
 		j.wrongTimer += dt
 		if j.wrongTimer >= wrongWayTime {
 			j.record(Infraction{
@@ -246,7 +253,7 @@ func (j *Judge) checkDirection(v *Vehicle, proj city.LaneProjection, speed, now,
 // junction it is in instead.
 func onRoundabout(c *city.City, p mathx.Vec) bool {
 	for _, n := range c.Roundabouts() {
-		if d := n.Pos.DistTo(p); d < n.RingRadius()+city.LaneWidth {
+		if d := n.Pos.DistTo(p); d < n.RingOuter()+0.4 && d > n.RingInner()-0.4 {
 			return true
 		}
 	}
@@ -305,10 +312,11 @@ func (j *Judge) trackApproach(v *Vehicle, l *city.Lane, beyond, speed float32) b
 func (j *Judge) judgeControl(v *Vehicle, l *city.Lane, sig *Signals, speed, now float32) {
 	switch l.Control {
 	case city.ControlSignal:
-		if sig.LaneState(l).MustStop() {
+		if ranLight(sig, l, speed) {
 			j.record(Infraction{
 				Kind: RedLight, At: now, Pos: v.Pos,
-				Detail: fmt.Sprintf("entered on red at %.0f mph", mathx.ToMPH(speed)),
+				Detail: fmt.Sprintf("entered on %s at %.0f mph",
+					strings.ToLower(sig.LaneState(l).String()), mathx.ToMPH(speed)),
 			})
 		}
 	case city.ControlStop:
@@ -318,6 +326,28 @@ func (j *Judge) judgeControl(v *Vehicle, l *city.Lane, sig *Signals, speed, now 
 				Detail: fmt.Sprintf("rolled the line at %.0f mph", mathx.ToMPH(speed)),
 			})
 		}
+	}
+}
+
+// Amber judgement. Amber means stop, unless the car is so close to the line
+// when it appears that stopping would mean standing on the brakes.
+const (
+	amberReaction float32 = 0.7 // seconds a driver takes to respond
+	amberBraking  float32 = 5.0 // the hardest stop that is reasonable, m/s^2
+)
+
+// ranLight reports whether crossing the line now is an offence.
+func ranLight(sig *Signals, l *city.Lane, speed float32) bool {
+	switch sig.LaneState(l) {
+	case SignalGreen:
+		return false
+	case SignalAmber:
+		// Work back to where the car was when the amber came on, and ask
+		// whether it could have pulled up from there.
+		back := sig.Since(l.ToNode, l.Group) * speed
+		return back > speed*amberReaction+speed*speed/(2*amberBraking)
+	default:
+		return true
 	}
 }
 

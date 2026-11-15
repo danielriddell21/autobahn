@@ -24,6 +24,9 @@ const (
 	keepRadius float32 = 420
 	spawnNear  float32 = 120
 	spawnFar   float32 = 300
+	// popRange is how close a car may be put down in plain view of the
+	// player. Nearer than this it has to be round a corner.
+	popRange float32 = 210
 	// restitution is the bounciness of a vehicle impact.
 	restitution float32 = 0.22
 )
@@ -40,7 +43,7 @@ type Config struct {
 
 // DefaultConfig returns a populated city configuration.
 func DefaultConfig(seed uint64) Config {
-	return Config{Seed: seed, Traffic: 70, Police: 5}
+	return Config{Seed: seed, Traffic: 70, Police: 7}
 }
 
 // World is the whole simulation: the city, its traffic, the signal controller
@@ -59,6 +62,9 @@ type World struct {
 
 	// Time is the elapsed simulation time in seconds.
 	Time float32
+	// Damage is how battered the player's car is, from 0 to 1. Every hard
+	// knock adds to it, and a car at 1 has very little left to give.
+	Damage float32
 
 	rng       *rand.Rand
 	buildings map[[2]int][]int
@@ -68,6 +74,19 @@ type World struct {
 	indexed    int
 	blocked    bool
 	sinceBlock float32
+	// units is scratch space for the police units that could answer a call,
+	// nearest first, and after setPursuit the ones on it lead the slice.
+	units []*Agent
+	// blockPos and blockDir are where the current roadblock stands and which
+	// way the road runs through it; blockRun is set once it has been passed.
+	blockPos, blockDir mathx.Vec
+	blockRun           bool
+	// wedged and backing are how long the reckless driver has been stuck
+	// against something, and how much longer it will reverse away from it.
+	wedged, backing float32
+	// near is scratch space for the vehicles around whichever agent is looking
+	// for the car in front, reused so the search does not allocate.
+	near []*Vehicle
 	// spawn is where the player restarts.
 	spawnPos mathx.Vec
 	spawnYaw float32
@@ -100,6 +119,7 @@ func NewWorld(cfg Config) *World {
 	w.spawnPos = start.Point(min(18, start.Length*0.35))
 	w.spawnYaw = start.Heading
 	w.Player = NewVehicle(PlayerBody().Spec, w.spawnPos, w.spawnYaw)
+	w.Player.Nitro = 1
 	w.Route = NewRoute(c, rng.Stream(cfg.Seed, streamRoute))
 	w.Route.Update(w.Player.Pos, w.Player.Forward())
 
@@ -114,6 +134,7 @@ func NewWorld(cfg Config) *World {
 	for i := range cfg.Police {
 		lane := c.RandomLane(traffic, 30)
 		u := NewPoliceUnit(cfg.Traffic+i, c, lane, traffic.Float32()*lane.Length, traffic)
+		u.SetUnit(unitRoster[i%len(unitRoster)])
 		if w.tooClose(u.V.Pos, 9) {
 			continue
 		}
@@ -127,6 +148,11 @@ func (w *World) watchForOffences() {
 	// Subscribes the police to the judge. An offence a unit saw draws attention
 	// at once; one nobody saw is remembered, and enough of them get called in.
 	w.Judge.Events.Subscribe(judgeWatcher(func(in Infraction) {
+		// Seen or phoned in, an offence says where the car was when it was
+		// committed, which is where anybody sent after it starts looking.
+		if w.Wanted.State != PursuitActive {
+			w.Wanted.LastSeen = in.Pos
+		}
 		if w.witnessed() {
 			w.Wanted.witness(in.Points)
 			return
@@ -199,9 +225,12 @@ func (w *World) Caught() bool {
 	return c.V.Pos.DistTo(w.Player.Pos) < stopRange && w.Player.Speed() < 2.5
 }
 
-// Respawn returns the player to the starting pose.
+// Respawn returns the player to the starting pose, in a car that has been
+// straightened out.
 func (w *World) Respawn() {
 	w.Player.Place(w.spawnPos, w.spawnYaw)
+	w.Player.Nitro = 1
+	w.Damage = 0
 }
 
 // PlaceOnNearestLane drops the player onto the nearest lane facing the right
@@ -221,6 +250,11 @@ func (w *World) Update(c Controls, dt float32) {
 	w.Time += dt
 	w.grow()
 	w.Signals.Update(dt)
+	if w.Damage >= 1 {
+		// A wrecked car still moves, but only just.
+		c.Throttle *= wreckedPower
+		c.Boost = false
+	}
 	w.Player.Update(c, dt)
 	for _, a := range w.Agents {
 		a.drive(w, dt)
@@ -288,111 +322,293 @@ func (w *World) tooClose(p mathx.Vec, r float32) bool {
 	return false
 }
 
-func (w *World) leaderFor(a *Agent) (gap, leadSpeed float32, ok bool) {
-	// Find the closest thing directly ahead within a lane-width corridor. The
-	// player counts as traffic, so agents queue behind the human too.
+// Leader search geometry, in metres.
+const (
+	// nearScan is how far ahead the route itself is searched. Within it
+	// anything standing on the path counts, whichever way it is facing: a car
+	// crossing a junction, a unit parked across the road, a wreck.
+	nearScan float32 = 26
+	nearStep float32 = 2.6
+	// pathClearance is how far to the side of the path a vehicle's centre may
+	// be and still be on it, beyond its own half-width.
+	pathClearance float32 = 1.25
+)
+
+func (w *World) leaderFor(a *Agent) (gap, leadSpeed float32, lead *Vehicle) {
+	// Find the closest thing ahead. The player counts as traffic, so agents
+	// queue behind the human too.
+	//
+	// Close in, the search follows the agent's route, so it goes round a bend
+	// with the road instead of straight on into the oncoming lane. Further out
+	// it looks straight ahead down the lane, and only at vehicles going the
+	// same way, which is all that is worth reacting to at that range.
 	fwd := a.V.Forward()
 	right := fwd.Right()
-	best := idmScanRange
 
-	consider := func(pos mathx.Vec, vel mathx.Vec, halfLen float32) {
-		rel := pos.Sub(a.V.Pos)
-		along := rel.Dot(fwd)
-		if along <= 0 || along > best {
-			return
+	near := w.near[:0]
+	near = append(near, w.Player)
+	for _, o := range w.Agents {
+		if o != a && o.V.Pos.DistTo(a.V.Pos) <= idmScanRange {
+			near = append(near, o.V)
 		}
-		if mathx.Abs(rel.Dot(right)) > idmLaneCoridor {
-			return
+	}
+	w.near = near
+
+	prev := a.V.Pos
+	for d := nearStep; d <= nearScan; d += nearStep {
+		p := a.pathPoint(w.City, d)
+		dir := p.Sub(prev).Norm()
+		prev = p
+		for _, v := range near {
+			if v.Pos.DistTo(p) > v.Spec.HalfWidth+pathClearance {
+				continue
+			}
+			// How much of the vehicle lies back along the path toward us.
+			reach := mathx.Abs(v.Forward().Dot(dir))*(v.Spec.HalfLength-v.Spec.HalfWidth) + v.Spec.HalfWidth
+			return max(d-a.V.Spec.HalfLength-reach, 0.2), max(v.Vel.Dot(dir), 0), v
+		}
+	}
+
+	best := idmScanRange
+	for _, v := range near {
+		rel := v.Pos.Sub(a.V.Pos)
+		along := rel.Dot(fwd)
+		if along <= nearScan || along > best {
+			continue
+		}
+		if mathx.Abs(rel.Dot(right)-a.sidestep) > idmLaneCoridor || v.Forward().Dot(fwd) < 0.5 {
+			continue
 		}
 		best = along
-		gap = along - a.V.Spec.HalfLength - halfLen
-		leadSpeed = max(vel.Dot(fwd), 0)
-		ok = true
+		gap = max(along-a.V.Spec.HalfLength-v.Spec.HalfLength, 0.2)
+		leadSpeed = max(v.Vel.Dot(fwd), 0)
+		lead = v
 	}
-
-	consider(w.Player.Pos, w.Player.Vel, w.Player.Spec.HalfLength)
-	for _, o := range w.Agents {
-		if o == a {
-			continue
-		}
-		if o.V.Pos.DistTo(a.V.Pos) > idmScanRange {
-			continue
-		}
-		consider(o.V.Pos, o.V.Vel, o.V.Spec.HalfLength)
-	}
-	if ok {
-		gap = max(gap, 0.2)
-	}
-	return gap, leadSpeed, ok
+	return gap, leadSpeed, lead
 }
 
-func (w *World) junctionBlocked(a *Agent) bool {
-	// Three separate rules decide whether a driver waits at a junction, and
-	// each is its own question.
+// Gap judgement, in seconds and metres.
+const (
+	// gapMargin is the room an ordinary driver leaves beyond the time their
+	// turn takes. A driver's own GapAcceptance scales it.
+	gapMargin float32 = 2.2
+	// pathConflict is how close two paths through a junction may come before
+	// the cars on them are in each other's way.
+	pathConflict float32 = 3.1
+	// recklessGap is how soon a car has to be arriving for a driver to wait for
+	// it whatever the rules say. It is what makes traffic brake for somebody
+	// coming through a red light instead of driving into them.
+	recklessGap float32 = 2.4
+)
+
+// pathSamples is how finely a path through a junction is compared with another.
+const pathSamples = 6
+
+// mustYield reports whether a driver at a junction should wait rather than go.
+func (w *World) mustYield(a *Agent) bool {
 	node := w.City.Nodes[a.lane.ToNode]
 	if node.IsRoundabout() {
 		return w.ringBlocked(a, node)
 	}
-	return w.boxOccupied(a, node) ||
-		w.oncomingBlocks(a, node) ||
-		w.higherPriorityWaiting(a, node)
+	if w.exitBlocked(a) || w.boxConflict(a, node) || w.playerThreatens(a) {
+		return true
+	}
+	if a.waited > waitLimit {
+		// Waited long enough. Whatever has priority is not taking it.
+		return false
+	}
+	return w.priorityConflict(a, node)
 }
 
-func (w *World) boxOccupied(a *Agent, node *city.Node) bool {
-	// Something already in the junction has to clear it first, unless it is
-	// simply following us out.
-	clearance := node.Radius + 3
+// turnPath samples the connector a driver is about to take, from u onward.
+func (w *World) turnPath(l *city.Lane, t city.Turn, u float32) [pathSamples]mathx.Vec {
+	var out [pathSamples]mathx.Vec
+	for i := range out {
+		out[i] = w.City.TurnPoint(l, t, u+(1-u)*float32(i)/(pathSamples-1))
+	}
+	return out
+}
+
+func pathsCross(a, b [pathSamples]mathx.Vec) bool {
+	for _, p := range a {
+		for _, q := range b {
+			if p.DistTo(q) < pathConflict {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// exitBlocked reports whether the lane a driver is heading for is backed up to
+// the junction. Entering then would leave the car stranded in the box.
+func (w *World) exitBlocked(a *Agent) bool {
+	out := w.City.Lanes[a.next.Lane]
+	// Standing in the mouth of that lane, and on it: the head of the queue
+	// waiting in the next lane over is right alongside, and is not in the way.
+	inMouth := func(v *Vehicle) bool {
+		rel := v.Pos.Sub(out.A)
+		along := rel.Dot(out.Fwd)
+		return along > -2 && along < 9 && mathx.Abs(rel.Cross(out.Fwd)) < 1.6 && v.Speed() < 1
+	}
+	if inMouth(w.Player) {
+		return true
+	}
 	for _, o := range w.Agents {
-		if o == a || o.V.Pos.DistTo(node.Pos) > clearance {
-			continue
-		}
-		if !o.inTurn && o.V.Speed() >= 1.2 {
-			continue
-		}
-		if o.V.Pos.Sub(a.V.Pos).Dot(a.V.Forward()) > 0 {
+		if o != a && inMouth(o.V) {
 			return true
 		}
 	}
 	return false
 }
 
-func (w *World) oncomingBlocks(a *Agent, node *city.Node) bool {
-	// Turning across the oncoming stream means giving way to it.
-	if !a.hasNext || a.next.Kind != turnAcrossTraffic() {
-		return false
-	}
+// boxConflict reports whether something already in the junction is in the way
+// of the turn a driver is about to make.
+func (w *World) boxConflict(a *Agent, node *city.Node) bool {
+	mine := w.turnPath(a.lane, a.next, 0)
 	for _, o := range w.Agents {
-		if o == a || o.lane == nil || o.inTurn {
+		if o == a || o.V.Pos.DistTo(node.Pos) > node.Radius+2 {
 			continue
 		}
-		if o.lane.ToNode != node.ID || o.V.Speed() < 2 {
+		if o.inTurn && o.lane.ToNode == node.ID && o.dazed <= 0 {
+			if o.lane == a.lane {
+				continue // the car in front, which is followed, not waited for
+			}
+			if pathsCross(mine, w.turnPath(o.lane, o.next, o.u)) {
+				return true
+			}
 			continue
 		}
-		// Oncoming means heading roughly opposite to us.
-		if o.lane.Fwd.Dot(a.lane.Fwd) > -0.7 {
-			continue
-		}
-		if o.lane.Length-o.s < 32 {
+		// Anything else in the box is not going anywhere predictable: a car
+		// that has been hit, or one parked across it.
+		if o.lane != a.lane && nearPath(mine, o.V.Pos, o.V.Spec.HalfLength+1.2) {
 			return true
 		}
 	}
 	return false
 }
 
-func (w *World) higherPriorityWaiting(a *Agent, node *city.Node) bool {
-	// Where several cars are waiting at the same priority junction, the
-	// lowest-numbered goes first, so four of them never sit staring at each
-	// other.
-	if a.lane.Control != city.ControlStop && a.lane.Control != city.ControlGiveWay {
-		return false
-	}
-	for _, o := range w.Agents {
-		if o == a || o.lane == nil || o.inTurn || o.ID >= a.ID {
-			continue
-		}
-		if o.lane.ToNode == node.ID && o.lane.Length-o.s < 6 && o.V.Speed() < 1.5 {
+func nearPath(path [pathSamples]mathx.Vec, p mathx.Vec, within float32) bool {
+	for _, q := range path {
+		if q.DistTo(p) < within {
 			return true
 		}
+	}
+	return false
+}
+
+// playerThreatens reports whether the player's car is about to be where this
+// driver's turn goes. The player is not on the lane graph and obeys nothing, so
+// the question is asked of where the car is and where it is heading.
+func (w *World) playerThreatens(a *Agent) bool {
+	p := w.Player
+	node := w.City.Nodes[a.lane.ToNode]
+	if p.Pos.DistTo(node.Pos) > node.Radius+p.Speed()*recklessGap+4 {
+		return false
+	}
+	mine := w.turnPath(a.lane, a.next, 0)
+	// Sweep the player forward over the next few seconds.
+	for t := float32(0); t <= recklessGap; t += 0.3 {
+		at := p.Pos.Add(p.Vel.Mul(t))
+		if !nearPath(mine, at, p.Spec.HalfLength+1.4) {
+			continue
+		}
+		// The player sitting in the queue behind is not a threat.
+		if at.Sub(a.V.Pos).Dot(a.V.Forward()) > a.V.Spec.HalfLength {
+			return true
+		}
+	}
+	return false
+}
+
+// priorityConflict reports whether traffic with priority over this driver is
+// close enough that pulling out would be in its way.
+func (w *World) priorityConflict(a *Agent, node *city.Node) bool {
+	minor := a.lane.Control == city.ControlStop || a.lane.Control == city.ControlGiveWay
+	across := a.next.Kind == turnAcrossTraffic()
+	if !minor && !across {
+		return false
+	}
+	need := a.gapNeeded()
+	mine := w.turnPath(a.lane, a.next, 0)
+
+	for _, o := range w.Agents {
+		if o == a || !w.approaching(o, a, node) || !w.outranks(o, a, minor, across) {
+			continue
+		}
+		if !arrivesWithin(o.lane.Length-o.s, o.V.Speed(), need) {
+			continue
+		}
+		if !o.hasNext || pathsCross(mine, w.turnPath(o.lane, o.next, 0)) {
+			return true
+		}
+	}
+
+	return w.playerOutranks(a, node, minor, across, need)
+}
+
+// approaching reports whether o is on its way into a junction by some road
+// other than the one a is on, which is what makes it something a might have to
+// wait for.
+func (w *World) approaching(o, a *Agent, node *city.Node) bool {
+	if o.inTurn || o.lane == nil || o.lane.ToNode != node.ID || o.dazed > 0 {
+		return false
+	}
+	// Alongside and going the same way is not in the way.
+	return o.lane.Road != a.lane.Road || o.lane.Dir != a.lane.Dir
+}
+
+// playerOutranks reports whether the player is close enough, and has enough
+// priority, that this driver should wait for them. The player has the same
+// priority any other car would have on the lane they are driving along, and
+// nobody knows which way they mean to go.
+func (w *World) playerOutranks(a *Agent, node *city.Node, minor, across bool, need float32) bool {
+	p := w.City.ProjectAlong(w.Player.Pos, w.Player.Forward())
+	if !p.Valid || p.Dist > 4 || p.Lane.ToNode != node.ID {
+		return false
+	}
+	if p.Lane.Road == a.lane.Road && p.Lane.Dir == a.lane.Dir {
+		return false // alongside, going the same way
+	}
+	pMinor := p.Lane.Control == city.ControlStop || p.Lane.Control == city.ControlGiveWay
+	ranks := (minor && !pMinor) || (across && p.Lane.Fwd.Dot(a.lane.Fwd) < -0.7)
+	return ranks && arrivesWithin(p.Lane.Length-p.S, w.Player.Speed(), need)
+}
+
+// arrivesWithin reports whether a car this far from the line, at this speed,
+// will be at the junction inside the gap a driver needs.
+func arrivesWithin(dist, speed, need float32) bool {
+	if dist > 110 || (speed < 0.5 && dist > 9) {
+		return false // too far off, or sat in a queue
+	}
+	return dist/max(speed, 2.5) <= need
+}
+
+// gapNeeded is how long a driver needs the road to stay clear for the turn
+// they are about to make: the time it takes to get through, plus a margin that
+// is theirs to choose.
+func (a *Agent) gapNeeded() float32 {
+	st := a.style()
+	through := (a.next.Len*0.6 + a.V.Spec.HalfLength*2) / min(turnSpeed(a.next, st), 9)
+	return 1 + through + gapMargin*st.GapAcceptance
+}
+
+// outranks reports whether o has priority over a at the junction both are
+// approaching.
+func (w *World) outranks(o, a *Agent, minor, across bool) bool {
+	oMinor := o.lane.Control == city.ControlStop || o.lane.Control == city.ControlGiveWay
+	switch {
+	case minor && !oMinor:
+		// On the major road, which runs through.
+		return true
+	case across && o.lane.Fwd.Dot(a.lane.Fwd) < -0.7 && o.next.Kind != turnAcrossTraffic():
+		// Oncoming, and not itself turning across: it comes first, provided it
+		// is actually coming and not held at its own line.
+		return o.V.Speed() > 1.5 || (!oMinor && w.Signals.LaneState(o.lane) == SignalGreen)
+	case minor && oMinor:
+		// Two drivers both waiting to pull out: the lower number goes first,
+		// so they do not sit staring at each other.
+		return o.ID < a.ID && o.lane.Length-o.s < 8 && o.V.Speed() < 1.5
 	}
 	return false
 }
@@ -436,6 +652,14 @@ func (w *World) resolveCollisions() {
 		if axis, depth, hit := pb.Penetration(a.V.Box()); hit {
 			impact := w.separate(w.Player, a.V, axis, depth)
 			w.Judge.ReportCollision(w.Player, "hit a vehicle", impact, w.Time)
+			a.knock(impact)
+			w.batter(impact)
+			if a.Role == RolePolice && impact > 3 && w.Wanted.Active() && w.Wanted.sinceRam > ramPause {
+				// Hitting a police car is its own offence, and its own reward.
+				w.Wanted.sinceRam = 0
+				w.Wanted.raise(heatPerRam)
+				w.Wanted.earn(float32(bountyPerRam * w.Wanted.Level))
+			}
 			pb = w.Player.Box()
 		}
 	}
@@ -447,7 +671,9 @@ func (w *World) resolveCollisions() {
 				continue
 			}
 			if axis, depth, hit := a.V.Box().Penetration(b.V.Box()); hit {
-				w.separate(a.V, b.V, axis, depth)
+				impact := w.separate(a.V, b.V, axis, depth)
+				a.knock(impact)
+				b.knock(impact)
 			}
 		}
 	}
@@ -481,6 +707,13 @@ func (w *World) separate(a, b *Vehicle, axis mathx.Vec, depth float32) float32 {
 	return mathx.Abs(closing)
 }
 
+// footprint is the ground a building stands on, as a box to collide with. A
+// box with no heading runs its length along X, which is the way a building's
+// width runs.
+func footprint(b city.Building) mathx.OBB {
+	return mathx.OBB{Center: b.Center, HalfL: b.W / 2, HalfW: b.D / 2}
+}
+
 func (w *World) collideBuildings(v *Vehicle, report bool) {
 	key := [2]int{int(v.Pos.X / w.cellSize), int(v.Pos.Z / w.cellSize)}
 	box := v.Box()
@@ -488,8 +721,7 @@ func (w *World) collideBuildings(v *Vehicle, report bool) {
 		for dz := -1; dz <= 1; dz++ {
 			for _, bi := range w.buildings[[2]int{key[0] + dx, key[1] + dz}] {
 				b := w.City.Buildings[bi]
-				wall := mathx.OBB{Center: b.Center, HalfW: b.W / 2, HalfL: b.D / 2}
-				axis, depth, hit := box.Penetration(wall)
+				axis, depth, hit := box.Penetration(footprint(b))
 				if !hit {
 					continue
 				}
@@ -500,6 +732,7 @@ func (w *World) collideBuildings(v *Vehicle, report bool) {
 					v.Vel = v.Vel.Sub(axis.Mul(closing * (1 + restitution)))
 					if report {
 						w.Judge.ReportCollision(v, "hit a building", closing, w.Time)
+						w.batter(closing)
 					}
 				}
 				box = v.Box()
@@ -510,8 +743,17 @@ func (w *World) collideBuildings(v *Vehicle, report bool) {
 
 func (w *World) recycleAgents() {
 	for _, a := range w.Agents {
-		stranded := !a.hasNext && a.s >= a.lane.Length-0.5
-		if a.V.Pos.DistTo(w.Player.Pos) < keepRadius && !stranded {
+		if a.Manual {
+			continue // somebody is driving it
+		}
+		stranded := !a.hasNext && a.s >= a.lane.Length-0.5 && !a.free
+		keep := keepRadius
+		if a.Role == RolePolice && w.Wanted.Active() {
+			// With a pursuit on, units a long way off are no use to it. Bring
+			// them in, so there is somebody to send when it escalates.
+			keep = backupRadius
+		}
+		if a.V.Pos.DistTo(w.Player.Pos) < keep && !stranded {
 			continue
 		}
 		if (a.pursuing || a.Blocking) && !stranded {
@@ -519,6 +761,32 @@ func (w *World) recycleAgents() {
 		}
 		w.relocate(a)
 	}
+}
+
+// backupRadius is how far from the driver a spare unit may be while a pursuit
+// is on before it is brought closer, in metres.
+const backupRadius float32 = 330
+
+// Damage tuning.
+const (
+	// batterFloor is the closing speed below which a knock does no damage, in
+	// m/s, and batterScale how much above it writes the car off.
+	batterFloor float32 = 3
+	batterScale float32 = 55
+	// wreckedPower is how much of its engine a wrecked car has left.
+	wreckedPower float32 = 0.3
+)
+
+// batter adds the damage from one impact to the player's car.
+func (w *World) batter(impact float32) {
+	if impact > batterFloor {
+		w.Damage = min(w.Damage+(impact-batterFloor)/batterScale, 1)
+	}
+}
+
+// cellOf returns the building index cell a point falls in.
+func (w *World) cellOf(p mathx.Vec) [2]int {
+	return [2]int{int(p.X / w.cellSize), int(p.Z / w.cellSize)}
 }
 
 func (w *World) relocate(a *Agent) {
@@ -532,12 +800,17 @@ func (w *World) relocate(a *Agent) {
 		if d < spawnNear || d > spawnFar {
 			continue
 		}
+		if d < popRange && w.LineOfSight(p, w.Player.Pos) {
+			continue // would appear out of thin air in full view
+		}
 		if w.tooClose(p, 11) {
 			continue
 		}
 		a.lane, a.s = lane, s
 		a.inTurn, a.u = false, 0
 		a.stoppedAt = -1
+		a.dazed, a.waited = 0, 0
+		a.free, a.sidestep, a.sidestepWant, a.stuck, a.passing = false, 0, 0, 0, 0
 		a.V.Place(p, lane.Heading)
 		a.chooseNext(w.City)
 		return

@@ -104,6 +104,34 @@ func (s *Signals) State(node, group int) SignalState {
 	}
 }
 
+// Since returns how long the given phase group at a node has been showing its
+// current aspect, in seconds. A signal that has only just changed is judged
+// differently from one that has been showing the same thing for a while.
+func (s *Signals) Since(node, group int) float32 {
+	if node < 0 || node >= len(s.city.Nodes) || !s.city.Nodes[node].Signalised {
+		return 1e6
+	}
+	t := mod(s.clock+s.offsetOf(node), fullCycle)
+	serving := 0
+	if t >= halfCycle {
+		serving, t = 1, t-halfCycle
+	}
+	if serving != group {
+		// Red since this group's own amber ended, half a cycle ago and more.
+		return t + allRedTime
+	}
+	switch {
+	case t < redAmberTime:
+		return t
+	case t < redAmberTime+greenTime:
+		return t - redAmberTime
+	case t < redAmberTime+greenTime+amberTime:
+		return t - redAmberTime - greenTime
+	default:
+		return t - redAmberTime - greenTime - amberTime
+	}
+}
+
 // LaneState returns the aspect governing a lane's approach to its junction.
 func (s *Signals) LaneState(l *city.Lane) SignalState {
 	if l.Control != city.ControlSignal {

@@ -245,3 +245,34 @@ func TestRangeAtHeightRejectsRaysThatNeverReachIt(t *testing.T) {
 		t.Errorf("a downward ray reported a signal at %v m; want no range", got)
 	}
 }
+
+// Boxes of one class that overlap on the image run together into one blob. Its
+// base is still the nearest box's alone, which is what says where the thing
+// actually standing at that range is.
+func TestBaseIsTheBottomRowOfABlob(t *testing.T) {
+	const w, h = 120, 80
+	px := blank(w, h)
+	// A far box up the image, and a nearer one lower down and off to the
+	// right, overlapping it.
+	paintRect(px, w, 20, 20, 60, 40, vision.ClassVehicle)
+	paintRect(px, w, 50, 35, 100, 60, vision.ClassVehicle)
+
+	dets := vision.NewScanner().Scan(px, w, h)
+	if len(dets) != 1 {
+		t.Fatalf("two overlapping boxes scanned as %d detections, want one blob", len(dets))
+	}
+	d := dets[0]
+	if d.MinX != 20 || d.MaxX != 100 {
+		t.Errorf("the blob spans %v..%v, want the whole of both boxes", d.MinX, d.MaxX)
+	}
+	lo, hi := d.Base()
+	if lo != 50 || hi != 100 {
+		t.Errorf("the base spans %v..%v, want the nearer box alone (50..100)", lo, hi)
+	}
+
+	// A detection built by hand has no base, and falls back to its box.
+	plain := vision.Detection{MinX: 7, MaxX: 31}
+	if lo, hi := plain.Base(); lo != 7 || hi != 31 {
+		t.Errorf("a detection with no base reports %v..%v, want its own box", lo, hi)
+	}
+}

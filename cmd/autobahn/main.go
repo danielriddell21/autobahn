@@ -58,6 +58,7 @@ func parse(name string, args []string, out io.Writer) (opts game.Options, done b
 	host := fs.String("host", "", "host a two-player chase on this address, e.g. :7777")
 	join := fs.String("join", "", "join a chase hosted at this address")
 	camera := fs.String("camera", "chase", "viewpoint: chase, bonnet or high")
+	timeOfDay := fs.String("time", "day", "light: day, dusk or night")
 	hz := fs.Float64("perception", float64(opts.PerceptionH), "perception updates per second")
 	frames := fs.Int("frames", 0, "run this many frames then exit; 0 runs until closed")
 	shot := fs.String("screenshot", "", "write a screenshot to this path before exiting")
@@ -104,6 +105,16 @@ func parse(name string, args []string, out io.Writer) (opts game.Options, done b
 		opts.Camera = game.CameraChase
 	default:
 		return opts, false, fmt.Errorf("unknown camera %q", *camera)
+	}
+	switch *timeOfDay {
+	case "day":
+		opts.Time = game.TimeDay
+	case "dusk":
+		opts.Time = game.TimeDusk
+	case "night":
+		opts.Time = game.TimeNight
+	default:
+		return opts, false, fmt.Errorf("unknown time %q", *timeOfDay)
 	}
 	opts.PerceptionH = float32(*hz)
 	opts.Frames = *frames

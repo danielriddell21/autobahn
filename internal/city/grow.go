@@ -156,7 +156,10 @@ func (c *City) settleShape(n *Node, ln *worldgen.LatticeNode) {
 	for _, id := range ln.Edges {
 		widest = max(widest, halfWidthOf(latticeClass(c.lat, c.lat.Edges[id])))
 	}
-	n.Radius = widest
+	// The junction box reaches past the carriageways by the kerb radius, so a
+	// lane stops where the corner starts to curve and a turn has room to be
+	// driven.
+	n.Radius = widest + KerbRadius
 
 	// A roundabout needs room and somewhere to send traffic, and the choice
 	// has to come from the junction's position rather than from a running
@@ -167,7 +170,7 @@ func (c *City) settleShape(n *Node, ln *worldgen.LatticeNode) {
 	n.Roundabout = true
 	n.ringRadius = mathx.Clamp(widest+7, 11, 17)
 	// The approach lanes stop just outside the circulating carriageway.
-	n.Radius = n.ringRadius + 2.5
+	n.Radius = n.ringRadius + ringVerge + ringApron
 }
 
 // settleControl decides how entry to a junction is governed.
@@ -328,20 +331,14 @@ const (
 	buildingSalt   = 0x27d4
 )
 
-// The salts and shares behind the rest of the positional decisions.
-const (
-	speedSignSalt = 0x6a09
-	parkSalt      = 0x3c6e
-)
+// parkSalt is the salt behind which blocks are left as open ground.
+const parkSalt = 0x3c6e
 
 // The shares each of those decisions comes out at.
 const (
 	// stopSignShare is how many priority junctions are signed STOP rather than
 	// GIVE WAY.
 	stopSignShare = 1.0 / 7
-	// speedSignShare is how many lanes long enough to carry one get a repeater
-	// speed sign shortly after their junction.
-	speedSignShare = 0.55
 	// parkShare is how many blocks are left as open ground.
 	parkShare = 0.10
 	// alleyShare is how often the run of buildings along a street is broken by

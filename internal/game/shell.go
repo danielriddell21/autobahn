@@ -218,9 +218,18 @@ func (s *Shell) showSettings(from screen) {
 				Label:  func() string { return "Viewpoint     " + set.Camera.String() },
 				Adjust: func(d int) { set.Camera = cycleCamera(set.Camera, d) },
 			},
+			{
+				Label:  func() string { return "Time of day   " + set.Time.String() },
+				Adjust: func(d int) { set.Time = cycleTime(set.Time, d) },
+			},
 			{Label: text("Back"), Action: s.leaveSettings},
 		},
 	}
+}
+
+// cycleTime steps through the times of day, wrapping at both ends.
+func cycleTime(t TimeOfDay, dir int) TimeOfDay {
+	return TimeOfDay((int(t) + dir + int(numTimes)) % int(numTimes))
 }
 
 // cycleCamera steps through the viewpoints, wrapping at both ends.
@@ -252,6 +261,7 @@ func (s *Shell) applyLive() {
 	}
 	s.game.ShowPanel(s.settings.ShowPanel)
 	s.game.showLabels = s.settings.ShowLabels
+	s.game.SetTime(s.settings.Time)
 }
 
 func masterVolume(set Settings) float32 {

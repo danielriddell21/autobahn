@@ -1,6 +1,6 @@
 # autobahn
 
-> *autobahn* — a quarter mile at a time. The autopilot manages eleven miles an hour.
+> *autobahn* — a quarter mile at a time. The autopilot manages fifteen miles an hour, and never gets a ticket.
 
 [![CI](https://github.com/danielriddell21/autobahn/actions/workflows/ci.yaml/badge.svg)](https://github.com/danielriddell21/autobahn/actions/workflows/ci.yaml)
 [![codecov](https://codecov.io/gh/danielriddell21/autobahn/graph/badge.svg)](https://codecov.io/gh/danielriddell21/autobahn)
@@ -14,6 +14,24 @@ the same car to an autopilot that sees the world **only through a camera**, as
 colour-coded detection boxes it has to read back out of the pixels.
 
 Both drivers are scored by the same judge, so the comparison is honest.
+
+Drive badly enough where a unit can see it and the police come after you. A
+pursuit escalates for as long as you stay in sight: patrol cars first, sat
+behind with their lights on, then interceptors that go for your back corner,
+then heavy units and roadblocks. Every second of it earns a bounty, which you
+keep only by getting away — break the line of sight round a corner and stay
+gone until they give up. Get stopped and it is forfeit. Traffic pulls over for
+the sirens, goes round the wrecks, and brakes for the car coming through a red.
+
+| Key | |
+| --- | --- |
+| `W` `A` `S` `D` | drive |
+| `Space` | handbrake |
+| `Shift` | nitrous, which a slide earns back |
+| `Tab` | hand the car to the autopilot, or take it back |
+| `C` | camera |
+| `T` | time of day: day, dusk, night |
+| `H` | the rest |
 
 Two people can play: one hosts a chase and drives the runner, the other joins
 over the network and gives chase in a police car. Set it up from the title
@@ -34,7 +52,7 @@ brew install --cask danielriddell21/tap/autobahn
 ```sh
 just run              # drive it yourself
 just drive            # hand the car to the autopilot
-just ci               # lint + test + build + the boundary check
+just ci               # lint + test + build + the boundary check + the autopilot gate
 ```
 
 Or without `just`:

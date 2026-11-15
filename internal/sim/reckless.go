@@ -15,6 +15,21 @@ import (
 func RecklessControls(w *World) Controls {
 	speed := max(w.Player.ForwardSpeed(), 0)
 
+	// Driven like this the car ends up nose-first in a wall sooner or later.
+	// Back off it and carry on, as anybody would.
+	const step = 1.0 / 60
+	if w.backing > 0 {
+		w.backing -= step
+		return Controls{Throttle: 1, Reverse: true, Steer: 0.6}
+	}
+	if w.Player.Speed() < 0.8 {
+		if w.wedged += step; w.wedged > 1.2 {
+			w.wedged, w.backing = 0, 1.3
+		}
+	} else {
+		w.wedged = 0
+	}
+
 	// Look far enough ahead to stay on the road at speed, but not so far that
 	// it cuts corners at a junction.
 	look := mathx.Clamp(7+0.75*speed, 8, 20)

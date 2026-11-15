@@ -32,13 +32,15 @@ type Settings struct {
 	Police  int `json:"police"`
 	// Camera is the viewpoint a new session opens on.
 	Camera CameraMode `json:"camera"`
+	// Time is the light the city is seen in.
+	Time TimeOfDay `json:"time"`
 }
 
 // DefaultSettings returns the settings a first run starts with.
 func DefaultSettings() Settings {
 	return Settings{
 		Volume: 0.7, ShowPanel: true, ShowLabels: true,
-		Traffic: 70, Police: 5, Camera: CameraChase,
+		Traffic: 70, Police: 7, Camera: CameraChase,
 	}
 }
 
@@ -58,6 +60,9 @@ func (s *Settings) clamp() {
 	s.Police = geom.Clamp(s.Police, policeMin, policeMax)
 	if s.Camera < 0 || s.Camera >= numCameraModes {
 		s.Camera = CameraChase
+	}
+	if s.Time < 0 || s.Time >= numTimes {
+		s.Time = TimeDay
 	}
 }
 
@@ -125,6 +130,9 @@ func (s Settings) applyViewTo(o Options) Options {
 	}
 	if !o.Given["camera"] {
 		o.Camera = s.Camera
+	}
+	if !o.Given["time"] {
+		o.Time = s.Time
 	}
 	// Muting is the exception: -mute silences a session whatever the stored
 	// setting says, and the stored setting silences one the flag left alone.

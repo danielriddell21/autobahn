@@ -51,13 +51,25 @@ const Thickness = 2
 const (
 	vehicleRange   float32 = 85
 	propRange      float32 = 95
-	laneRange      float32 = 56
-	laneSpacing    float32 = 7.0
+	laneRange      float32 = 55
+	laneSpacing    float32 = 5.0
 	laneMarkerSize float32 = 0.5
 	// Lane markers are given real height so their projected box stays taller
 	// than the scanner's minimum size well into the distance.
 	laneMarkerRise float32 = 0.32
 	stopLineRange  float32 = 95
+)
+
+// Where each kind of prop's box sits on its post, in metres: how far below the
+// top of the prop the box is centred, and half its height.
+//
+// The autopilot ranges a signal from the bottom of its box and a sign from the
+// top, and is told the heights of those edges as calibration, so these and
+// the heights in package vision have to agree. A test holds them to it.
+const (
+	SignalDrop, SignalHalf       float32 = 0.55, 0.85
+	SignDrop, SignHalf           float32 = 0.42, 0.5
+	SpeedSignDrop, SpeedSignHalf float32 = 0.4, 0.55
 )
 
 // projector turns world points into image coordinates for one view.
@@ -164,34 +176,23 @@ func (lo *layout) props(w *sim.World) {
 		}
 		switch prop.Kind {
 		case city.PropTrafficLight:
-			lo.add(boxOf(lo.p, signalClass(w, prop), prop.Pos, prop.Height-0.55, 0.55, 0.85, 0.3, prop.Heading))
+			lo.add(boxOf(lo.p, signalClass(w, prop), prop.Pos, prop.Height-SignalDrop, 0.55, SignalHalf, 0.3, prop.Heading))
 		case city.PropStopSign:
-			lo.add(boxOf(lo.p, vision.ClassStopSign, prop.Pos, prop.Height-0.42, 0.5, 0.5, 0.12, prop.Heading))
+			lo.add(boxOf(lo.p, vision.ClassStopSign, prop.Pos, prop.Height-SignDrop, 0.5, SignHalf, 0.12, prop.Heading))
 		case city.PropGiveWaySign:
-			lo.add(boxOf(lo.p, vision.ClassGiveWay, prop.Pos, prop.Height-0.42, 0.5, 0.5, 0.12, prop.Heading))
+			lo.add(boxOf(lo.p, vision.ClassGiveWay, prop.Pos, prop.Height-SignDrop, 0.5, SignHalf, 0.12, prop.Heading))
 		case city.PropSpeedSign:
-			lo.add(boxOf(lo.p, speedClass(prop.Limit), prop.Pos, prop.Height-0.4, 0.45, 0.55, 0.12, prop.Heading))
+			lo.add(boxOf(lo.p, speedClass(prop.Limit), prop.Pos, prop.Height-SpeedSignDrop, 0.45, SpeedSignHalf, 0.12, prop.Heading))
 		}
 	}
 }
 
 func (lo *layout) propFacesUs(prop city.Prop) bool {
 	// A prop's heading is the direction of the traffic it governs, so the one
-	// meant for this car points the way the car is going.
-	//
-	// Signals are the exception, and are taken from either direction. The
-	// head at your own stop line disappears over the bonnet once you have
-	// pulled up at it, and a driver who could see nothing else would have no
-	// way of knowing when the light changed. Real junctions answer that with
-	// a secondary head across the junction, which is precisely the one
-	// facing the other way — same road, same phase group, same aspect. Signs
-	// have no secondary, so the ones facing away belong to somebody else.
-	facing := mathx.FromAngle(prop.Heading).Dot(lo.fwd)
-	if prop.Kind == city.PropTrafficLight {
-		// A signal across the junction governs other traffic.
-		return mathx.Abs(facing) >= 0.25
-	}
-	return facing >= 0.25
+	// meant for this car points the way the car is going. Anything facing
+	// another way belongs to somebody else, and a driver who obeyed it would
+	// stop for the cross street's red.
+	return mathx.FromAngle(prop.Heading).Dot(lo.fwd) >= 0.25
 }
 
 func (lo *layout) vehicles(w *sim.World) {

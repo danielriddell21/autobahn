@@ -15,9 +15,12 @@ const (
 	// roundabout with no changes at all. Keeping the pieces short makes the
 	// polygon read as a circle.
 	ringSegment float32 = 4.5
-	// ringLanes is how many pieces the smallest ring is split into, so even a
-	// tight roundabout is not a triangle.
-	ringLanes = 12
+	// ringVerge is how far the circulating carriageway reaches either side of
+	// the line traffic follows round it: out to the kerb, and in to the island.
+	ringVerge float32 = 3.3
+	// ringApron is how far outside the carriageway the approaches stop, which
+	// is where their give way lines are painted.
+	ringApron float32 = 1.0
 	// giveWayArc is how far back around the ring, in radians, a circulating car
 	// has to be before a waiting driver will pull out in front of it.
 	giveWayArc float32 = 1.15
@@ -29,8 +32,15 @@ const (
 // conventional junction.
 func (n *Node) IsRoundabout() bool { return n.Roundabout }
 
-// RingRadius returns the radius of a roundabout's circulating carriageway.
+// RingRadius returns the radius of the line traffic follows round a
+// roundabout: the middle of its circulating carriageway.
 func (n *Node) RingRadius() float32 { return n.ringRadius }
+
+// RingOuter returns the radius of a roundabout's outer kerb.
+func (n *Node) RingOuter() float32 { return n.ringRadius + ringVerge }
+
+// RingInner returns the radius of a roundabout's central island.
+func (n *Node) RingInner() float32 { return n.ringRadius - ringVerge }
 
 func (c *City) buildRing(n *Node) {
 	// One synthetic road carries every lane of the ring, so anything that looks
@@ -38,17 +48,18 @@ func (c *City) buildRing(n *Node) {
 	// try to paint a centre line down a circle.
 	road := &Road{
 		ID: len(c.Roads), A: n.ID, B: n.ID, Class: Local, Ring: true,
-		HalfWidth: LaneWidth * 1.5, Dir: mathx.V(1, 0),
+		HalfWidth: ringVerge, Dir: mathx.V(1, 0),
 	}
 	c.Roads = append(c.Roads, road)
 
-	angles := c.ringAngles(n)
+	verts := c.ringVertices(n)
 	n.ringEntry = make(map[int]int, len(n.Roads))
+	n.ringEntryAngle = make(map[int]float32, len(n.Roads))
 
 	// Lay the ring lanes first, so each vertex knows which lane leaves it.
 	first := len(c.Lanes)
-	for i, a := range angles {
-		b := angles[(i+1)%len(angles)]
+	for i, a := range verts {
+		b := verts[(i+1)%len(verts)]
 		l := &Lane{
 			ID: len(c.Lanes), Road: road.ID, Dir: +1, Index: 0,
 			A: n.ringPoint(a.theta), B: n.ringPoint(b.theta),
@@ -58,30 +69,38 @@ func (c *City) buildRing(n *Node) {
 		}
 		l.finish()
 		c.Lanes = append(c.Lanes, l)
-		if a.road >= 0 {
-			n.ringEntry[a.road] = l.ID
+		// Filed like any other lane, so a car going round is found on the ring
+		// rather than on whichever approach happens to be nearest.
+		c.indexLane(l)
+		if a.entry >= 0 {
+			n.ringEntry[a.entry] = l.ID
+			n.ringEntryAngle[a.entry] = a.theta
 		}
 	}
-	count := len(angles)
+	count := len(verts)
 
-	// Then wire it: every lane continues around, and the ones that end at a
-	// road may also leave by it.
+	// Then wire it: every lane continues around, and the ones that end where a
+	// road peels off may also leave by it.
 	for i := range count {
 		l := c.Lanes[first+i]
 		next := c.Lanes[first+(i+1)%count]
 		l.Succ = append(l.Succ, c.makeTurn(l, next, TurnStraight, n))
 
-		exit := angles[(i+1)%count].road
+		exit := verts[(i+1)%count].exit
 		if exit < 0 {
 			continue
 		}
 		for _, oid := range c.exitLanes(c.Roads[exit], n.ID) {
 			o := c.Lanes[oid]
-			l.Succ = append(l.Succ, c.makeTurn(l, o, TurnLeft, n))
+			t := c.makeTurn(l, o, TurnLeft, n)
+			t.Ctrl = easedControl(t.Ctrl, l.B, o.A, o.Fwd.Mul(-1))
+			t.Len = bezierLength(l.B, t.Ctrl, o.A)
+			l.Succ = append(l.Succ, t)
 		}
 	}
 
-	// Approaches give way, then join the ring at their own vertex.
+	// Approaches give way, then join the ring a little way round from where
+	// they arrive, so they merge with the flow instead of meeting it square.
 	for _, rid := range n.Roads {
 		lane, ok := n.ringEntry[rid]
 		if !ok {
@@ -90,46 +109,92 @@ func (c *City) buildRing(n *Node) {
 		for _, in := range c.approachLanes(c.Roads[rid], n.ID) {
 			l := c.Lanes[in]
 			l.Control = ControlGiveWay
-			l.Succ = append(l.Succ[:0], c.makeTurn(l, c.Lanes[lane], TurnLeft, n))
+			t := c.makeTurn(l, c.Lanes[lane], TurnLeft, n)
+			t.Ctrl = easedControl(t.Ctrl, c.Lanes[lane].A, l.B, l.Fwd)
+			t.Len = bezierLength(l.B, t.Ctrl, c.Lanes[lane].A)
+			l.Succ = append(l.Succ[:0], t)
 		}
 	}
 }
 
-// ringVertex is one point on the circulating carriageway. Vertices that carry a
-// road are where traffic joins and leaves.
+// easeShare is the least of a ring connector's span that its control point
+// stands off from the road end, as a fraction of the straight-line distance.
+const easeShare float32 = 0.45
+
+// easedControl keeps the bend of a connector between a road and the ring from
+// bunching up against the road end.
+//
+// The natural control point is where the two directions meet, and for a lane
+// close to the centre line that is almost on top of the lane's own end: the
+// connector runs straight and then turns all at once, which no car can follow.
+// Sliding the control back along the lane spreads the turn over the whole
+// connector, and keeps it leaving or joining the lane dead straight.
+//
+// ringEnd is the connector's end on the ring, roadEnd its end on the lane, and
+// away the direction from roadEnd toward the junction along that lane.
+func easedControl(ctrl, ringEnd, roadEnd, away mathx.Vec) mathx.Vec {
+	least := ringEnd.DistTo(roadEnd) * easeShare
+	if ctrl.Sub(roadEnd).Dot(away) >= least {
+		return ctrl
+	}
+	return roadEnd.Add(away.Mul(least))
+}
+
+// ringVertex is one point on the circulating carriageway. Each road has two:
+// one where traffic peels off to leave by it, and one further round where
+// traffic arriving by it joins.
 type ringVertex struct {
 	theta float32
-	road  int // the road attaching here, or -1 for a plain vertex
+	entry int // the road joining here, or -1
+	exit  int // the road leaving here, or -1
 }
 
-func (c *City) ringAngles(n *Node) []ringVertex {
-	// Returns the ring's vertices in circulation order: one at every
-	// road, plus enough plain vertices between them to keep the segments short.
-	out := make([]ringVertex, 0, len(n.Roads))
+// ringFlare is the most a road's joining and leaving points are swung round
+// from the road itself, in radians. Roads meet a roundabout a quarter turn
+// apart, so this keeps one road's entry short of the next road's exit.
+const ringFlare float32 = 0.68
+
+func (c *City) ringVertices(n *Node) []ringVertex {
+	// Returns the ring's vertices in circulation order: an exit and an entry
+	// for every road, plus enough plain vertices between them to keep the
+	// segments short.
+	type arm struct {
+		theta, flare float32
+		road         int
+	}
+	arms := make([]arm, 0, len(n.Roads))
 	for _, rid := range n.Roads {
-		out = append(out, ringVertex{theta: c.roadAngle(n, rid), road: rid})
+		// A wide road's kerbside lane is a long way round from its centre
+		// line, so its traffic needs more of the ring to peel off across.
+		flare := min((c.Roads[rid].HalfWidth+3)/n.ringRadius, ringFlare)
+		arms = append(arms, arm{theta: c.roadAngle(n, rid), flare: flare, road: rid})
 	}
 	// Circulation runs in the direction of increasing angle.
-	for i := 1; i < len(out); i++ {
-		for j := i; j > 0 && out[j].theta < out[j-1].theta; j-- {
-			out[j], out[j-1] = out[j-1], out[j]
+	for i := 1; i < len(arms); i++ {
+		for j := i; j > 0 && arms[j].theta < arms[j-1].theta; j-- {
+			arms[j], arms[j-1] = arms[j-1], arms[j]
 		}
 	}
 
-	filled := make([]ringVertex, 0, len(out)*3)
-	for i, v := range out {
+	keyed := make([]ringVertex, 0, len(arms)*2)
+	for _, a := range arms {
+		keyed = append(keyed,
+			ringVertex{theta: a.theta - a.flare, entry: -1, exit: a.road},
+			ringVertex{theta: a.theta + a.flare, entry: a.road, exit: -1})
+	}
+
+	filled := make([]ringVertex, 0, len(keyed)*3)
+	for i, v := range keyed {
 		filled = append(filled, v)
-		next := out[(i+1)%len(out)].theta
-		span := next - v.theta
-		if i == len(out)-1 {
+		span := keyed[(i+1)%len(keyed)].theta - v.theta
+		if i == len(keyed)-1 {
 			span += 2 * math.Pi
 		}
 		// Split the gap into pieces no longer than ringSegment.
 		steps := int(span*n.ringRadius/ringSegment) + 1
-		steps = max(steps, ringLanes/max(len(out), 1))
 		for s := 1; s < steps; s++ {
 			filled = append(filled, ringVertex{
-				theta: v.theta + span*float32(s)/float32(steps), road: -1,
+				theta: v.theta + span*float32(s)/float32(steps), entry: -1, exit: -1,
 			})
 		}
 	}
@@ -183,8 +248,15 @@ func (n *Node) RingOccupied(entry float32, positions func(yield func(mathx.Vec, 
 	return blocked
 }
 
-// EntryAngle returns the ring angle at which a lane joins a roundabout.
-func (n *Node) EntryAngle(l *Lane) float32 { return l.B.Sub(n.Pos).Angle() }
+// EntryAngle returns the ring angle at which a lane joins a roundabout: the
+// point where its traffic merges with what is going round, which is where a
+// gap has to be found.
+func (n *Node) EntryAngle(l *Lane) float32 {
+	if a, ok := n.ringEntryAngle[l.Road]; ok {
+		return a
+	}
+	return l.B.Sub(n.Pos).Angle()
+}
 
 func wrapTwoPi(a float32) float32 {
 	const twoPi = 2 * math.Pi

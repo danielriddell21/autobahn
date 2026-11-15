@@ -9,7 +9,7 @@ for everything that is engine rather than game.
 ## Before every commit
 
 * Run `just ci` autonomously (lint + test + build + the autopilot boundary
-  check + `eval`). All must pass.
+  check + `just gate`, which is `eval` with a pass mark). All must pass.
 * When adding a function or package, write unit tests alongside the code in the
   same commit.
 * Never commit until the user explicitly confirms. Propose changes as diffs,
@@ -63,12 +63,46 @@ it must cost nothing when the car has not reached new ground.
 
 ## eval is a gate, not a report
 
-`just eval` drives many cities headlessly and scores the result. It runs in
-`just ci`, so a change that makes the autopilot worse fails the build.
+`just eval` drives many cities headlessly and scores the result. `just gate`
+is the same thing with a pass mark, and runs in `just ci` and in the workflow,
+so a change that makes the autopilot worse fails the build. Keep the two pass
+marks the same.
 
 Its numbers are noisy: judge a change over at least twenty seeds, and remember
 that changing city generation changes which cities the seeds produce, so a
 before-and-after on the same seed is not a comparison. Compare distributions.
+
+## Junction geometry is what makes the city drivable
+
+A junction's box reaches past its carriageways by `city.KerbRadius`, lanes stop
+at the edge of the box, and the kerbs are rounded to match. That radius is what
+gives the turn toward the kerb an arc a car can follow; with square corners it
+had a radius under two metres and nothing could make it. Lane 0 is the lane by
+the centre line whichever side traffic keeps to, so on a two-lane approach the
+turn toward the kerb is made from the last lane and the turn across the road
+from lane 0.
+
+Inside the box the nearest lane says nothing about where a car should be. The
+route planner, the judge and the traffic all have to ask whether they are in a
+junction before they trust `City.Project`, and the tests that hold them to it
+are the ones about keeping a plan through a junction and not driving the wrong
+way across one.
+
+## Drawing
+
+The scene is flat colours through one shader (`internal/game/light.go`). Two
+conventions in it are load-bearing:
+
+* The top few alpha values name a material rather than a transparency — a
+  façade grows windows, asphalt gets grain, a glow is unlit. Mark a colour with
+  `as(col, mat…)`; anything below `matFloor` is ordinary alpha.
+* The shader holds every channel just short of full brightness. Each of the
+  vision system's reserved colours has a channel at 255, so no light, fog or
+  glow can land on one. Do not draw anything in the 3D scene outside the shader.
+
+Immediate mode hands the shader world-space positions and normals. Do not use
+the model matrix raylib offers: it is whatever the matrix stack held when the
+batch flushed.
 
 ## What belongs in crucible
 

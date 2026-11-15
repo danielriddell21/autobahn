@@ -19,30 +19,43 @@ import (
 // annotation boxes, so nothing in the scene can be mistaken for a detection.
 var (
 	colSky      = rl.NewColor(139, 174, 206, 255)
-	colGround   = rl.NewColor(86, 104, 72, 255)
-	colAsphalt  = rl.NewColor(58, 58, 63, 255)
-	colSidewalk = rl.NewColor(131, 129, 123, 255)
-	colKerb     = rl.NewColor(154, 151, 144, 255)
-	colPark     = rl.NewColor(74, 112, 64, 255)
-	colLinePale = rl.NewColor(216, 214, 206, 255)
+	colGround   = rl.NewColor(92, 112, 76, 255)
+	colAsphalt  = rl.NewColor(62, 62, 68, 255)
+	colSidewalk = rl.NewColor(150, 147, 140, 255)
+	colKerb     = rl.NewColor(176, 172, 164, 255)
+	colPark     = rl.NewColor(84, 124, 70, 255)
+	colLinePale = rl.NewColor(222, 220, 212, 255)
 	// Yellow paint in Britain means a parking restriction at the kerb, never a
 	// lane divider, so it only ever appears as the double lines by the pavement.
-	colLineWarm = rl.NewColor(198, 170, 74, 255)
+	colLineWarm = rl.NewColor(204, 176, 78, 255)
 	colPole     = rl.NewColor(94, 96, 99, 255)
-	colSignBack = rl.NewColor(74, 76, 80, 255)
-	colStopFace = rl.NewColor(178, 52, 48, 255)
-	colSignFace = rl.NewColor(226, 224, 216, 255)
-	colGlass    = rl.NewColor(96, 116, 134, 255)
-	colTyre     = rl.NewColor(38, 38, 41, 255)
+	colSignBack = rl.NewColor(64, 66, 70, 255)
+	colStopFace = rl.NewColor(186, 54, 50, 255)
+	colSignFace = rl.NewColor(230, 228, 220, 255)
+	colGlass    = rl.NewColor(82, 102, 122, 255)
+	colTyre     = rl.NewColor(34, 34, 37, 255)
+	colHub      = rl.NewColor(132, 134, 140, 255)
+	colTrim     = rl.NewColor(44, 46, 50, 255)
 	colLampHead = rl.NewColor(206, 200, 172, 255)
+	colLampLit  = rl.NewColor(246, 222, 164, 255)
+	colTrunk    = rl.NewColor(92, 74, 58, 255)
+	colSkid     = rl.NewColor(18, 18, 20, 120)
+	colShadow   = rl.NewColor(0, 0, 0, 86)
+
+	leafShades = [4]rl.Color{
+		rl.NewColor(70, 116, 62, 255),
+		rl.NewColor(86, 128, 66, 255),
+		rl.NewColor(62, 104, 70, 255),
+		rl.NewColor(104, 132, 72, 255),
+	}
 
 	buildingShades = [6]rl.Color{
-		rl.NewColor(148, 142, 132, 255),
-		rl.NewColor(122, 124, 128, 255),
-		rl.NewColor(166, 150, 134, 255),
-		rl.NewColor(110, 116, 122, 255),
-		rl.NewColor(138, 128, 118, 255),
-		rl.NewColor(96, 100, 106, 255),
+		rl.NewColor(168, 160, 146, 255),
+		rl.NewColor(136, 140, 146, 255),
+		rl.NewColor(184, 164, 142, 255),
+		rl.NewColor(122, 130, 140, 255),
+		rl.NewColor(156, 138, 124, 255),
+		rl.NewColor(108, 114, 124, 255),
 	}
 
 	carPaints = [8]rl.Color{
@@ -59,6 +72,7 @@ var (
 	// Police livery: a white car with the reflective blue-and-yellow blocks of
 	// British battenburg markings, and a light bar that runs blues and reds.
 	colPoliceBody   = rl.NewColor(232, 232, 236, 255)
+	colPoliceDark   = rl.NewColor(38, 44, 60, 255)
 	colPoliceBlue   = rl.NewColor(36, 76, 168, 255)
 	colPoliceYellow = rl.NewColor(226, 198, 62, 255)
 	colBeaconBlue   = rl.NewColor(64, 110, 245, 255)
@@ -73,52 +87,16 @@ var (
 
 // Draw distances in metres.
 const (
-	cullBuildings float32 = 300
-	cullBlocks    float32 = 320
-	// apronHeight lifts a roundabout's carriageway just clear of the pavement
-	// slabs it has to cover.
-	apronHeight  float32 = city.KerbHeight + 0.03
-	cullMarkings float32 = 150
-	cullDashes   float32 = 110
-	cullProps    float32 = 130
-	cullCrossing float32 = 95
+	cullBuildings float32 = 330
+	cullBlocks    float32 = 350
+	cullMarkings  float32 = 170
+	cullDashes    float32 = 120
+	cullProps     float32 = 150
+	cullCrossing  float32 = 100
+	cullTrees     float32 = 190
+	cullWheels    float32 = 90
+	cullPools     float32 = 140
 )
-
-// lightingVS is the vertex shader used for the whole scene. It matches
-// raylib's default attribute names so it works with immediate-mode drawing.
-const lightingVS = `#version 330
-in vec3 vertexPosition;
-in vec2 vertexTexCoord;
-in vec4 vertexColor;
-in vec3 vertexNormal;
-uniform mat4 mvp;
-uniform mat4 matNormal;
-out vec2 fragTexCoord;
-out vec4 fragColor;
-out vec3 fragNormal;
-void main() {
-    fragTexCoord = vertexTexCoord;
-    fragColor = vertexColor;
-    fragNormal = normalize(vec3(matNormal * vec4(vertexNormal, 1.0)));
-    gl_Position = mvp * vec4(vertexPosition, 1.0);
-}`
-
-// lightingFS applies a single directional light plus ambient, which is enough
-// to read the shape of the city without any texture assets.
-const lightingFS = `#version 330
-in vec2 fragTexCoord;
-in vec4 fragColor;
-in vec3 fragNormal;
-uniform sampler2D texture0;
-uniform vec4 colDiffuse;
-out vec4 finalColor;
-void main() {
-    vec3 sun = normalize(vec3(-0.45, 0.82, 0.35));
-    float lambert = max(dot(normalize(fragNormal), sun), 0.0);
-    float shade = 0.46 + 0.54 * lambert;
-    vec4 base = texture(texture0, fragTexCoord) * colDiffuse * fragColor;
-    finalColor = vec4(base.rgb * shade, base.a);
-}`
 
 func vec3(x, y, z float32) rl.Vector3 { return rl.NewVector3(x, y, z) }
 
@@ -131,36 +109,35 @@ func (g *Game) drawWorld(cam rl.Camera3D, drawPlayer bool) {
 	// false the player's own car is omitted, which is what the bonnet-mounted AI
 	// camera wants.
 	eye := mathx.V(cam.Position.X, cam.Position.Z)
+	// Fog is measured from the eye, so a view from a long way up pushes it
+	// back by as much, or the plan it exists to show would be a blank haze.
+	g.scene.use(g.light, cam.Position, max(g.cullRange()/cullBlocks, cam.Position.Y/90))
 
 	rl.BeginMode3D(cam)
-	if g.hasShader {
-		rl.BeginShaderMode(g.shader)
+	// Everything here is a closed shape or lies flat on the ground, so nothing
+	// is gained by culling back faces, and the hand-built pieces need not all
+	// agree about which way round they are wound.
+	rl.DisableBackfaceCulling()
+	if g.scene.ok {
+		rl.BeginShaderMode(g.scene.shader)
 	}
 
 	g.drawGround(eye)
 	g.drawBlocks(eye)
 	g.drawRoundabouts(eye)
 	g.drawMarkings(eye)
+	g.drawSkids(eye)
 	g.drawBuildings(eye)
+	g.drawTrees(eye)
 	g.drawProps(eye)
+	g.drawTraffic(eye, drawPlayer)
+	g.drawLightPools(eye, drawPlayer)
+	g.drawSmoke()
 
-	for _, a := range g.world.Agents {
-		if a.V.Pos.DistTo(eye) > cullBuildings {
-			continue
-		}
-		if a.Role == sim.RolePolice {
-			drawPoliceCar(a, g.blink)
-			continue
-		}
-		drawCar(a.V, carPaints[a.Paint%len(carPaints)], a.Indicator(), g.blink)
-	}
-	if drawPlayer {
-		drawCar(g.world.Player, carPaints[0], sim.IndicatorOff, false)
-	}
-
-	if g.hasShader {
+	if g.scene.ok {
 		rl.EndShaderMode()
 	}
+	rl.EnableBackfaceCulling()
 	rl.EndMode3D()
 }
 
@@ -204,59 +181,54 @@ func (g *Game) drawGround(eye mathx.Vec) {
 		return
 	}
 	rl.DrawPlane(vec3((loX+hiX)/2, -0.02, (loZ+hiZ)/2),
-		rl.NewVector2(hiX-loX, hiZ-loZ), colAsphalt)
+		rl.NewVector2(hiX-loX, hiZ-loZ), as(colAsphalt, matRoad))
+}
+
+// outline returns the kerb line of a block, worked out once and kept: the
+// blocks never change, and their corners are curves.
+func (g *Game) outline(i int) []mathx.Vec {
+	for len(g.outlines) <= i {
+		g.outlines = append(g.outlines, g.world.City.Blocks[len(g.outlines)].Outline())
+	}
+	return g.outlines[i]
 }
 
 func (g *Game) drawBlocks(eye mathx.Vec) {
-	for _, b := range g.world.City.Blocks {
-		cx := (b.Min.X + b.Max.X) / 2
-		cz := (b.Min.Z + b.Max.Z) / 2
-		if mathx.V(cx, cz).DistTo(eye) > g.cullRange() {
+	for i, b := range g.world.City.Blocks {
+		centre := b.Min.Lerp(b.Max, 0.5)
+		if centre.DistTo(eye) > g.cullRange()+b.Max.Sub(b.Min).Len()/2 {
 			continue
 		}
-		w := b.Max.X - b.Min.X
-		d := b.Max.Z - b.Min.Z
-		// The pavement slab, raised to make a kerb.
-		rl.DrawCube(vec3(cx, city.KerbHeight/2, cz), w, city.KerbHeight, d, colKerb)
+		// The pavement slab, raised to make a kerb, with its corners rounded
+		// off for the junctions they face.
+		kerb := g.outline(i)
 		surface := colSidewalk
 		if b.Park {
 			surface = colPark
 		}
-		rl.DrawCube(vec3(cx, city.KerbHeight, cz), w-0.5, 0.02, d-0.5, surface)
+		groundWall(centre, kerb, -0.02, city.KerbHeight, colKerb)
+		groundFan(centre, kerb, city.KerbHeight, surface)
 	}
 }
 
 func (g *Game) drawRoundabouts(eye mathx.Vec) {
-	// Paves the junction and puts the island in the middle of it.
-	//
-	// The block layout insets itself by the junction radius, so the pavement
-	// already clears the carriageway — this is what makes the junction read as
-	// a circle of asphalt rather than a square gap between four blocks.
+	// Puts the island in the middle of each roundabout. The blocks around it
+	// are already scooped out to its outer kerb, so the carriageway is simply
+	// what is left between them and this.
 	for _, n := range g.world.City.Roundabouts() {
 		if n.Pos.DistTo(eye) > g.cullRange() {
 			continue
 		}
-		ring := n.RingRadius()
-		x, z := n.Pos.X, n.Pos.Z
-
-		apron := n.Radius
-		rl.DrawCylinderEx(vec3(x, 0, z), vec3(x, apronHeight, z),
-			apron, apron, 36, colAsphalt)
-
-		// The island fills the circle inside the circulating lane, so the
-		// roundabout reads as one rather than as a bollard in a car park.
-		island := ring - city.LaneWidth
+		island := n.RingInner()
 		if island < 2 {
 			continue
 		}
-		top := apronHeight + city.KerbHeight
-		rl.DrawCylinderEx(vec3(x, apronHeight, z), vec3(x, top, z),
-			island, island, 28, colKerb)
-		rl.DrawCylinderEx(vec3(x, top, z), vec3(x, top+0.02, z),
-			island-0.6, island-0.6, 28, colPark)
+		top := city.KerbHeight
+		pillar(n.Pos, -0.02, top, island, island, 32, colKerb)
+		pillar(n.Pos, top, top+0.02, island-0.5, island-0.5, 32, colPark)
 		// A low mound so it reads as an island from the driver's seat.
-		rl.DrawCylinderEx(vec3(x, top, z), vec3(x, top+1.1, z),
-			island*0.55, island*0.2, 16, colPark)
+		pillar(n.Pos, top, top+1.0, island*0.6, island*0.25, 20, colPark)
+		drawTree(tree{at: n.Pos, height: 5.2, spread: 2.1, shade: n.ID}, top+0.9)
 	}
 }
 
@@ -346,7 +318,7 @@ func drawJunctionPaint(l *city.Lane, axis int, eyeDist float32) {
 		drawStripe(bar, 1-axis, city.LaneWidth-0.3, 0.5, colLinePale)
 	}
 
-	if l.Index != 0 || eyeDist >= cullCrossing {
+	if l.Index != 0 || eyeDist >= cullCrossing || l.Control != city.ControlSignal {
 		return
 	}
 	// Zebra stripes just beyond the stop line, running with the direction of
@@ -376,17 +348,19 @@ func (g *Game) drawBuildings(eye mathx.Vec) {
 			continue
 		}
 		shade := buildingShades[int(b.Shade)%len(buildingShades)]
-		rl.DrawCube(vec3(b.Center.X, b.Height/2, b.Center.Z), b.W, b.Height, b.D, shade)
+		// The walls are marked as a façade, which is what tells the shader to
+		// put windows in them.
+		rl.DrawCube(vec3(b.Center.X, b.Height/2, b.Center.Z), b.W, b.Height, b.D, as(shade, matFacade))
 		// A darker parapet caps the roof and reads as a silhouette detail.
 		rl.DrawCube(vec3(b.Center.X, b.Height+0.35, b.Center.Z),
 			b.W*0.97, 0.7, b.D*0.97, scaleColor(shade, 0.74))
 		// Tall buildings get a setback tower so the skyline is not all boxes.
 		if b.Height > 34 {
 			rl.DrawCube(vec3(b.Center.X, b.Height+4.5, b.Center.Z),
-				b.W*0.55, 8, b.D*0.55, scaleColor(shade, 0.88))
+				b.W*0.55, 8, b.D*0.55, as(scaleColor(shade, 0.88), matFacade))
 		}
-		// A glazed band at street level.
-		rl.DrawCube(vec3(b.Center.X, 2.1, b.Center.Z), b.W*1.005, 2.6, b.D*1.005, colGlass)
+		// A fascia over the shop fronts, which is where the signs would hang.
+		rl.DrawCube(vec3(b.Center.X, 3.5, b.Center.Z), b.W*1.012, 0.5, b.D*1.012, scaleColor(shade, 0.55))
 	}
 }
 
@@ -406,52 +380,76 @@ func (g *Game) drawProps(eye mathx.Vec) {
 		case city.PropTrafficLight:
 			g.drawTrafficLight(p)
 		case city.PropStopSign:
-			drawSignPost(p, colStopFace, 0.42)
+			drawStopSign(p)
 		case city.PropGiveWaySign:
 			drawGiveWaySign(p)
 		case city.PropSpeedSign:
-			drawSignPost(p, colSignFace, 0.36)
+			drawSpeedSign(p)
 		case city.PropStreetLamp:
-			drawLamp(p)
+			g.drawLamp(p)
 		}
 	}
 }
 
-func (g *Game) drawTrafficLight(p city.Prop) {
-	state := g.world.Signals.State(p.Node, p.Group)
-	rl.DrawCylinderEx(vec3(p.Pos.X, 0, p.Pos.Z), vec3(p.Pos.X, p.Height-0.9, p.Pos.Z),
-		0.07, 0.07, 8, colPole)
+// post stands a square pole at a prop's position.
+func post(p city.Prop, height, thick float32) {
+	rl.DrawCube(vec3(p.Pos.X, height/2, p.Pos.Z), thick, height, thick, colPole)
+}
 
+// facing pushes a matrix that puts a prop's face at the origin: +X is the way
+// the traffic it governs is travelling, so its face looks back along -X.
+func facing(p city.Prop) {
 	rl.PushMatrix()
 	rl.Translatef(p.Pos.X, 0, p.Pos.Z)
-	rl.Rotatef(-p.Heading*rl.Rad2deg, 0, 1, 0)
+	rl.Rotatef(-p.Heading*rad2deg, 0, 1, 0)
+}
+
+func (g *Game) drawTrafficLight(p city.Prop) {
+	state := g.world.Signals.State(p.Node, p.Group)
+	post(p, p.Height-0.9, 0.14)
+
+	facing(p)
 	head := p.Height - 0.35
-	rl.DrawCube(vec3(0, head, 0), 0.22, 1.0, 0.34, colSignBack)
-	// Three bulbs, only the active one lit.
+	rl.DrawCube(vec3(0, head, 0), 0.24, 1.08, 0.38, colSignBack)
+	// A backing board, which is what makes the head readable against the sky.
+	rl.DrawCube(vec3(0.02, head, 0), 0.05, 1.3, 0.62, scaleColor(colSignBack, 0.7))
+	// Three bulbs, only the active ones lit.
 	bulbs := [3]rl.Color{bulbDark, bulbDark, bulbDark}
 	switch state {
 	case sim.SignalGreen:
-		bulbs[2] = bulbGreen
+		bulbs[2] = as(bulbGreen, matGlow)
 	case sim.SignalAmber:
-		bulbs[1] = bulbAmber
+		bulbs[1] = as(bulbAmber, matGlow)
 	case sim.SignalRedAmber:
-		bulbs[0], bulbs[1] = bulbRed, bulbAmber
+		bulbs[0], bulbs[1] = as(bulbRed, matGlow), as(bulbAmber, matGlow)
 	default:
-		bulbs[0] = bulbRed
+		bulbs[0] = as(bulbRed, matGlow)
 	}
 	for i, col := range bulbs {
-		rl.DrawCube(vec3(-0.13, head+0.3-float32(i)*0.3, 0), 0.06, 0.2, 0.2, col)
+		rl.DrawCube(vec3(-0.13, head+0.32-float32(i)*0.32, 0), 0.06, 0.24, 0.24, col)
 	}
 	rl.PopMatrix()
 }
 
-func drawSignPost(p city.Prop, face rl.Color, size float32) {
-	rl.DrawCylinderEx(vec3(p.Pos.X, 0, p.Pos.Z), vec3(p.Pos.X, p.Height-size, p.Pos.Z),
-		0.05, 0.05, 8, colPole)
-	rl.PushMatrix()
-	rl.Translatef(p.Pos.X, 0, p.Pos.Z)
-	rl.Rotatef(-p.Heading*rl.Rad2deg, 0, 1, 0)
-	rl.DrawCube(vec3(-0.06, p.Height-size, 0), 0.06, size*2, size*2, face)
+func drawStopSign(p city.Prop) {
+	const size float32 = 0.42
+	post(p, p.Height-size, 0.1)
+	facing(p)
+	// An octagon, near enough: a square with a second square turned on it.
+	rl.DrawCube(vec3(-0.06, p.Height-size, 0), 0.06, size*2, size*2, colStopFace)
+	rl.DrawCube(vec3(-0.07, p.Height-size, 0), 0.06, size*2.3, size*1.2, colStopFace)
+	rl.DrawCube(vec3(-0.07, p.Height-size, 0), 0.06, size*1.2, size*2.3, colStopFace)
+	rl.DrawCube(vec3(-0.1, p.Height-size, 0), 0.03, size*0.34, size*1.5, colSignFace)
+	rl.PopMatrix()
+}
+
+func drawSpeedSign(p city.Prop) {
+	const size float32 = 0.4
+	post(p, p.Height-size, 0.1)
+	facing(p)
+	// The roundel: a red ring round a white face.
+	rl.DrawCube(vec3(-0.06, p.Height-size, 0), 0.05, size*2, size*2, colStopFace)
+	rl.DrawCube(vec3(-0.08, p.Height-size, 0), 0.05, size*1.5, size*1.5, colSignFace)
 	rl.PopMatrix()
 }
 
@@ -459,11 +457,8 @@ func drawGiveWaySign(p city.Prop) {
 	// Renders the British inverted triangle: a white face with a
 	// red border, pointing down.
 	const size float32 = 0.5
-	rl.DrawCylinderEx(vec3(p.Pos.X, 0, p.Pos.Z), vec3(p.Pos.X, p.Height-size, p.Pos.Z),
-		0.05, 0.05, 8, colPole)
-	rl.PushMatrix()
-	rl.Translatef(p.Pos.X, 0, p.Pos.Z)
-	rl.Rotatef(-p.Heading*rl.Rad2deg, 0, 1, 0)
+	post(p, p.Height-size, 0.1)
+	facing(p)
 	// Three tapering slabs approximate the downward triangle.
 	for i := range 3 {
 		f := 1 - float32(i)*0.32
@@ -475,83 +470,118 @@ func drawGiveWaySign(p city.Prop) {
 	rl.PopMatrix()
 }
 
-func drawLamp(p city.Prop) {
-	rl.DrawCylinderEx(vec3(p.Pos.X, 0, p.Pos.Z), vec3(p.Pos.X, p.Height, p.Pos.Z),
-		0.09, 0.07, 8, colPole)
-	rl.PushMatrix()
-	rl.Translatef(p.Pos.X, 0, p.Pos.Z)
-	rl.Rotatef(-p.Heading*rl.Rad2deg, 0, 1, 0)
-	rl.DrawCube(vec3(0, p.Height, -1.1), 0.1, 0.1, 2.2, colPole)
-	rl.DrawCube(vec3(0, p.Height-0.12, -2.1), 0.42, 0.14, 0.8, colLampHead)
+// lampReach is how far out over the road a street lamp's head hangs, in
+// metres. The pool of light it throws is centred under it.
+const lampReach float32 = 2.1
+
+func (g *Game) drawLamp(p city.Prop) {
+	post(p, p.Height, 0.16)
+	facing(p)
+	rl.DrawCube(vec3(0, p.Height, -lampReach/2), 0.1, 0.1, lampReach, colPole)
+	head := colLampHead
+	if g.light.night > 0.25 {
+		head = as(colLampLit, matGlow)
+	}
+	rl.DrawCube(vec3(0, p.Height-0.12, -lampReach), 0.42, 0.14, 0.8, head)
 	rl.PopMatrix()
 }
 
-func drawCar(v *sim.Vehicle, paint rl.Color, ind sim.Indicator, blinkOn bool) {
-	// Renders a vehicle as a stack of boxes in its own local space, so the
-	// whole car rotates with a single matrix push.
-	s := v.Spec
-	rl.PushMatrix()
-	rl.Translatef(v.Pos.X, 0, v.Pos.Z)
-	rl.Rotatef(-v.Yaw*rl.Rad2deg, 0, 1, 0)
-
-	length := s.HalfLength * 2
-	width := s.HalfWidth * 2
-
-	// Body, then a narrower cabin set back from the nose.
-	rl.DrawCube(vec3(0, 0.62, 0), length, 0.62, width, paint)
-	rl.DrawCube(vec3(-0.15, 1.12, 0), length*0.52, 0.44, width*0.88, scaleColor(paint, 0.86))
-	rl.DrawCube(vec3(-0.15, 1.12, 0), length*0.5, 0.30, width*0.92, colGlass)
-	// A little nose and tail definition.
-	rl.DrawCube(vec3(length*0.42, 0.42, 0), length*0.14, 0.26, width*0.96, scaleColor(paint, 0.9))
-
-	// Wheels. The front pair turns with the steering angle.
-	for _, f := range [2]float32{1, -1} {
-		for _, side := range [2]float32{1, -1} {
-			x := f * s.FrontAxle
-			if f < 0 {
-				x = -s.RearAxle
-			}
-			z := side * (s.HalfWidth - 0.08)
-			if f > 0 {
-				rl.PushMatrix()
-				rl.Translatef(x, 0.33, z)
-				rl.Rotatef(-v.Steer*rl.Rad2deg, 0, 1, 0)
-				rl.DrawCube(vec3(0, 0, 0), 0.66, 0.66, 0.24, colTyre)
-				rl.PopMatrix()
-				continue
-			}
-			rl.DrawCube(vec3(x, 0.33, z), 0.66, 0.66, 0.24, colTyre)
-		}
-	}
-
-	// Lamps: white at the front, red at the back, brighter under braking.
-	tail := rl.NewColor(150, 44, 40, 255)
-	if v.Brake > 0.05 {
-		tail = rl.NewColor(226, 62, 52, 255)
-	}
-	for _, side := range [2]float32{1, -1} {
-		z := side * (s.HalfWidth - 0.22)
-		rl.DrawCube(vec3(s.HalfLength-0.04, 0.66, z), 0.1, 0.16, 0.3, rl.NewColor(224, 222, 200, 255))
-		rl.DrawCube(vec3(-s.HalfLength+0.04, 0.66, z), 0.1, 0.16, 0.3, tail)
-	}
-
-	// Indicators.
-	if blinkOn && ind != sim.IndicatorOff {
-		z := s.HalfWidth - 0.1
-		if ind == sim.IndicatorRight {
-			z = -z
-		}
-		amber := rl.NewColor(232, 158, 44, 255)
-		rl.DrawCube(vec3(s.HalfLength-0.1, 0.66, z), 0.12, 0.16, 0.18, amber)
-		rl.DrawCube(vec3(-s.HalfLength+0.1, 0.66, z), 0.12, 0.16, 0.18, amber)
-	}
-
-	rl.PopMatrix()
+// tree is one tree: where it stands and how big it is.
+type tree struct {
+	at     mathx.Vec
+	height float32
+	spread float32
+	shade  int
 }
 
-// PaletteBases returns the world's key colours together with the vision
-// system's annotation colours. Feeding these through crucible's demo.Ramp
-// builds a GIF palette that reproduces both the city and the detection boxes
+// Tree planting, in metres.
+const (
+	treeSpacing float32 = 21  // along a street
+	treeSetback float32 = 1.9 // in from the kerb
+	parkPerTree float32 = 230 // square metres of park to each tree
+)
+
+// plantTrees adds the trees for whatever part of the city has appeared since
+// it was last called. Where each one stands is worked out from the block or
+// road it belongs to, so the same city always grows the same trees.
+func (g *Game) plantTrees() {
+	c := g.world.City
+	for ; g.treedBlocks < len(c.Blocks); g.treedBlocks++ {
+		b := c.Blocks[g.treedBlocks]
+		if !b.Park {
+			continue
+		}
+		size := b.Max.Sub(b.Min)
+		n := int(size.X * size.Z / parkPerTree)
+		for i := range n {
+			h := scatter(b.Min.X, b.Min.Z, i)
+			at := mathx.V(b.Min.X+6+h[0]*(size.X-12), b.Min.Z+6+h[1]*(size.Z-12))
+			g.trees = append(g.trees, tree{
+				at: at, height: 4.5 + h[2]*4, spread: 1.6 + h[2]*1.5, shade: i,
+			})
+		}
+	}
+	for ; g.treedRoads < len(c.Roads); g.treedRoads++ {
+		r := c.Roads[g.treedRoads]
+		if r.Ring || r.Class == city.Arterial {
+			continue // the main roads are lined with lamps instead
+		}
+		from := c.Nodes[r.A].Radius + 9
+		to := r.Length - c.Nodes[r.B].Radius - 9
+		for d, i := from, 0; d < to; d, i = d+treeSpacing, i+1 {
+			for _, s := range [2]float32{-1, 1} {
+				h := scatter(float32(r.ID), d, int(s)+2)
+				if h[0] < 0.25 {
+					continue // gaps, so it is not a row of soldiers
+				}
+				at := c.Nodes[r.A].Pos.Add(r.Dir.Mul(d + h[1]*4)).
+					Add(r.Dir.Right().Mul(s * (r.HalfWidth + treeSetback)))
+				g.trees = append(g.trees, tree{
+					at: at, height: 3.8 + h[2]*2.4, spread: 1.2 + h[2]*0.7, shade: i + int(s),
+				})
+			}
+		}
+	}
+}
+
+// scatter returns three numbers in [0, 1) for a place and an index, the same
+// every time, which is all a tree needs to decide where exactly to stand.
+func scatter(x, z float32, i int) [3]float32 {
+	h := uint32(int32(x*7.3))*0x9e3779b1 ^ uint32(int32(z*5.1))*0x85ebca6b ^ uint32(i+1)*0xc2b2ae35
+	var out [3]float32
+	for k := range out {
+		h ^= h >> 15
+		h *= 0x2c1b3c6d
+		h ^= h >> 12
+		out[k] = float32(h>>8&0xffff) / 65536
+	}
+	return out
+}
+
+func (g *Game) drawTrees(eye mathx.Vec) {
+	g.plantTrees()
+	for _, t := range g.trees {
+		if t.at.DistTo(eye) > cullTrees {
+			continue
+		}
+		drawTree(t, city.KerbHeight)
+	}
+}
+
+func drawTree(t tree, ground float32) {
+	leaf := leafShades[((t.shade%len(leafShades))+len(leafShades))%len(leafShades)]
+	trunk := t.height * 0.42
+	rl.DrawCube(vec3(t.at.X, ground+trunk/2, t.at.Z), 0.32, trunk, 0.32, colTrunk)
+	// Three stacked blocks, shrinking toward the top.
+	crown := t.height - trunk
+	y := ground + trunk
+	for i, f := range [3]float32{1, 0.78, 0.48} {
+		h := crown * [3]float32{0.42, 0.34, 0.24}[i]
+		w := t.spread * 2 * f
+		rl.DrawCube(vec3(t.at.X, y+h/2, t.at.Z), w, h, w, scaleColor(leaf, 0.9+0.1*float32(i)))
+		y += h
+	}
+}
 
 func drawBoxes(boxes []annotate.Box, labels bool) {
 	// Paints the annotator's boxes over whatever is already rendered.
@@ -574,47 +604,6 @@ func drawBoxes(boxes []annotate.Box, labels bool) {
 	}
 }
 
-func drawPoliceCar(a *sim.Agent, blinkOn bool) {
-	// Renders a marked unit: the same body as any other car, with
-	// battenburg blocks down the side and a light bar on the roof. The bar only
-	// flashes when the unit is actually running to a call.
-	v := a.V
-	drawCar(v, colPoliceBody, a.Indicator(), blinkOn)
-
-	s := v.Spec
-	rl.PushMatrix()
-	rl.Translatef(v.Pos.X, 0, v.Pos.Z)
-	rl.Rotatef(-v.Yaw*rad2deg, 0, 1, 0)
-
-	// Battenburg: alternating blocks along both flanks.
-	for i := range 5 {
-		x := (float32(i) - 2) * (s.HalfLength * 2 / 5.5)
-		block := colPoliceBlue
-		if i%2 == 1 {
-			block = colPoliceYellow
-		}
-		for _, side := range [2]float32{1, -1} {
-			rl.DrawCube(vec3(x, 0.62, side*(s.HalfWidth+0.01)),
-				s.HalfLength*2/5.6, 0.34, 0.04, block)
-		}
-	}
-
-	// The light bar. Both halves sit dark until the unit is on a call, then
-	// they alternate blue and red.
-	left, right := colBeaconDark, colBeaconDark
-	if a.BluesAndTwos() {
-		left, right = colBeaconBlue, colBeaconRed
-		if blinkOn {
-			left, right = right, left
-		}
-	}
-	rl.DrawCube(vec3(-0.1, 1.4, 0), 0.26, 0.1, s.HalfWidth*1.7, colBeaconDark)
-	rl.DrawCube(vec3(-0.1, 1.44, s.HalfWidth*0.42), 0.22, 0.12, s.HalfWidth*0.7, left)
-	rl.DrawCube(vec3(-0.1, 1.44, -s.HalfWidth*0.42), 0.22, 0.12, s.HalfWidth*0.7, right)
-
-	rl.PopMatrix()
-}
-
 // PaletteBases returns the world's key colours together with the vision
 // system's annotation colours. Feeding these through crucible's demo.Ramp
 // builds a GIF palette that reproduces both the city and the detection boxes
@@ -626,11 +615,15 @@ func PaletteBases() []color.RGBA {
 		toRGBAColor(colLinePale), toRGBAColor(colLineWarm), toRGBAColor(colPole),
 		toRGBAColor(colStopFace), toRGBAColor(colSignFace), toRGBAColor(colGlass),
 		toRGBAColor(colTyre), toRGBAColor(hudPanel), toRGBAColor(hudText),
+		toRGBAColor(colPoliceBody), toRGBAColor(colBeaconBlue), toRGBAColor(colBeaconRed),
 	}
 	for _, c := range buildingShades {
 		out = append(out, toRGBAColor(c))
 	}
 	for _, c := range carPaints {
+		out = append(out, toRGBAColor(c))
+	}
+	for _, c := range leafShades {
 		out = append(out, toRGBAColor(c))
 	}
 	for cl := vision.ClassVehicle; cl <= vision.ClassStopLine; cl++ {

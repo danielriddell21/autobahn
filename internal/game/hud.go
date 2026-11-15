@@ -45,8 +45,10 @@ func (g *Game) drawHUD() {
 		g.drawAutopilotPanel()
 	}
 	g.drawWanted()
+	g.drawCarState()
 	g.drawMinimap(int32(g.opts.Width)/2-72, 8, 144)
 	g.drawNotice()
+	g.drawBanner()
 	if g.showHelp {
 		g.drawHelp()
 	}
@@ -128,6 +130,9 @@ func (g *Game) drawScore() {
 	rl.DrawText("penalty points", x+14, y+64, 12, hudDim)
 	rl.DrawText(fmt.Sprintf("%.2f km", j.Distance/1000), x+140, y+30, 16, hudText)
 	rl.DrawText(fmt.Sprintf("%d faults", j.Faults), x+140, y+52, 12, hudDim)
+	if banked := g.world.Wanted.Banked; banked > 0 {
+		rl.DrawText(money(banked)+" banked", x+140, y+68, 12, hudGood)
+	}
 }
 
 func (g *Game) drawInfractions() {
@@ -155,42 +160,123 @@ func (g *Game) drawInfractions() {
 }
 
 func (g *Game) drawWanted() {
-	// Shows the police response: the wanted level and what the units
-	// are currently doing about it.
+	// Shows the police response: how wanted the driver is, what the units are
+	// doing about it, and what getting away would be worth.
 	wa := g.world.Wanted
 	if wa.Level == 0 && wa.State != sim.PursuitStopped {
 		return
 	}
-	x, y := int32(g.opts.Width)/2-110, int32(g.opts.Height)-150
-	panel(x, y, 220, 52)
+	const w, h = int32(300), int32(74)
+	x, y := int32(g.opts.Width)/2-w/2, int32(g.opts.Height)-h-96
+	panel(x, y, w, h)
 
 	col := hudWarn
 	switch wa.State {
 	case sim.PursuitActive:
 		col = hudBad
+		if g.blink {
+			col = hudAccent // the label flashes with the light bars
+		}
 	case sim.PursuitStopped:
 		col = hudAccent
 	}
-	rl.DrawText(wa.State.String(), x+14, y+8, 18, col)
+	rl.DrawText(wa.State.String(), x+14, y+8, 20, col)
 
 	// One lamp per wanted level, lit up to the current one.
-	for i := range 4 {
+	for i := range sim.MaxWanted {
 		lamp := rl.NewColor(58, 60, 66, 255)
 		if i < wa.Level {
-			lamp = col
+			lamp = hudBad
 		}
-		rl.DrawCircle(x+150+int32(i)*16, y+18, 6, lamp)
+		rl.DrawCircle(x+w-22-int32(sim.MaxWanted-1-i)*18, y+18, 7, lamp)
 	}
-	if wa.State == sim.PursuitEvading {
-		rl.DrawText("keep out of sight", x+14, y+32, 12, hudDim)
+
+	bounty := fmt.Sprintf("bounty  %s", money(wa.Bounty))
+	rl.DrawText(bounty, x+14, y+34, 14, hudText)
+
+	// One bar underneath, for whichever way this is currently going.
+	switch {
+	case wa.Busting > 0.02:
+		g.meter(x+14, y+56, w-28, wa.Busting, hudBad, "being stopped")
+	case wa.State == sim.PursuitEvading:
+		g.meter(x+14, y+56, w-28, wa.Cooldown, hudAccent, "losing them")
+	default:
+		rl.DrawText("break the line of sight", x+14, y+54, 12, hudDim)
+	}
+}
+
+// meter draws a labelled progress bar.
+func (g *Game) meter(x, y, w int32, v float32, col rl.Color, label string) {
+	rl.DrawRectangle(x, y, w, 10, rl.NewColor(50, 54, 60, 255))
+	rl.DrawRectangle(x, y, int32(float32(w)*mathx.Clamp(v, 0, 1)), 10, col)
+	rl.DrawText(label, x+w-rl.MeasureText(label, 10)-4, y-11, 10, hudDim)
+}
+
+// money formats a bounty the way a British player would read it.
+func money(v int) string {
+	s := fmt.Sprintf("%d", v)
+	for i := len(s) - 3; i > 0; i -= 3 {
+		s = s[:i] + "," + s[i:]
+	}
+	return "£" + s
+}
+
+// drawCarState shows what the car has left: nitrous, and how much of a
+// beating it will still take.
+func (g *Game) drawCarState() {
+	x, y := int32(270), int32(g.opts.Height)-52
+	panel(x, y, 190, 40)
+	bar := func(by int32, label string, v float32, col rl.Color) {
+		rl.DrawText(label, x+10, by-1, 10, hudDim)
+		rl.DrawRectangle(x+58, by, 120, 8, rl.NewColor(50, 54, 60, 255))
+		rl.DrawRectangle(x+58, by, int32(120*mathx.Clamp(v, 0, 1)), 8, col)
+	}
+	nitro := hudAccent
+	if g.world.Player.Boosting {
+		nitro = hudText
+	}
+	bar(y+8, "NITRO", g.world.Player.Nitro, nitro)
+	health := hudGood
+	switch d := g.world.Damage; {
+	case d >= 1:
+		health = hudBad
+	case d > 0.6:
+		health = hudWarn
+	}
+	bar(y+24, "CAR", 1-g.world.Damage, health)
+}
+
+// drawBanner announces how a pursuit ended, across the middle of the screen.
+func (g *Game) drawBanner() {
+	if g.bannerFor <= 0 {
 		return
 	}
-	// Being seen and being phoned in are different things, so say which.
-	seen := fmt.Sprintf("%d witnessed", wa.Witnessed)
-	if wa.Reported > 0 {
-		seen += fmt.Sprintf(", %d reported", wa.Reported)
+	size := int32(64)
+	w := rl.MeasureText(g.banner, size)
+	x := int32(g.opts.Width)/2 - w/2
+	y := int32(g.opts.Height)/2 - 110
+	rl.DrawText(g.banner, x+3, y+3, size, rl.NewColor(0, 0, 0, 160))
+	rl.DrawText(g.banner, x, y, size, g.bannerCol)
+	if g.bannerNote != "" {
+		nw := rl.MeasureText(g.bannerNote, 22)
+		rl.DrawText(g.bannerNote, int32(g.opts.Width)/2-nw/2, y+72, 22, hudText)
 	}
-	rl.DrawText(seen, x+14, y+32, 12, hudDim)
+}
+
+// watchPursuit notices a pursuit ending and raises the banner for it.
+func (g *Game) watchPursuit(dt float32) {
+	wa := g.world.Wanted
+	switch {
+	case wa.Stops > g.seenStops:
+		g.banner, g.bannerCol, g.bannerNote = "BUSTED", hudBad, "bounty forfeited"
+		g.bannerFor = 3.2
+	case wa.Escapes > g.seenEscapes:
+		g.banner, g.bannerCol = "ESCAPED", hudGood
+		g.bannerNote = fmt.Sprintf("%s banked", money(wa.Banked-g.seenBanked))
+		g.bannerFor = 3.2
+	}
+	g.seenStops, g.seenEscapes, g.seenBanked = wa.Stops, wa.Escapes, wa.Banked
+	g.bannerFor = max(g.bannerFor-dt, 0)
 }
 
 func (g *Game) drawAIPanel() {
@@ -284,8 +370,10 @@ func controlBindings() []keymap.Binding {
 		{Key: "W/S", Action: "throttle, brake"},
 		{Key: "A/D", Action: "steer"},
 		{Key: "Space", Action: "handbrake"},
+		{Key: "Shift", Action: "nitrous"},
 		{Key: "Tab", Action: "autopilot"},
 		{Key: "C", Action: "camera"},
+		{Key: "T", Action: "time of day"},
 		{Key: "V", Action: "AI camera (autopilot)"},
 		{Key: "L", Action: "labels"},
 		{Key: "N", Action: "back on road"},
@@ -330,7 +418,7 @@ func (g *Game) drawNotice() {
 	w := rl.MeasureText(text, 20) + 36
 	x := int32(g.opts.Width)/2 - w/2
 	// Sits above the wanted panel, which occupies the band below it.
-	y := int32(g.opts.Height) - 214
+	y := int32(g.opts.Height) - 216
 	panel(x, y, w, 34)
 	rl.DrawText(text, x+18, y+8, 20, col)
 }

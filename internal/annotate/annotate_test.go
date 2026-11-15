@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/autobahn/internal/annotate"
+	"github.com/danielriddell21/autobahn/internal/city"
 	"github.com/danielriddell21/autobahn/internal/mathx"
 	"github.com/danielriddell21/autobahn/internal/sim"
 	"github.com/danielriddell21/autobahn/internal/vision"
@@ -154,5 +155,84 @@ func TestLayoutIsEmptyLookingAtNothing(t *testing.T) {
 	}
 	if boxes := annotate.Layout(w, v); len(boxes) != 0 {
 		t.Errorf("got %d boxes looking at empty sky, want 0", len(boxes))
+	}
+}
+
+// The autopilot is told how high the edges of a signal's and a sign's box
+// stand, and ranges them from that. If the boxes move and the calibration does
+// not, every signal is ranged wrong and nothing else will say so.
+func TestBoxHeightsMatchTheCameraCalibration(t *testing.T) {
+	w := world(t)
+	seen := map[city.PropKind]bool{}
+	for _, p := range w.City.Props {
+		if seen[p.Kind] {
+			continue
+		}
+		seen[p.Kind] = true
+		var got, want float32
+		switch p.Kind {
+		case city.PropTrafficLight:
+			got, want = p.Height-annotate.SignalDrop-annotate.SignalHalf, vision.SignalHeadHeight
+		case city.PropStopSign, city.PropGiveWaySign:
+			got, want = p.Height-annotate.SignDrop+annotate.SignHalf, vision.SignTopHeight
+		case city.PropSpeedSign:
+			got, want = p.Height-annotate.SpeedSignDrop+annotate.SpeedSignHalf, vision.SpeedSignTopHeight
+		default:
+			continue
+		}
+		if mathx.Abs(got-want) > 0.001 {
+			t.Errorf("prop kind %d: box edge at %.3fm, calibrated as %.3fm", p.Kind, got, want)
+		}
+	}
+	if !seen[city.PropTrafficLight] || !seen[city.PropSpeedSign] {
+		t.Fatal("this city has no signals or speed signs to check")
+	}
+}
+
+// A signal governing the cross street faces another way, and a driver who
+// obeyed it would stop for somebody else's red.
+func TestOnlyPropsFacingTheCarAreAnnotated(t *testing.T) {
+	w := world(t)
+	_, view := bonnet()
+	// Stand on every signalled approach in turn, well back from the line.
+	checked := 0
+	for _, l := range w.City.Lanes {
+		if l.Control != city.ControlSignal || l.Length < 60 || l.Index != 0 {
+			continue
+		}
+		w.Player.Place(l.Point(l.Length-30), l.Heading)
+		w.Route.Update(w.Player.Pos, w.Player.Forward())
+		want := map[vision.Class]bool{}
+		switch w.Signals.LaneState(l) {
+		case sim.SignalGreen:
+			want[vision.ClassLightGreen] = true
+		case sim.SignalAmber:
+			want[vision.ClassLightAmber] = true
+		case sim.SignalRedAmber:
+			want[vision.ClassLightRedAmber] = true
+		default:
+			want[vision.ClassLightRed] = true
+		}
+		lights := 0
+		for _, b := range annotate.Layout(w, view(w)) {
+			switch b.Class {
+			case vision.ClassLightRed, vision.ClassLightRedAmber, vision.ClassLightAmber, vision.ClassLightGreen:
+				// Heads beyond this junction may show anything; the two
+				// nearest the car are its own.
+				if lights++; lights <= 2 && !want[b.Class] {
+					t.Fatalf("lane %d: a %v head is annotated, but this approach shows %v",
+						l.ID, b.Class, w.Signals.LaneState(l))
+				}
+			}
+		}
+		if lights < 2 {
+			t.Fatalf("lane %d: %d signal heads in view from 30m back, want the primary and the far-side one", l.ID, lights)
+		}
+		if checked++; checked >= 12 {
+			break
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no signalled approach long enough to stand on")
 	}
 }

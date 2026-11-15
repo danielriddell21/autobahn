@@ -76,9 +76,11 @@ type Options struct {
 	Chase bool
 	// Host makes this machine the authority for a two-player chase against
 	// another person, listening on the given address. Join connects to one.
-	Host       string
-	Join       string
-	Camera     CameraMode
+	Host   string
+	Join   string
+	Camera CameraMode
+	// Time is the light the city is seen in.
+	Time       TimeOfDay
 	Frames     int // when > 0, run this many frames then exit
 	Screenshot string
 	Stats      bool // print a session summary on exit
@@ -103,7 +105,7 @@ type Given map[string]bool
 // DefaultOptions returns the standard session settings.
 func DefaultOptions() Options {
 	return Options{
-		Seed: 7, Traffic: 70, Police: 5, Width: 1280, Height: 720,
+		Seed: 7, Traffic: 70, Police: 7, Width: 1280, Height: 720,
 		CamWidth: 420, CamHeight: 236, ShowPanel: true, PerceptionH: 20,
 		// A 1280x720 scene needs downscaling to make a sensible GIF, and half
 		// a minute at sixty frames a second is long enough for any clip.
@@ -116,8 +118,29 @@ type Game struct {
 	opts  Options
 	world *sim.World
 
-	shader    rl.Shader
-	hasShader bool
+	// scene is the lighting shader, light what it is currently lighting the
+	// city with, and tod the time of day that light belongs to.
+	scene sceneShader
+	light lighting
+	tod   TimeOfDay
+	// outlines caches each block's kerb line, and trees what has been planted;
+	// treedBlocks and treedRoads say how much of the city that covers.
+	outlines    [][]mathx.Vec
+	trees       []tree
+	treedBlocks int
+	treedRoads  int
+	fx          effects
+	// fov is the chase camera's lens, which opens up with speed.
+	fov float32
+	// banner is the word across the screen when a pursuit ends, bannerFor how
+	// much longer it stays up, and the seen counts what it has already
+	// announced.
+	banner, bannerNote string
+	bannerCol          rl.Color
+	bannerFor          float32
+	seenStops          int
+	seenEscapes        int
+	seenBanked         int
 
 	camMode CameraMode
 	// overheadHeight is how much ground the overhead camera shows either side
@@ -247,8 +270,9 @@ func New(opts Options) *Game {
 	g.driver = autopilot.New(g.visionCam)
 	g.aiTarget = rl.LoadRenderTexture(int32(opts.CamWidth), int32(opts.CamHeight))
 
-	g.shader = rl.LoadShaderFromMemory(lightingVS, lightingFS)
-	g.hasShader = g.shader.ID != 0
+	g.scene = loadSceneShader()
+	g.SetTime(opts.Time)
+	g.fov = groundFov
 
 	g.cam = rl.Camera3D{Up: vec3(0, 1, 0), Fovy: groundFov, Projection: rl.CameraPerspective}
 	g.aiCam = rl.Camera3D{
@@ -300,10 +324,22 @@ func (g *Game) watchInfractions() {
 func (g *Game) Close() {
 	g.audio.Close()
 	rl.UnloadRenderTexture(g.aiTarget)
-	if g.hasShader {
-		rl.UnloadShader(g.shader)
+	if g.scene.ok {
+		rl.UnloadShader(g.scene.shader)
 	}
 }
+
+// Time returns the time of day the city is being shown at.
+func (g *Game) Time() TimeOfDay { return g.tod }
+
+// SetTime changes the time of day.
+func (g *Game) SetTime(t TimeOfDay) {
+	g.tod = ((t % numTimes) + numTimes) % numTimes
+	g.light = lightingFor(g.tod)
+}
+
+// sky clears the frame to the sky for the current time of day.
+func (g *Game) sky(w, h int) { drawSky(g.light, int32(w), int32(h)) }
 
 // World exposes the simulation, for tests and tools.
 func (g *Game) World() *sim.World { return g.world }
@@ -377,11 +413,13 @@ func (g *Game) Step(dt float32) {
 	}
 
 	g.world.Update(controls, dt)
+	g.updateEffects(dt)
+	g.watchPursuit(dt)
 	g.updateCameras(dt)
 	g.updateAudio()
 
 	rl.BeginDrawing()
-	rl.ClearBackground(colSky)
+	g.sky(g.opts.Width, g.opts.Height)
 	g.drawWorld(g.cam, g.camMode != CameraBonnet)
 	if g.showHUD {
 		g.drawHUD()
@@ -536,11 +574,12 @@ func (g *Game) stepChase(dt float32) {
 		g.driveChase(g.runnerControls(dt), dt)
 	}
 
+	g.updateEffects(dt)
 	g.chaseCamera(dt)
 	g.updateAudio()
 
 	rl.BeginDrawing()
-	rl.ClearBackground(colSky)
+	g.sky(g.opts.Width, g.opts.Height)
 	g.drawWorld(g.cam, true)
 	if g.showHUD {
 		g.drawSpeedoFor(g.chaseSubject())
@@ -567,6 +606,8 @@ func (g *Game) handleInput() {
 		g.world.PlaceOnNearestLane()
 	case rl.IsKeyPressed(rl.KeyH):
 		g.showHelp = !g.showHelp
+	case rl.IsKeyPressed(rl.KeyT):
+		g.SetTime(g.tod + 1)
 	}
 }
 
@@ -590,6 +631,7 @@ func (g *Game) manualControls() sim.Controls {
 		}
 	}
 	c.Handbrake = rl.IsKeyDown(rl.KeySpace)
+	c.Boost = rl.IsKeyDown(rl.KeyLeftShift) || rl.IsKeyDown(rl.KeyRightShift)
 	return c
 }
 
@@ -608,7 +650,7 @@ func (g *Game) updateCameras(dt float32) {
 	look := mount.Add(fwd.Mul(24))
 
 	if g.camMode != CameraHigh {
-		g.cam.Fovy = groundFov
+		g.cam.Fovy = g.speedLens(p, dt)
 	}
 	switch g.camMode {
 	case CameraBonnet:
@@ -638,17 +680,43 @@ func (g *Game) updateCameras(dt float32) {
 				mathx.Approach(g.camPos.Z, want.Z, rate, dt),
 			)
 		}
-		g.cam.Position = vec3(g.camPos.X, 4.3, g.camPos.Z)
+		sx, sy := g.rattle()
+		side := fwd.Right().Mul(sx)
+		g.cam.Position = vec3(g.camPos.X+side.X, 4.3+sy, g.camPos.Z+side.Z)
 		ahead := p.Pos.Add(fwd.Mul(9))
 		g.cam.Target = vec3(ahead.X, 1.0, ahead.Z)
 	}
+}
+
+// Lens tuning for the view from the car.
+const (
+	// speedFov is how much the lens opens between a standstill and flat out,
+	// and boostFov how much further it opens on nitrous. A wider lens is most
+	// of what makes speed look like speed.
+	speedFov float32 = 15
+	boostFov float32 = 7
+)
+
+// speedLens returns the field of view for the view from a car, easing toward
+// the lens its speed calls for.
+func (g *Game) speedLens(v *sim.Vehicle, dt float32) float32 {
+	want := groundFov + speedFov*mathx.Clamp(v.Speed()/v.Spec.MaxSpeed, 0, 1)
+	if v.Boosting {
+		want += boostFov
+	}
+	if dt <= 0 {
+		g.fov = want
+	} else {
+		g.fov = mathx.Approach(g.fov, want, 3, dt)
+	}
+	return g.fov
 }
 
 func (g *Game) renderAICamera() {
 	// Draws the scene from the bonnet camera into the off-screen
 	// target and paints the detection boxes over it.
 	rl.BeginTextureMode(g.aiTarget)
-	rl.ClearBackground(colSky)
+	g.sky(g.opts.CamWidth, g.opts.CamHeight)
 	g.drawWorld(g.aiCam, false)
 	boxes := annotate.Layout(g.world, g.aiView)
 	drawBoxes(boxes, g.showLabels)

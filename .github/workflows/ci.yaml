@@ -65,5 +65,5 @@ jobs:
 
       - uses: danielriddell21/github-actions/.github/actions/setup-raylib@v2
 
-      - name: Score the autopilot across 16 cities
-        run: go run ./tools/eval -seeds 16 -seconds 60 -max-points 40
+      - name: Score the autopilot across 24 cities
+        run: go run ./tools/eval -seeds 24 -seconds 60 -max-points 12

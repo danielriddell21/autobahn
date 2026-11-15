@@ -143,7 +143,24 @@ func IsLaneMarker(c Class) bool {
 type Detection struct {
 	Class                  Class
 	MinX, MinY, MaxX, MaxY float32
-	Pixels                 int
+	// BaseMinX and BaseMaxX are the extent of the blob along its bottom row.
+	//
+	// Boxes of one class that overlap on the image run together into a single
+	// blob, and a queue of cars does exactly that. The blob's bottom row still
+	// belongs to the nearest of them alone, so this is how wide the thing
+	// actually standing at the ranged distance is, where MinX and MaxX may
+	// take in everything queued up behind it.
+	BaseMinX, BaseMaxX float32
+	Pixels             int
+}
+
+// Base returns the extent of the detection along its bottom edge, falling
+// back to the whole box for a detection that was not produced by a scan.
+func (d Detection) Base() (lo, hi float32) {
+	if d.BaseMinX == 0 && d.BaseMaxX == 0 {
+		return d.MinX, d.MaxX
+	}
+	return d.BaseMinX, d.BaseMaxX
 }
 
 // Width returns the box width in pixels.
@@ -193,6 +210,16 @@ func (c Camera) GroundDistance(pixelY float32) float32 {
 // SignalHeadHeight is the height above the road of the bottom of a traffic
 // light's annotated box, used to range signals directly.
 const SignalHeadHeight float32 = 2.0
+
+// The heights above the road of the top edge of a sign's annotated box. A sign
+// stands at about the height of the lens, so its lower edge sits on the
+// horizon and says nothing about how far away it is; the top edge does.
+const (
+	// SignTopHeight is the top of a stop or give way sign's box.
+	SignTopHeight float32 = 2.28
+	// SpeedSignTopHeight is the top of a speed limit sign's box.
+	SpeedSignTopHeight float32 = 2.45
+)
 
 // RangeAtHeight estimates how far ahead a point lies when its height above the
 // road is known, which is what lets a traffic light be ranged directly instead
@@ -289,6 +316,21 @@ func (s *Scanner) Scan(px []color.RGBA, w, h int) []Detection {
 	return s.boxes
 }
 
+// include grows a detection to take in one more pixel.
+func (d *Detection) include(x, y int) {
+	d.Pixels++
+	fx, fy := float32(x), float32(y)
+	d.MinX, d.MaxX = min(d.MinX, fx), max(d.MaxX, fx)
+	d.MinY = min(d.MinY, fy)
+	switch {
+	case fy > d.MaxY:
+		// A new lowest row: the base starts again from here.
+		d.MaxY, d.BaseMinX, d.BaseMaxX = fy, fx, fx
+	case fy == d.MaxY:
+		d.BaseMinX, d.BaseMaxX = min(d.BaseMinX, fx), max(d.BaseMaxX, fx)
+	}
+}
+
 func (s *Scanner) flood(px []color.RGBA, w, h, start int, cl Class) Detection {
 	// Eight-connected flood fill over pixels of exactly this class colour. The
 	// annotations are hollow rectangles, so one fill recovers one box outline.
@@ -301,17 +343,14 @@ func (s *Scanner) flood(px []color.RGBA, w, h, start int, cl Class) Detection {
 		Class: cl,
 		MinX:  float32(start % w), MaxX: float32(start % w),
 		MinY: float32(start / w), MaxY: float32(start / w),
+		BaseMinX: float32(start % w), BaseMaxX: float32(start % w),
 	}
 
 	for len(s.stack) > 0 {
 		idx := s.stack[len(s.stack)-1]
 		s.stack = s.stack[:len(s.stack)-1]
 		x, y := int(idx)%w, int(idx)/w
-		d.Pixels++
-		d.MinX = min(d.MinX, float32(x))
-		d.MaxX = max(d.MaxX, float32(x))
-		d.MinY = min(d.MinY, float32(y))
-		d.MaxY = max(d.MaxY, float32(y))
+		d.include(x, y)
 
 		for dy := -1; dy <= 1; dy++ {
 			for dx := -1; dx <= 1; dx++ {

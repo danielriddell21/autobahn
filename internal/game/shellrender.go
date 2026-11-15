@@ -157,7 +157,7 @@ func centred(text string, w, y int32, size int32, col rl.Color) {
 // drawFrozen paints the scene as it stands without advancing it, so the pause
 // menu has the world behind it rather than a black screen.
 func (g *Game) drawFrozen(float32) {
-	rl.ClearBackground(colSky)
+	g.sky(g.opts.Width, g.opts.Height)
 	g.drawWorld(g.cam, g.camMode != CameraBonnet)
 	if g.showHUD {
 		g.drawHUD()
