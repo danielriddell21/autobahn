@@ -9,6 +9,8 @@ import (
 	"github.com/danielriddell21/crucible/geom"
 	"github.com/danielriddell21/crucible/menu"
 	"github.com/danielriddell21/crucible/netplay"
+
+	"github.com/danielriddell21/autobahn/internal/autopilot"
 )
 
 // screen is what the window is currently showing.
@@ -219,6 +221,12 @@ func (s *Shell) showSettings(from screen) {
 				Adjust: func(d int) { set.Camera = cycleCamera(set.Camera, d) },
 			},
 			{
+				Label: func() string { return "Autopilot     " + set.Mode.String() },
+				Adjust: func(d int) {
+					set.Mode = autopilot.Mode((int(set.Mode) + d + int(autopilot.NumModes)) % int(autopilot.NumModes))
+				},
+			},
+			{
 				Label:  func() string { return "Time of day   " + set.Time.String() },
 				Adjust: func(d int) { set.Time = cycleTime(set.Time, d) },
 			},
@@ -262,6 +270,7 @@ func (s *Shell) applyLive() {
 	s.game.ShowPanel(s.settings.ShowPanel)
 	s.game.showLabels = s.settings.ShowLabels
 	s.game.SetTime(s.settings.Time)
+	s.game.driver.Mode = s.settings.Mode
 }
 
 func masterVolume(set Settings) float32 {

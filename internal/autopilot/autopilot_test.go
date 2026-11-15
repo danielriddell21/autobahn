@@ -519,3 +519,60 @@ func TestIgnoresASpeedSignOnAnotherStreet(t *testing.T) {
 		t.Errorf("took a limit of %.1f m/s from a sign 80m away", d.SeenLimit)
 	}
 }
+
+func TestModesHaveDistinctNamesThatParse(t *testing.T) {
+	seen := map[string]bool{}
+	for m := range autopilot.NumModes {
+		name := m.String()
+		if seen[name] {
+			t.Errorf("mode %d repeats the name %q", m, name)
+		}
+		seen[name] = true
+		if got, ok := autopilot.ParseMode(name); !ok || got != m {
+			t.Errorf("ParseMode(%q) = %v, %v; want %v", name, got, ok, m)
+		}
+	}
+	if _, ok := autopilot.ParseMode("teatime"); ok {
+		t.Error("ParseMode accepted a mode that does not exist")
+	}
+}
+
+// Faster modes aim higher on the same open road, and keep their grip on the
+// lane markers doing it.
+func TestFasterModesAimFaster(t *testing.T) {
+	c := cam()
+	last := float32(0)
+	for _, m := range []autopilot.Mode{autopilot.ModeCautious, autopilot.ModeNormal, autopilot.ModeBrisk, autopilot.ModeAggressive, autopilot.ModeGetaway} {
+		d := autopilot.New(c)
+		d.Mode = m
+		d.Drive(straightLane(t, c), 8, 1.0/60)
+		if d.TargetSpeed <= last {
+			t.Errorf("%v aims for %.1f m/s, no more than the mode before it (%.1f)", m, d.TargetSpeed, last)
+		}
+		last = d.TargetSpeed
+	}
+}
+
+// Whatever the mode, a red light is a red light.
+func TestEveryModeStopsForARedLight(t *testing.T) {
+	c := cam()
+	for m := range autopilot.NumModes {
+		d := autopilot.New(c)
+		d.Mode = m
+		dets := append(straightLane(t, c),
+			signalAt(c, vision.ClassLightRed, 15, float32(c.Width)/2+60),
+			atRange(t, c, vision.ClassStopLine, 14, float32(c.Width)/2))
+		if cmd := drive(d, dets, 12, 0.1); cmd.Brake <= 0 {
+			t.Errorf("%v did not brake for a red light 14m away at 12 m/s", m)
+		}
+	}
+}
+
+func TestResetKeepsTheMode(t *testing.T) {
+	d := autopilot.New(cam())
+	d.Mode = autopilot.ModeGetaway
+	d.Reset()
+	if d.Mode != autopilot.ModeGetaway {
+		t.Errorf("Reset changed the mode to %v", d.Mode)
+	}
+}

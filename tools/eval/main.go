@@ -57,13 +57,19 @@ func main() {
 		width    = flag.Int("camwidth", 420, "camera width in pixels")
 		height   = flag.Int("camheight", 236, "camera height in pixels")
 		workers  = flag.Int("workers", runtime.NumCPU(), "cities to drive in parallel")
+		modeName = flag.String("mode", "normal", "autopilot style: cautious, normal, brisk, aggressive or getaway")
 		verbose  = flag.Bool("verbose", false, "report the circumstances of every fault")
 		failOver = flag.Int("max-points", -1, "exit non-zero if mean penalty exceeds this")
 	)
 	flag.Parse()
 
+	mode, ok := autopilot.ParseMode(*modeName)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "eval: unknown mode %q\n", *modeName)
+		os.Exit(2)
+	}
 	cfg := runConfig{
-		seconds: float32(*seconds), traffic: *traffic, police: *police,
+		mode: mode, seconds: float32(*seconds), traffic: *traffic, police: *police,
 		perception: float32(*hz), width: *width, height: *height,
 		verbose: *verbose,
 	}
@@ -80,6 +86,7 @@ func main() {
 
 // runConfig is what every city in a run shares.
 type runConfig struct {
+	mode          autopilot.Mode
 	seconds       float32
 	traffic       int
 	police        int
@@ -117,6 +124,7 @@ func driveOne(seed uint64, cfg runConfig) result {
 		FovY: 62, Mount: 1.35, Pitch: 0.10,
 	}
 	driver := autopilot.New(cam)
+	driver.Mode = cfg.mode
 	scanner := vision.NewScanner()
 
 	if cfg.verbose {

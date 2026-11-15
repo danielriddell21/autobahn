@@ -2,6 +2,8 @@ package game
 
 import (
 	"testing"
+
+	"github.com/danielriddell21/autobahn/internal/autopilot"
 )
 
 func TestDefaultSettingsAreInRange(t *testing.T) {
@@ -196,5 +198,23 @@ func TestTheStoredTimeOfDayYieldsToTheCommandLine(t *testing.T) {
 	o.Time, o.Given = TimeDusk, Given{"time": true}
 	if got := s.applyTo(o); got.Time != TimeDusk {
 		t.Errorf("Time = %v, want the dusk the command line asked for", got.Time)
+	}
+}
+
+func TestTheStoredAutopilotModeYieldsToTheCommandLine(t *testing.T) {
+	s := DefaultSettings()
+	s.Mode = autopilot.ModeBrisk
+	if got := s.applyTo(DefaultOptions()); got.Mode != autopilot.ModeBrisk {
+		t.Errorf("Mode = %v, want the stored brisk", got.Mode)
+	}
+	o := DefaultOptions()
+	o.Mode, o.Given = autopilot.ModeCautious, Given{"mode": true}
+	if got := s.applyTo(o); got.Mode != autopilot.ModeCautious {
+		t.Errorf("Mode = %v, want the cautious the command line asked for", got.Mode)
+	}
+	s.Mode = 99
+	s.clamp()
+	if s.Mode != autopilot.ModeNormal {
+		t.Errorf("Mode = %v after clamping a bad value, want normal", s.Mode)
 	}
 }

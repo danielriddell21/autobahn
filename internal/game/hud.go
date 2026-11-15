@@ -347,6 +347,8 @@ func (g *Game) drawAutopilotPanel() {
 		col = hudBad
 	}
 	rl.DrawText(d.State.String(), x+14, y+22, 20, col)
+	mode := "mode " + d.Mode.String()
+	rl.DrawText(mode, x+250-14-rl.MeasureText(mode, 11), y+8, 11, hudAccent)
 	rl.DrawText(d.Reason, x+14, y+46, 11, hudDim)
 
 	rl.DrawText(fmt.Sprintf("target  %.0f mph", mathx.ToMPH(d.TargetSpeed)), x+14, y+64, 12, hudText)
@@ -374,6 +376,7 @@ func controlBindings() []keymap.Binding {
 		{Key: "Tab", Action: "autopilot"},
 		{Key: "C", Action: "camera"},
 		{Key: "T", Action: "time of day"},
+		{Key: "M", Action: "autopilot mode"},
 		{Key: "V", Action: "AI camera (autopilot)"},
 		{Key: "L", Action: "labels"},
 		{Key: "N", Action: "back on road"},

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/danielriddell21/autobahn/internal/autopilot"
 	"github.com/danielriddell21/autobahn/internal/game"
 )
 
@@ -82,6 +83,7 @@ func TestParseRejectsCommandLinesTheGameCannotHonour(t *testing.T) {
 	}{
 		{"both ends of a chase", []string{"-host", ":7777", "-join", ":7777"}, "give -host or -join, not both"},
 		{"a viewpoint that does not exist", []string{"-camera", "periscope"}, `unknown camera "periscope"`},
+		{"an autopilot mode that does not exist", []string{"-mode", "reckless"}, `unknown mode "reckless"`},
 		{"a time of day that does not exist", []string{"-time", "teatime"}, `unknown time "teatime"`},
 	}
 	for _, tt := range tests {
@@ -118,5 +120,15 @@ func TestParseReadsTheTimeOfDay(t *testing.T) {
 	}
 	if opts.Time != game.TimeDay {
 		t.Errorf("with no -time the light is %v, want day", opts.Time)
+	}
+}
+
+func TestParseReadsTheAutopilotMode(t *testing.T) {
+	opts, _, err := parse("autobahn", []string{"-mode", "getaway"}, &strings.Builder{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.Mode != autopilot.ModeGetaway || !opts.Given["mode"] {
+		t.Errorf("-mode getaway gave %v (given %v)", opts.Mode, opts.Given["mode"])
 	}
 }

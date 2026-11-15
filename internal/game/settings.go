@@ -3,6 +3,8 @@ package game
 import (
 	"fmt"
 
+	"github.com/danielriddell21/autobahn/internal/autopilot"
+
 	"github.com/danielriddell21/crucible/geom"
 	"github.com/danielriddell21/crucible/store"
 )
@@ -34,6 +36,8 @@ type Settings struct {
 	Camera CameraMode `json:"camera"`
 	// Time is the light the city is seen in.
 	Time TimeOfDay `json:"time"`
+	// Mode is how the autopilot drives.
+	Mode autopilot.Mode `json:"mode"`
 }
 
 // DefaultSettings returns the settings a first run starts with.
@@ -60,6 +64,9 @@ func (s *Settings) clamp() {
 	s.Police = geom.Clamp(s.Police, policeMin, policeMax)
 	if s.Camera < 0 || s.Camera >= numCameraModes {
 		s.Camera = CameraChase
+	}
+	if s.Mode < 0 || s.Mode >= autopilot.NumModes {
+		s.Mode = autopilot.ModeNormal
 	}
 	if s.Time < 0 || s.Time >= numTimes {
 		s.Time = TimeDay
@@ -130,6 +137,9 @@ func (s Settings) applyViewTo(o Options) Options {
 	}
 	if !o.Given["camera"] {
 		o.Camera = s.Camera
+	}
+	if !o.Given["mode"] {
+		o.Mode = s.Mode
 	}
 	if !o.Given["time"] {
 		o.Time = s.Time

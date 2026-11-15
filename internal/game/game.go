@@ -79,6 +79,8 @@ type Options struct {
 	Host   string
 	Join   string
 	Camera CameraMode
+	// Mode is how the autopilot drives.
+	Mode autopilot.Mode
 	// Time is the light the city is seen in.
 	Time       TimeOfDay
 	Frames     int // when > 0, run this many frames then exit
@@ -268,6 +270,7 @@ func New(opts Options) *Game {
 	g.notices = crucihud.New()
 	g.watchInfractions()
 	g.driver = autopilot.New(g.visionCam)
+	g.driver.Mode = opts.Mode
 	g.aiTarget = rl.LoadRenderTexture(int32(opts.CamWidth), int32(opts.CamHeight))
 
 	g.scene = loadSceneShader()
@@ -608,6 +611,8 @@ func (g *Game) handleInput() {
 		g.showHelp = !g.showHelp
 	case rl.IsKeyPressed(rl.KeyT):
 		g.SetTime(g.tod + 1)
+	case rl.IsKeyPressed(rl.KeyM):
+		g.driver.Mode = (g.driver.Mode + 1) % autopilot.NumModes
 	}
 }
 

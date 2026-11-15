@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/danielriddell21/autobahn/internal/autopilot"
 	"github.com/danielriddell21/autobahn/internal/game"
 )
 
@@ -58,6 +59,7 @@ func parse(name string, args []string, out io.Writer) (opts game.Options, done b
 	host := fs.String("host", "", "host a two-player chase on this address, e.g. :7777")
 	join := fs.String("join", "", "join a chase hosted at this address")
 	camera := fs.String("camera", "chase", "viewpoint: chase, bonnet or high")
+	modeName := fs.String("mode", "normal", "autopilot style: cautious, normal, brisk, aggressive or getaway")
 	timeOfDay := fs.String("time", "day", "light: day, dusk or night")
 	hz := fs.Float64("perception", float64(opts.PerceptionH), "perception updates per second")
 	frames := fs.Int("frames", 0, "run this many frames then exit; 0 runs until closed")
@@ -106,6 +108,11 @@ func parse(name string, args []string, out io.Writer) (opts game.Options, done b
 	default:
 		return opts, false, fmt.Errorf("unknown camera %q", *camera)
 	}
+	mode, ok := autopilot.ParseMode(*modeName)
+	if !ok {
+		return opts, false, fmt.Errorf("unknown mode %q", *modeName)
+	}
+	opts.Mode = mode
 	switch *timeOfDay {
 	case "day":
 		opts.Time = game.TimeDay

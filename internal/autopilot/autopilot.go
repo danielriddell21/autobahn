@@ -86,6 +86,74 @@ const (
 	blindStop  float32 = 3.0 // seconds blind before giving up and stopping
 )
 
+// Mode is how the autopilot drives. It is a setting, not something the
+// camera can tell it, so it does not cross the perception boundary.
+type Mode int
+
+// The driving modes, named for the traffic styles in package sim they match.
+const (
+	ModeNormal Mode = iota
+	ModeCautious
+	ModeBrisk
+	ModeAggressive
+	// ModeGetaway ignores the posted limit and brakes late. It still stops for
+	// signals, signs and the car in front.
+	ModeGetaway
+	NumModes
+)
+
+// String returns the mode's name.
+func (m Mode) String() string {
+	switch m {
+	case ModeCautious:
+		return "cautious"
+	case ModeBrisk:
+		return "brisk"
+	case ModeAggressive:
+		return "aggressive"
+	case ModeGetaway:
+		return "getaway"
+	default:
+		return "normal"
+	}
+}
+
+// ParseMode returns the mode with the given name.
+func ParseMode(name string) (Mode, bool) {
+	for m := range NumModes {
+		if m.String() == name {
+			return m, true
+		}
+	}
+	return ModeNormal, false
+}
+
+// profile is what a mode changes.
+type profile struct {
+	speed       float32 // multiplies the speed it is aiming for
+	followGap   float32 // standstill gap to the car in front, metres
+	followDecel float32 // braking a queue ahead is planned around
+	grip        float32 // sideways acceleration bends are taken at
+	cornerDecel float32 // braking for a bend
+	comfort     float32 // braking for everything else
+	creep       float32 // fastest approach to an unconfirmed junction, m/s
+}
+
+func (m Mode) profile() profile {
+	switch m {
+	case ModeCautious:
+		return profile{0.85, 6.5, 2.4, 2.0, 2.6, 2.2, 8}
+	case ModeBrisk:
+		return profile{1.15, 3.8, 3.4, 3.0, 3.8, 3.1, 10.5}
+	case ModeAggressive:
+		return profile{1.3, 3.0, 4.0, 3.5, 4.4, 3.6, 12}
+	case ModeGetaway:
+		return profile{1.8, 2.6, 4.6, 4.2, 5.0, 4.2, 13.5}
+	default:
+		return profile{1, followGap, followDecel, cornerGrip, cornerDecel, comfortStop, junctionCreep}
+	}
+}
+
 // State is what the controller is currently doing, surfaced for the HUD.
 type State int
 
@@ -122,6 +190,9 @@ func (s State) String() string {
 // enough to be obeyed.
 type Driver struct {
 	cam vision.Camera
+
+	// Mode is how the autopilot is driving, and may be changed at any time.
+	Mode Mode
 
 	// State is the controller's current behaviour, for display.
 	State State
@@ -170,7 +241,7 @@ func New(cam vision.Camera) *Driver {
 
 // Reset clears the driver's memory.
 func (d *Driver) Reset() {
-	*d = Driver{cam: d.cam, SeenLimit: defaultLimit, State: StateSearching}
+	*d = Driver{cam: d.cam, Mode: d.Mode, SeenLimit: defaultLimit, State: StateSearching}
 }
 
 // targetKind is why the car may have to slow down.
@@ -202,7 +273,8 @@ func (d *Driver) Drive(dets []vision.Detection, speed, dt float32) Command {
 	cmd := Command{}
 	cmd.Steer = d.steerFor(lane, speed, dt)
 
-	cruise := d.SeenLimit
+	pf := d.Mode.profile()
+	cruise := d.SeenLimit * pf.speed
 	d.State = StateCruise
 	d.Reason = "clear road"
 	if len(lane) == 0 {
@@ -222,15 +294,15 @@ func (d *Driver) Drive(dets []vision.Detection, speed, dt float32) Command {
 	}
 
 	// Collect everything that constrains speed, then obey the tightest.
-	targets := d.bendTargets(lane)
-	targets = append(targets, d.vehicleTargets(dets, lane)...)
-	targets = append(targets, d.junctionTargets(dets, lane, speed, dt)...)
+	targets := d.bendTargets(lane, pf)
+	targets = append(targets, d.vehicleTargets(dets, lane, pf)...)
+	targets = append(targets, d.junctionTargets(dets, lane, speed, dt, pf)...)
 
 	governed, need := cruise, float32(0)
 	for _, t := range targets {
 		decel := t.decel
 		if decel == 0 {
-			decel = comfortStop
+			decel = pf.comfort
 		}
 		if speed > t.speed {
 			need = max(need, (speed*speed-t.speed*t.speed)/(2*max(t.dist, 0.3)))
@@ -406,7 +478,7 @@ const (
 	bendAngle   float32 = 0.11 // the smallest change of direction that is a bend, rad
 )
 
-func (d *Driver) bendTargets(lane []lanePoint) []target {
+func (d *Driver) bendTargets(lane []lanePoint, pf profile) []target {
 	// Reads how sharply the lane turns from the chain of markers, and plans to
 	// be going slowly enough by the time each bend arrives. A junction turn and
 	// a roundabout both show up this way; nothing else tells the car one is
@@ -415,7 +487,7 @@ func (d *Driver) bendTargets(lane []lanePoint) []target {
 	if c := abs(d.curve); c > 0.02 && len(lane) > 0 {
 		// The arc being steered right now is a bend too.
 		out = append(out, target{
-			kind: targetBend, speed: bendSpeed(c), decel: cornerDecel, why: "in a bend",
+			kind: targetBend, speed: bendSpeed(c, pf), decel: pf.cornerDecel, why: "in a bend",
 		})
 	}
 	var travelled float32
@@ -435,15 +507,15 @@ func (d *Driver) bendTargets(lane []lanePoint) []target {
 		}
 		out = append(out, target{
 			kind: targetBend, dist: max(lane[0].dist+travelled-in/2, 0),
-			speed: bendSpeed(turn / ((in + onward) / 2)), decel: cornerDecel,
+			speed: bendSpeed(turn/((in+onward)/2), pf), decel: pf.cornerDecel,
 			why: "bend ahead",
 		})
 	}
 	return out
 }
 
-func bendSpeed(curvature float32) float32 {
-	return max(sqrt(cornerGrip/curvature), cornerFloor)
+func bendSpeed(curvature float32, pf profile) float32 {
+	return max(sqrt(pf.grip/curvature), cornerFloor)
 }
 
 func heading(a, b lanePoint) float32 {
@@ -496,7 +568,7 @@ func (d *Driver) inPath(det vision.Detection, lane []lanePoint) (float32, bool) 
 	return dist, left < centre+room && right > centre-room
 }
 
-func (d *Driver) vehicleTargets(dets []vision.Detection, lane []lanePoint) []target {
+func (d *Driver) vehicleTargets(dets []vision.Detection, lane []lanePoint, pf profile) []target {
 	var out []target
 	// The car in front. A vehicle box's bottom edge is where its tyres meet
 	// the road, which is the usable range cue.
@@ -513,14 +585,14 @@ func (d *Driver) vehicleTargets(dets []vision.Detection, lane []lanePoint) []tar
 		// Behind moving traffic that settles into a gap that grows with speed;
 		// behind a queue it stops.
 		out = append(out, target{
-			kind: targetVehicle, dist: max(dist-followGap, 0), decel: followDecel,
+			kind: targetVehicle, dist: max(dist-pf.followGap, 0), decel: pf.followDecel,
 			why: fmt.Sprintf("vehicle %.0fm ahead", dist),
 		})
 	}
 	return out
 }
 
-func (d *Driver) junctionTargets(dets []vision.Detection, lane []lanePoint, speed, dt float32) []target {
+func (d *Driver) junctionTargets(dets []vision.Detection, lane []lanePoint, speed, dt float32, pf profile) []target {
 	stopAt, haveStop := d.locateLine(dets, speed, dt)
 	stopAt, haveStop = d.readSignal(dets, stopAt, haveStop, speed, dt)
 	stopAt, haveStop = d.readPrioritySign(dets, stopAt, haveStop)
@@ -554,7 +626,7 @@ func (d *Driver) junctionTargets(dets []vision.Detection, lane []lanePoint, spee
 	// Approach an unconfirmed junction at a speed the car can stop from, unless
 	// the line is already too close to stop for at all.
 	if stopAt < junctionWatch && !committed(speed, stopAt) {
-		out = append(out, target{dist: stop, speed: junctionCreep, why: "approaching a junction"})
+		out = append(out, target{dist: stop, speed: pf.creep, why: "approaching a junction"})
 	}
 	return out
 }
