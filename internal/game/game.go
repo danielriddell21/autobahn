@@ -137,6 +137,8 @@ type Game struct {
 	// city with, and clock the hour that light belongs to.
 	scene sceneShader
 	light lighting
+	// look is how the map's season dresses the scene.
+	look  seasonLook
 	clock dayClock
 	// outlines caches each block's kerb line, and trees what has been planted;
 	// treedBlocks and treedRoads say how much of the city that covers.
@@ -302,6 +304,7 @@ func New(opts Options) *Game {
 	g.aiTarget = rl.LoadRenderTexture(int32(opts.CamWidth), int32(opts.CamHeight))
 
 	g.scene = loadSceneShader()
+	g.look = lookFor(opts.Map.Season())
 	g.clock.minutes = opts.DayLength
 	g.SetTime(opts.Time)
 	g.fov = groundFov
@@ -368,7 +371,7 @@ func (g *Game) Time() TimeOfDay { return g.clock.stage() }
 func (g *Game) SetTime(t TimeOfDay) {
 	g.opts.Time = ((t % NumTimes) + NumTimes) % NumTimes
 	g.clock.set(g.opts.Time)
-	g.light = lightingAt(g.clock.hour)
+	g.relight()
 }
 
 // SetDayLength changes how many real minutes a day lasts; 0 holds the clock.
@@ -380,7 +383,12 @@ func (g *Game) SetDayLength(minutes float32) {
 // advanceDay moves the clock on and relights the city for the new hour.
 func (g *Game) advanceDay(dt float32) {
 	g.clock.step(dt)
-	g.light = lightingAt(g.clock.hour)
+	g.relight()
+}
+
+// relight sets the light for the hour on the clock, in the map's season.
+func (g *Game) relight() {
+	g.light = relight(lightingAt(g.clock.hour), g.opts.Map.Season())
 }
 
 // sky clears the frame to the sky for the current time of day.

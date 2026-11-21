@@ -7,6 +7,7 @@
 package sim
 
 import (
+	"github.com/danielriddell21/autobahn/internal/city"
 	"github.com/danielriddell21/autobahn/internal/mathx"
 )
 
@@ -70,6 +71,38 @@ func TrafficSpec() Spec {
 	s.MaxSpeed = 40
 	s.GripFront, s.GripRear = 90000, 96000
 	return s
+}
+
+// winterGrip is how much of its grip a tyre keeps on a winter road.
+const winterGrip float32 = 0.7
+
+// SeasonGrip returns how much of a tyre's dry grip the road gives in a
+// season, from 0 to 1. Only winter takes any away.
+func SeasonGrip(s city.Season) float32 {
+	if s == city.Winter {
+		return winterGrip
+	}
+	return 1
+}
+
+// OnSurface returns the profile of the same vehicle on a road giving that
+// share of full grip. The tyres hold less sideways and the brakes can use
+// less of what they have, so it runs wide and takes longer to stop; the
+// engine is left alone, which is what makes it easy to spin up.
+func (s Spec) OnSurface(grip float32) Spec {
+	grip = mathx.Clamp(grip, 0.2, 1)
+	s.GripFront *= grip
+	s.GripRear *= grip
+	s.MaxLateral *= grip
+	// Braking loses half as much as cornering: a locked wheel still slows a
+	// car on snow, it just does it badly.
+	s.BrakeForce *= (1 + grip) / 2
+	return s
+}
+
+// seasoned is a vehicle's profile on the roads of a particular city.
+func seasoned(s Spec, c *city.City) Spec {
+	return s.OnSurface(SeasonGrip(c.Map().Season()))
 }
 
 // Wheelbase returns the distance between the axles.

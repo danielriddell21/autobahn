@@ -134,6 +134,7 @@ func (g *Game) drawWorld(cam rl.Camera3D, drawPlayer bool) {
 	g.drawParking(eye)
 	g.drawTraffic(eye, drawPlayer)
 	g.drawLightPools(eye, drawPlayer)
+	g.drawFall(eye)
 	g.drawSmoke()
 
 	if g.scene.ok {
@@ -169,7 +170,7 @@ func (g *Game) drawGround(eye mathx.Vec) {
 	// also not the shape of what exists: drive east and then north, and the box
 	// covers a whole quadrant nobody has been to. Paving that box would turn
 	// the quadrant into a featureless grey plain.
-	rl.DrawPlane(vec3(eye.X, -0.06, eye.Z), rl.NewVector2(6000, 6000), colGround)
+	rl.DrawPlane(vec3(eye.X, -0.06, eye.Z), rl.NewVector2(6000, 6000), g.look.ground)
 
 	c := g.world.City
 	// Never reach beyond the radius the city is kept built to, or the slab
@@ -206,7 +207,7 @@ func (g *Game) drawBlocks(eye mathx.Vec) {
 		kerb := g.outline(i)
 		surface := colSidewalk
 		if b.Park {
-			surface = colPark
+			surface = g.look.park
 		}
 		groundWall(centre, kerb, -0.02, city.KerbHeight, colKerb)
 		groundFan(centre, kerb, city.KerbHeight, surface)
@@ -228,10 +229,10 @@ func (g *Game) drawRoundabouts(eye mathx.Vec) {
 		}
 		top := city.KerbHeight
 		pillar(n.Pos, -0.02, top, island, island, 32, colKerb)
-		pillar(n.Pos, top, top+0.02, island-0.5, island-0.5, 32, colPark)
+		pillar(n.Pos, top, top+0.02, island-0.5, island-0.5, 32, g.look.park)
 		// A low mound so it reads as an island from the driver's seat.
-		pillar(n.Pos, top, top+1.0, island*0.6, island*0.25, 20, colPark)
-		drawTree(tree{at: n.Pos, height: 5.2, spread: 2.1, shade: n.ID}, top+0.9)
+		pillar(n.Pos, top, top+1.0, island*0.6, island*0.25, 20, g.look.park)
+		g.look.drawTree(tree{at: n.Pos, height: 5.2, spread: 2.1, shade: n.ID}, top+0.9)
 	}
 }
 
@@ -350,7 +351,7 @@ func (g *Game) drawBuildings(eye mathx.Vec) {
 		if b.Center.DistTo(eye) > g.cullRange() {
 			continue
 		}
-		drawBuilding(b, g.light.night)
+		drawBuilding(b, g.light.night, g.look.snow)
 	}
 }
 
@@ -566,25 +567,14 @@ func scatter(x, z float32, i int) [3]float32 {
 func (g *Game) drawTrees(eye mathx.Vec) {
 	g.plantTrees()
 	for _, t := range g.trees {
-		if t.at.DistTo(eye) > cullTrees {
+		d := t.at.DistTo(eye)
+		if d > cullTrees {
 			continue
 		}
-		drawTree(t, city.KerbHeight)
-	}
-}
-
-func drawTree(t tree, ground float32) {
-	leaf := leafShades[((t.shade%len(leafShades))+len(leafShades))%len(leafShades)]
-	trunk := t.height * 0.42
-	rl.DrawCube(vec3(t.at.X, ground+trunk/2, t.at.Z), 0.32, trunk, 0.32, colTrunk)
-	// Three stacked blocks, shrinking toward the top.
-	crown := t.height - trunk
-	y := ground + trunk
-	for i, f := range [3]float32{1, 0.78, 0.48} {
-		h := crown * [3]float32{0.42, 0.34, 0.24}[i]
-		w := t.spread * 2 * f
-		rl.DrawCube(vec3(t.at.X, y+h/2, t.at.Z), w, h, w, scaleColor(leaf, 0.9+0.1*float32(i)))
-		y += h
+		g.look.drawTree(t, city.KerbHeight)
+		if g.look.litter && d < litterRange {
+			g.look.drawLitter(t, city.KerbHeight)
+		}
 	}
 }
 

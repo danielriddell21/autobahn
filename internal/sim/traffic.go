@@ -137,6 +137,9 @@ type Agent struct {
 	// Blocking marks a unit parked across the carriageway as part of a
 	// roadblock. It holds its position and drives nowhere.
 	Blocking bool
+	// surface is the share of full grip the roads it drives on give, so a
+	// car it is changed to gets the same.
+	surface float32
 }
 
 // Pursuing reports whether this unit is currently on a blue-light run.
@@ -196,9 +199,10 @@ func NewAgent(id int, c *city.City, lane *city.Lane, s float32, rng *rand.Rand) 
 		paint = body.Livery
 	}
 	a := &Agent{
-		ID: id, V: NewVehicle(body.Spec, lane.Point(s), lane.Heading),
+		ID: id, V: NewVehicle(seasoned(body.Spec, c), lane.Point(s), lane.Heading),
 		Paint: paint, Body: body, Style: RandomStyle(rng), Role: RoleCivilian,
 		lane: lane, s: s, stoppedAt: -1, rng: rng,
+		surface: SeasonGrip(c.Map().Season()),
 	}
 	a.chooseNext(c)
 	return a
@@ -212,7 +216,7 @@ func NewPoliceUnit(id int, c *city.City, lane *city.Lane, s float32, rng *rand.R
 	a.Style = Normal()
 	a.Body = BodyOf(Estate) // a marked traffic car, not a hatchback
 	a.Body.Spec = PoliceSpec()
-	a.V.Spec = a.Body.Spec
+	a.V.Spec = a.Body.Spec.OnSurface(a.surface)
 	return a
 }
 
@@ -230,7 +234,7 @@ func (a *Agent) SetUnit(k UnitKind) {
 		a.Body = BodyOf(Estate)
 	}
 	a.Body.Spec = UnitSpec(k)
-	a.V.Spec = a.Body.Spec
+	a.V.Spec = a.Body.Spec.OnSurface(a.surface)
 }
 
 func (a *Agent) chooseNext(c *city.City) {

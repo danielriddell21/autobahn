@@ -77,7 +77,7 @@ func roofOf(b city.Building) roofKind {
 }
 
 // drawBuilding draws one building: its walls, its roof and its shop front.
-func drawBuilding(b city.Building, night float32) {
+func drawBuilding(b city.Building, night float32, snow bool) {
 	shade := buildingShades[int(b.Shade)%len(buildingShades)]
 	h := scatter(b.Center.X, b.Center.Z, 11)
 	x, z, top := b.Center.X, b.Center.Z, b.Height
@@ -90,12 +90,19 @@ func drawBuilding(b city.Building, night float32) {
 
 	parapet := func() {
 		rl.DrawCube(vec3(x, top+0.35, z), b.W*0.97, 0.7, b.D*0.97, scaleColor(shade, 0.74))
+		if snow {
+			rl.DrawCube(vec3(x, top+0.74, z), b.W*0.93, 0.1, b.D*0.93, colSnow)
+		}
 	}
 	switch roofOf(b) {
 	case roofGable:
 		rise := 1.6 + h[1]*1.8
 		rl.DrawCube(vec3(x, top+0.1, z), b.W*1.03, 0.2, b.D*1.03, scaleColor(shade, 0.7))
-		gable(b.Center, b.W*1.03, b.D*1.03, top+0.2, rise, roofShades[int(h[2]*3)%len(roofShades)], shade)
+		tiles := roofShades[int(h[2]*3)%len(roofShades)]
+		if snow {
+			tiles = colSnow
+		}
+		gable(b.Center, b.W*1.03, b.D*1.03, top+0.2, rise, tiles, shade)
 		// A chimney, off to one end.
 		cx, cz := x+b.W*0.28, z
 		if b.D > b.W {
@@ -345,7 +352,7 @@ func drawFurnishing(f furnishing) {
 		box(0, 0, 2.4, 0.86, 0.12, 0.86, scaleColor(colPillarBox, 0.8))
 	case furnPlanter:
 		box(0, 0, 0, 1.6, 0.55, 0.7, colStone)
-		box(0, 0, 0.55, 1.4, 0.4, 0.5, leafShades[1])
+		box(0, 0, 0.55, 1.4, 0.4, 0.5, colEvergreen)
 	case furnShelter:
 		// A glass back, a post at each end, and a roof out over the pavement.
 		box(0, 0.55, 0.15, 3.2, 2.05, 0.06, scaleColor(colGlass, 0.9))

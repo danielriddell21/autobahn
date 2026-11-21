@@ -167,7 +167,7 @@ func (g *Game) adopt(s Snapshot, dt float32) {
 	g.world.Signals.SetClock(s.Clock)
 	g.world.Time = s.Clock
 	g.clock.hour, g.clock.glide = wrapHour(s.Hour), 0
-	g.light = lightingAt(g.clock.hour)
+	g.relight()
 	ease(g.world.Player, s.Runner, dt)
 
 	for i, p := range s.Agents {

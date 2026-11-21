@@ -35,6 +35,51 @@ func (m Map) Name() string {
 	}
 }
 
+// Season is the time of year a map is driven in. Each map has one and keeps
+// it: the season is part of what the place looks like, and in winter of how
+// it drives.
+type Season int
+
+// The seasons.
+const (
+	Autumn Season = iota
+	Summer
+	Spring
+	Winter
+	numSeasons
+)
+
+// Seasons returns every season.
+func Seasons() []Season {
+	out := make([]Season, 0, numSeasons)
+	for s := range numSeasons {
+		out = append(out, s)
+	}
+	return out
+}
+
+// Name returns the season's name.
+func (s Season) Name() string {
+	switch s {
+	case Summer:
+		return "summer"
+	case Spring:
+		return "spring"
+	case Winter:
+		return "winter"
+	default:
+		return "autumn"
+	}
+}
+
+// Season returns the time of year a map is driven in.
+func (m Map) Season() Season {
+	switch m { //nolint:gocritic // one map now, more to come
+	default:
+		return Autumn
+	}
+}
+
 // ParseMap reads a map's name, forgiving case and spaces.
 func ParseMap(name string) (Map, bool) {
 	want := squashName(name)

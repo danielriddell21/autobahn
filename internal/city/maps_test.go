@@ -44,3 +44,21 @@ func TestTheCityMapIsTheDefaultCity(t *testing.T) {
 		t.Errorf("city map params %+v differ from the defaults %+v", got, want)
 	}
 }
+
+func TestEveryMapHasASeason(t *testing.T) {
+	names := map[string]bool{}
+	for _, s := range city.Seasons() {
+		if s.Name() == "" || names[s.Name()] {
+			t.Errorf("season %d has no name of its own: %q", s, s.Name())
+		}
+		names[s.Name()] = true
+	}
+	for _, m := range city.Maps() {
+		if !names[m.Season().Name()] {
+			t.Errorf("%s is driven in a season that does not exist", m.Name())
+		}
+	}
+	if city.MapCity.Season() != city.Autumn {
+		t.Errorf("the city is driven in %s, want autumn", city.MapCity.Season().Name())
+	}
+}

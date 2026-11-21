@@ -133,7 +133,7 @@ func NewWorld(cfg Config) *World {
 	if w.PlayerBody.Spec.Mass == 0 {
 		w.PlayerBody = PlayerBody()
 	}
-	w.Player = NewVehicle(w.PlayerBody.Spec, w.spawnPos, w.spawnYaw)
+	w.Player = NewVehicle(seasoned(w.PlayerBody.Spec, c), w.spawnPos, w.spawnYaw)
 	w.Player.Nitro = 1
 	w.Route = NewRoute(c, rng.Stream(cfg.Seed, streamRoute))
 	w.Route.Update(w.Player.Pos, w.Player.Forward())
@@ -854,7 +854,7 @@ func (w *World) relocate(a *Agent) {
 // speed and heading.
 func (w *World) SetPlayerBody(b Body) {
 	w.PlayerBody = b
-	w.Player.Spec = b.Spec
+	w.Player.Spec = seasoned(b.Spec, w.City)
 }
 
 // ApplyPose moves a vehicle to a pose supplied by the host of a network game.

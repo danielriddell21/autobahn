@@ -142,3 +142,52 @@ func TestEveryMapsTrafficIsAMixOfAHundred(t *testing.T) {
 		t.Errorf("%d of 4000 city vehicles are buses or lorries", big)
 	}
 }
+
+func TestOnlyWinterTakesGripAway(t *testing.T) {
+	for _, s := range city.Seasons() {
+		g := sim.SeasonGrip(s)
+		if (g < 1) != (s == city.Winter) || g <= 0 || g > 1 {
+			t.Errorf("%s gives %.2f of full grip", s.Name(), g)
+		}
+	}
+}
+
+func TestALooseSurfaceTakesGripAndBrakingButNotPower(t *testing.T) {
+	dry := sim.CarSpec()
+	if got := dry.OnSurface(1); got != dry {
+		t.Errorf("a dry road changed the car: %+v", got)
+	}
+	snow := dry.OnSurface(0.7)
+	if snow.GripFront >= dry.GripFront || snow.GripRear >= dry.GripRear || snow.MaxLateral >= dry.MaxLateral {
+		t.Error("a car on snow corners as well as one in the dry")
+	}
+	if snow.BrakeForce >= dry.BrakeForce {
+		t.Error("a car on snow stops as well as one in the dry")
+	}
+	// It loses less braking than cornering, and nothing else.
+	if snow.BrakeForce/dry.BrakeForce <= snow.MaxLateral/dry.MaxLateral {
+		t.Error("braking fell away as far as cornering")
+	}
+	if snow.EngineForce != dry.EngineForce || snow.Mass != dry.Mass || snow.MaxSpeed != dry.MaxSpeed {
+		t.Error("the surface changed the car itself")
+	}
+	// Nothing is ever taken down to no grip at all, or put above the dry.
+	if ice := dry.OnSurface(0); ice.MaxLateral <= 0 || ice.BrakeForce <= 0 {
+		t.Error("a surface with no grip left the car with none at all")
+	}
+	if got := dry.OnSurface(3); got != dry {
+		t.Error("a surface cannot give more than full grip")
+	}
+}
+
+func TestEveryVehicleInTheCityHasItsDryGrip(t *testing.T) {
+	w := sim.NewWorld(sim.Config{Seed: 7})
+	if w.Player.Spec != w.PlayerBody.Spec {
+		t.Error("the player's car has lost grip in the city, which is driven in the dry")
+	}
+	for _, a := range w.Agents {
+		if a.V.Spec != a.Body.Spec {
+			t.Fatalf("a %s has lost grip in the city", a.Body.Kind.Name())
+		}
+	}
+}
