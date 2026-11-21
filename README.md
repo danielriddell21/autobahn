@@ -23,10 +23,6 @@ colour-coded detection boxes it has to read back out of the pixels.
 | `T` | skip ahead to the next time of day |
 | `H` | the rest |
 
-Two people can play: one hosts a chase and drives the runner, the other joins
-over the network and gives chase in a police car. Set it up from the title
-screen, or with `-host` and `-join`.
-
 ![The autopilot driving the city](docs/media/drive.gif)
 
 *The autopilot at the wheel. The panel in the corner is the image it is reading.*
@@ -53,13 +49,7 @@ headlands or moors stand on the horizon.
 
 The city is the base game. The other three come in packs, each with cars of
 its own for the garage, and a pack unlocks once the bounty you have banked
-across every drive reaches its price: £3,000 for the coast, £9,000 for the
-country, £18,000 for the motorway. Bounty is banked by getting away from the
-police, and only counts if you drove the whole pursuit yourself. The title
-screen chooses the map and shows how far along each pack is.
-
-`-map` names the place on the command line. `-unlock-all`, or
-`"unlockAll": true` in the settings file, offers everything without earning it.
+across every drive reaches its price.
 
 ## Install
 
