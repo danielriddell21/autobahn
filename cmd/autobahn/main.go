@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/danielriddell21/autobahn/internal/autopilot"
 	"github.com/danielriddell21/autobahn/internal/game"
@@ -61,6 +62,8 @@ func parse(name string, args []string, out io.Writer) (opts game.Options, done b
 	camera := fs.String("camera", "chase", "viewpoint: chase, bonnet or high")
 	modeName := fs.String("mode", "normal", "autopilot style: cautious, normal, brisk, aggressive or getaway")
 	timeOfDay := fs.String("time", "day", "light: day, dusk or night")
+	car := fs.String("car", "hothatch", "the player's car: "+strings.Join(game.CarNames(), ", "))
+	paintName := fs.String("paint", "rosso", "the player's paint, as the garage names it, spaces dropped")
 	hz := fs.Float64("perception", float64(opts.PerceptionH), "perception updates per second")
 	frames := fs.Int("frames", 0, "run this many frames then exit; 0 runs until closed")
 	shot := fs.String("screenshot", "", "write a screenshot to this path before exiting")
@@ -122,6 +125,9 @@ func parse(name string, args []string, out io.Writer) (opts game.Options, done b
 		opts.Time = game.TimeNight
 	default:
 		return opts, false, fmt.Errorf("unknown time %q", *timeOfDay)
+	}
+	if opts.Car, opts.Paint, err = game.ParseCar(*car, *paintName); err != nil {
+		return opts, false, err
 	}
 	opts.PerceptionH = float32(*hz)
 	opts.Frames = *frames

@@ -23,6 +23,19 @@ keep only by getting away — break the line of sight round a corner and stay
 gone until they give up. Get stopped and it is forfeit. Traffic pulls over for
 the sirens, goes round the wrecks, and brakes for the car coming through a red.
 
+Nobody else on the road drives alike. Some sit under the limit and let you out
+of a side road; some change lane to get past, pass on the wrong side of a
+single carriageway when it is clear, flash their lights at whoever is holding
+them up and lean on the horn at a green. The autopilot does the same from what
+its cameras show it — a bonnet camera to steer by and three mirrors to check
+before it moves over — in whichever style you set it to.
+
+Pick your car in the garage, from the title screen or the pause menu: a hot
+hatch, a hatchback, a saloon, an estate, a taxi or a van, each of which drives
+the way it looks, in any of a dozen paints.
+
+![Every car in the garage](docs/media/garage.png)
+
 | Key | |
 | --- | --- |
 | `W` `A` `S` `D` | drive |

@@ -69,6 +69,7 @@ func items() []item {
 		{"police", "police.gif", "a pursuit, earned by driving badly", clipPolice},
 		{"city", "city.png", "four seeds from above, showing the layout variety", sheetCity},
 		{"cameras", "cameras.png", "the three viewpoints on one scene", sheetCameras},
+		{"garage", "garage.png", "every car the garage offers, each in its own paint", sheetGarage},
 	}
 }
 
@@ -155,10 +156,20 @@ func (c config) recorder(frames, scale int) *record.Recorder {
 	// Builds a recorder with a palette ramped from the game's own colours,
 	// which keeps both the city and the saturated detection boxes clean in a GIF.
 	return record.NewRecorder(c.fps, scale, frames,
-		record.WithPalette(demo.Ramp(game.PaletteBases(), 5)),
+		record.WithPalette(palette()),
 		record.WithFrameDiff(),
 		record.WithFinalHold(120),
 	)
+}
+
+// palette is the GIF palette: the city's colours ramped through light and
+// shade, and the detection boxes exactly as they are drawn.
+func palette() color.Palette {
+	pal := demo.Ramp(game.PaletteBases(), 5)
+	for _, c := range game.BoxColours() {
+		pal = append(pal, c)
+	}
+	return pal
 }
 
 func rolling(g *game.Game) bool {
@@ -315,6 +326,24 @@ func sheetCameras(cfg config) error {
 		}
 		sheet := demo.Montage(cells, 3, 12, color.RGBA{R: 16, G: 18, B: 22, A: 255})
 		return writePNG(cfg.path("cameras.png"), sheet)
+	})
+}
+
+func sheetGarage(cfg config) error {
+	// Each shape on the garage turntable, in a different paint and turned a
+	// little differently, so the sheet reads as a range rather than a grid.
+	return game.WithWindow(cfg.opts(cfg.seed), func(*game.Game) error {
+		cars := sim.PlayerBodies()
+		cells := make([]image.Image, 0, len(cars))
+		for i, k := range cars {
+			shot := game.ShowroomShot(k, (i*5)%game.PaintCount(), 0.5+float32(i)*0.35)
+			if shot == nil {
+				return fmt.Errorf("rendering the %s", k.Name())
+			}
+			cells = append(cells, shot)
+		}
+		sheet := demo.Montage(cells, 3, 12, color.RGBA{R: 16, G: 18, B: 22, A: 255})
+		return writePNG(cfg.path("garage.png"), sheet)
 	})
 }
 

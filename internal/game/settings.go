@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/danielriddell21/autobahn/internal/autopilot"
+	"github.com/danielriddell21/autobahn/internal/sim"
 
 	"github.com/danielriddell21/crucible/geom"
 	"github.com/danielriddell21/crucible/store"
@@ -38,13 +39,17 @@ type Settings struct {
 	Time TimeOfDay `json:"time"`
 	// Mode is how the autopilot drives.
 	Mode autopilot.Mode `json:"mode"`
+	// Car is the shape of the player's car, and Paint its colour, as chosen
+	// in the garage.
+	Car   sim.BodyKind `json:"car"`
+	Paint int          `json:"paint"`
 }
 
 // DefaultSettings returns the settings a first run starts with.
 func DefaultSettings() Settings {
 	return Settings{
 		Volume: 0.7, ShowPanel: true, ShowLabels: true,
-		Traffic: 70, Police: 7, Camera: CameraChase,
+		Traffic: 70, Police: 7, Camera: CameraChase, Car: sim.HotHatch,
 	}
 }
 
@@ -70,6 +75,12 @@ func (s *Settings) clamp() {
 	}
 	if s.Time < 0 || s.Time >= numTimes {
 		s.Time = TimeDay
+	}
+	if !sim.IsPlayerBody(s.Car) {
+		s.Car = sim.HotHatch
+	}
+	if s.Paint < 0 || s.Paint >= len(playerPaints) {
+		s.Paint = 0
 	}
 }
 
@@ -119,6 +130,11 @@ func (s Settings) applyTo(o Options) Options {
 	if !o.Given["police"] {
 		o.Police = s.Police
 	}
+	// The car's shape changes its size, which a chase against another person
+	// has to agree on, so it is only ever taken here.
+	if !o.Given["car"] {
+		o.Car = s.Car
+	}
 	return s.applyViewTo(o)
 }
 
@@ -143,6 +159,9 @@ func (s Settings) applyViewTo(o Options) Options {
 	}
 	if !o.Given["time"] {
 		o.Time = s.Time
+	}
+	if !o.Given["paint"] {
+		o.Paint = s.Paint
 	}
 	// Muting is the exception: -mute silences a session whatever the stored
 	// setting says, and the stored setting silences one the flag left alone.

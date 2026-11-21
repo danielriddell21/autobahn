@@ -39,6 +39,8 @@ type Config struct {
 	// police entirely, which leaves the judge still scoring but nobody
 	// responding.
 	Police int
+	// PlayerBody is the player's car. Left empty, it is the usual one.
+	PlayerBody Body
 }
 
 // DefaultConfig returns a populated city configuration.
@@ -52,8 +54,10 @@ type World struct {
 	City    *city.City
 	Signals *Signals
 	Player  *Vehicle
-	Agents  []*Agent
-	Judge   *Judge
+	// PlayerBody is the shape of the player's car, for whoever draws it.
+	PlayerBody Body
+	Agents     []*Agent
+	Judge      *Judge
 	// Wanted tracks the police response to how the player has been driving.
 	Wanted Wanted
 	// Route is the player car's navigation plan, used to draw lane guidance
@@ -118,7 +122,11 @@ func NewWorld(cfg Config) *World {
 	}
 	w.spawnPos = start.Point(min(18, start.Length*0.35))
 	w.spawnYaw = start.Heading
-	w.Player = NewVehicle(PlayerBody().Spec, w.spawnPos, w.spawnYaw)
+	w.PlayerBody = cfg.PlayerBody
+	if w.PlayerBody.Spec.Mass == 0 {
+		w.PlayerBody = PlayerBody()
+	}
+	w.Player = NewVehicle(w.PlayerBody.Spec, w.spawnPos, w.spawnYaw)
 	w.Player.Nitro = 1
 	w.Route = NewRoute(c, rng.Stream(cfg.Seed, streamRoute))
 	w.Route.Update(w.Player.Pos, w.Player.Forward())
@@ -816,6 +824,13 @@ func (w *World) relocate(a *Agent) {
 		a.chooseNext(w.City)
 		return
 	}
+}
+
+// SetPlayerBody changes the player's car in place, wherever it is, keeping its
+// speed and heading.
+func (w *World) SetPlayerBody(b Body) {
+	w.PlayerBody = b
+	w.Player.Spec = b.Spec
 }
 
 // ApplyPose moves a vehicle to a pose supplied by the host of a network game.

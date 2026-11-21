@@ -66,8 +66,8 @@ func (g *Game) drawTraffic(eye mathx.Vec, drawPlayer bool) {
 		drawCar(a.V, a.Body, look)
 	}
 	if drawPlayer {
-		drawCar(g.world.Player, sim.PlayerBody(), carLook{
-			paint: carPaints[0], blink: g.blink, night: night, wheels: true,
+		drawCar(g.world.Player, g.world.PlayerBody, carLook{
+			paint: g.playerPaint(), blink: g.blink, night: night, wheels: true,
 			player: true, boosting: g.world.Player.Boosting, indicator: g.playerIndicator(),
 		})
 	}
