@@ -194,13 +194,21 @@ func (lk seasonLook) drawTree(t tree, ground float32) {
 	for i, f := range [3]float32{1, 0.78, 0.48} {
 		h := crown * [3]float32{0.42, 0.34, 0.24}[i]
 		w := t.spread * 2 * f
-		rl.DrawCube(vec3(t.at.X, y+h/2, t.at.Z), w, h, w, scaleColor(leaf, 0.9+0.1*float32(i)))
+		rl.DrawCube(vec3(t.at.X, y+h/2, t.at.Z), w, h, w, crownShade(leaf, i))
 		y += h
 	}
 	if lk.snow {
 		w := t.spread * 2 * 0.5
 		rl.DrawCube(vec3(t.at.X, y+0.06, t.at.Z), w, 0.14, w, colSnow)
 	}
+}
+
+// crownShade is the colour of one tier of a tree's crown, the lowest darkest.
+// It only ever darkens: brightening a pale colour would run a channel past
+// full, and a colour that wraps round could land on one the vision system
+// has reserved.
+func crownShade(leaf rl.Color, tier int) rl.Color {
+	return scaleColor(leaf, min(0.8+0.1*float32(tier), 1))
 }
 
 // litterRange is how near the eye a tree has to be before the leaves under

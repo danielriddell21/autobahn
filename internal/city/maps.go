@@ -15,6 +15,9 @@ const (
 	// MapSeaside is a seaside town: low terraces, and the sea along one
 	// side with a beach below the front.
 	MapSeaside
+	// MapVillage is a village in the country: cottages along long lanes,
+	// with fields between them.
+	MapVillage
 	numMaps
 )
 
@@ -35,6 +38,8 @@ func (m Map) Name() string {
 	switch m {
 	case MapSeaside:
 		return "seaside"
+	case MapVillage:
+		return "village"
 	default:
 		return "city"
 	}
@@ -82,6 +87,8 @@ func (m Map) Season() Season {
 	switch m {
 	case MapSeaside:
 		return Summer
+	case MapVillage:
+		return Spring
 	default:
 		return Autumn
 	}
@@ -118,6 +125,14 @@ func ParamsFor(m Map, seed uint64) Params {
 		p.MinSpan, p.MaxSpan = 70, 120
 		p.Roundabouts, p.Parks, p.Rise = 0.2, 0.14, 0.22
 		p.Coast, p.CoastRow = true, 3
+	}
+	if m == MapVillage {
+		// Long lanes with a main road only every fifth line, so most of the
+		// junctions are give ways and roundabouts rather than lights; two
+		// blocks in five left as fields, and nothing over three storeys.
+		p.MinSpan, p.MaxSpan = 110, 200
+		p.Roundabouts, p.Parks, p.Rise = 0.4, 0.42, 0
+		p.Floor, p.Storeys, p.MainEvery = 5.5, 4.5, 5
 	}
 	return p
 }

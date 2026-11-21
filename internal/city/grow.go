@@ -156,7 +156,7 @@ func (c *City) settleShape(n *Node, ln *worldgen.LatticeNode) {
 	var widest float32
 	edges := c.edgesOf(ln)
 	for _, id := range edges {
-		widest = max(widest, halfWidthOf(latticeClass(c.lat, c.lat.Edges[id])))
+		widest = max(widest, halfWidthOf(c.classOf(c.lat.Edges[id])))
 	}
 	// The junction box reaches past the carriageways by the kerb radius, so a
 	// lane stops where the corner starts to curve and a turn has room to be
@@ -193,7 +193,7 @@ func (c *City) settleControl(n *Node, ln *worldgen.LatticeNode) {
 	}
 	hasArterial := false
 	for _, id := range edges {
-		if latticeClass(c.lat, c.lat.Edges[id]) == Arterial {
+		if c.classOf(c.lat.Edges[id]) == Arterial {
 			hasArterial = true
 		}
 	}
@@ -221,7 +221,7 @@ func (c *City) buildRoads(cells geom.Rect) {
 			if !c.Nodes[e.A].settled || !c.Nodes[e.B].settled {
 				continue
 			}
-			r := c.addRoad(e.A, e.B, latticeClass(c.lat, e), axisOf(e))
+			r := c.addRoad(e.A, e.B, c.classOf(e), axisOf(e))
 			c.roadOf[e.ID] = r.ID
 			c.buildRoadLanes(r)
 		}

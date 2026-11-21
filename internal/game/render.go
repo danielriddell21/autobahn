@@ -212,17 +212,22 @@ func (g *Game) drawBlocks(eye mathx.Vec) {
 		// off for the junctions they face.
 		kerb := g.outline(i)
 		surface := colSidewalk
+		field := fieldOf(b, g.opts.Map)
 		switch {
 		case b.Park:
-			surface = g.look.park
+			surface = fieldShade(field, g.look)
 		case b.Beach:
 			surface = colSand
 		}
 		groundWall(centre, kerb, -0.02, city.KerbHeight, colKerb)
 		groundFan(centre, kerb, city.KerbHeight, surface)
-		drawPark(b)
-		if b.Beach {
+		switch {
+		case field != fieldNone:
+			drawField(b, field)
+		case b.Beach:
 			drawBeach(b)
+		default:
+			drawPark(b)
 		}
 	}
 }
@@ -363,7 +368,7 @@ func (g *Game) drawBuildings(eye mathx.Vec) {
 		if b.Center.DistTo(eye) > g.cullRange() {
 			continue
 		}
-		drawBuilding(b, g.facades, g.light.night, g.look.snow)
+		drawBuilding(b, g.town, g.light.night, g.look.snow)
 	}
 }
 
@@ -520,6 +525,11 @@ func (g *Game) plantTrees() {
 // plantPark scatters trees over a park, keeping them off its paths.
 func (g *Game) plantPark(b city.Block) {
 	if !b.Park {
+		return
+	}
+	if fieldOf(b, g.opts.Map) != fieldNone {
+		// A field is kept clear, and has its trees in the hedge round it.
+		g.trees = append(g.trees, hedgerow(b)...)
 		return
 	}
 	size := b.Max.Sub(b.Min)

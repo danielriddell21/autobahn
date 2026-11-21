@@ -68,7 +68,9 @@ var packs = [numPacks]Pack{
 	},
 	Country: {
 		ID: Country, Name: "country", Price: priceCountry,
-		Blurb: "a village in spring",
+		Blurb:  "a village in spring",
+		Maps:   []city.Map{city.MapVillage},
+		Bodies: []sim.BodyKind{sim.FourByFour, sim.SUV},
 	},
 	Motorway: {
 		ID: Motorway, Name: "motorway", Price: priceMotorway,

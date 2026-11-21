@@ -139,3 +139,20 @@ func TestWinterClosesInAndNightStaysDark(t *testing.T) {
 		}
 	}
 }
+
+// A tier of a tree's crown is never brighter than the leaf it is made of: a
+// pale colour pushed past full would wrap round into something else.
+func TestACrownIsNeverBrighterThanItsLeaves(t *testing.T) {
+	for _, s := range city.Seasons() {
+		lk := lookFor(s)
+		leaves := append(lk.leaves[:], colBlossom[:]...)
+		for _, leaf := range leaves {
+			for tier := range 3 {
+				got := crownShade(leaf, tier)
+				if got.R > leaf.R || got.G > leaf.G || got.B > leaf.B {
+					t.Errorf("%s: tier %d of a tree in %v is drawn in %v", s.Name(), tier, leaf, got)
+				}
+			}
+		}
+	}
+}

@@ -36,12 +36,24 @@ var (
 // seaReach is how far out the water is drawn, in metres: well past the fog.
 const seaReach float32 = 6000
 
-// facadesFor returns the colours a map's buildings are painted.
-func facadesFor(m city.Map) *[6]rl.Color {
-	if m == city.MapSeaside {
-		return &seasideShades
+// townLook is how a map's buildings are finished.
+type townLook struct {
+	// facades are the colours the walls are painted.
+	facades *[6]rl.Color
+	// shops is the share of buildings with a shop on the ground floor; the
+	// rest are houses, with a front door.
+	shops float32
+}
+
+// townFor returns how a map's buildings are finished.
+func townFor(m city.Map) townLook {
+	switch m {
+	case city.MapSeaside:
+		return townLook{facades: &seasideShades, shops: 0.6}
+	case city.MapVillage:
+		return townLook{facades: &villageShades, shops: 0.22}
 	}
-	return &buildingShades
+	return townLook{facades: &buildingShades, shops: 1}
 }
 
 // Seafront layout, in metres, measured from the kerb of the front.

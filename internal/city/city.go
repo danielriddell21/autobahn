@@ -387,6 +387,13 @@ type Params struct {
 	// Rise is how far the skyline climbs toward the middle of the place: 1
 	// is a city with towers at its heart, 0 a place the same height all over.
 	Rise float32
+	// Floor and Storeys set how tall an ordinary building is, in metres: no
+	// lower than Floor, and up to Storeys more.
+	Floor, Storeys float32
+	// MainEvery is how many grid lines apart the main roads fall. The line
+	// after each is a collector and the rest are side streets, so a larger
+	// number is a quieter place.
+	MainEvery int
 	// Coast puts the sea along one side. Nothing is built beyond the grid
 	// line CoastRow, which becomes the seafront, with a beach below it.
 	Coast    bool
@@ -398,6 +405,7 @@ func DefaultParams(seed uint64) Params {
 	return Params{
 		Seed: seed, Cols: 9, Rows: 9, MinSpan: 80, MaxSpan: 150,
 		Roundabouts: 0.28, Parks: parkShare, Rise: 1,
+		Floor: 7, Storeys: 10, MainEvery: 3,
 	}
 }
 
@@ -429,20 +437,21 @@ func axisOf(e *worldgen.LatticeEdge) int {
 	return 1
 }
 
-// latticeClass grades an edge before the city proper exists, which is what
+// classOf grades an edge before the city proper exists, which is what
 // lets the thinning pass protect the main roads.
-func latticeClass(l *worldgen.Lattice, e *worldgen.LatticeEdge) RoadClass {
-	return classFor(l.Nodes[e.A].Col, l.Nodes[e.A].Row, axisOf(e))
+func (c *City) classOf(e *worldgen.LatticeEdge) RoadClass {
+	return classFor(c.lat.Nodes[e.A].Col, c.lat.Nodes[e.A].Row, axisOf(e), c.params.MainEvery)
 }
 
-func classFor(i, j, axis int) RoadClass {
-	// Every third grid line is an arterial, which gives the city a clear
-	// skeleton of fast roads with quieter streets between them.
+func classFor(i, j, axis, every int) RoadClass {
+	// Every few grid lines is an arterial, three apart in the city, which
+	// gives a place a clear skeleton of fast roads with quieter streets
+	// between them.
 	line := i
 	if axis == 0 {
 		line = j
 	}
-	switch line % 3 {
+	switch line % max(every, 2) {
 	case 0:
 		return Arterial
 	case 1:
@@ -908,7 +917,7 @@ func (c *City) streetHalfWidth(a, b *Node) float32 {
 	for _, id := range c.edgesOf(c.lat.Nodes[a.ID]) {
 		e := c.lat.Edges[id]
 		if c.lat.Other(e, a.ID) == b.ID {
-			return halfWidthOf(latticeClass(c.lat, e))
+			return halfWidthOf(c.classOf(e))
 		}
 	}
 	return 0
@@ -945,7 +954,7 @@ func (c *City) fillBlock(col, row int, lo, hi mathx.Vec, downtown float32) {
 		if w < 5 || d < 5 {
 			return
 		}
-		h := 7 + draw()*10 + c.params.Rise*downtown*downtown*(18+draw()*58)
+		h := c.params.Floor + draw()*c.params.Storeys + c.params.Rise*downtown*downtown*(18+draw()*58)
 		c.Buildings = append(c.Buildings, Building{
 			Center: mathx.V(cx, cz), W: w, D: d, Height: h,
 			Shade:  uint8(draw() * 6),

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/autobahn/internal/city"
+	"github.com/danielriddell21/autobahn/internal/mathx"
 )
 
 func TestEveryMapHasANameThatParsesBack(t *testing.T) {
@@ -60,5 +61,49 @@ func TestEveryMapHasASeason(t *testing.T) {
 	}
 	if city.MapCity.Season() != city.Autumn {
 		t.Errorf("the city is driven in %s, want autumn", city.MapCity.Season().Name())
+	}
+}
+
+func TestTheVillageIsLowQuietAndMostlyFields(t *testing.T) {
+	grow := func(m city.Map) *city.City {
+		c := city.NewGrowing(city.ParamsFor(m, 7))
+		c.EnsureAround(mathx.V(0, 0), 1200)
+		return c
+	}
+	village, town := grow(city.MapVillage), grow(city.MapCity)
+
+	for _, b := range village.Buildings {
+		if b.Height > 11 {
+			t.Fatalf("a building in the village is %.1f m tall", b.Height)
+		}
+	}
+	share := func(c *city.City, is func(city.Block) bool) float32 {
+		n := 0
+		for _, b := range c.Blocks {
+			if is(b) {
+				n++
+			}
+		}
+		return float32(n) / float32(len(c.Blocks))
+	}
+	open := func(b city.Block) bool { return b.Park }
+	if v, c := share(village, open), share(town, open); v < 0.3 || v <= c*2 {
+		t.Errorf("%.2f of the village is open ground against %.2f of the city", v, c)
+	}
+	main := func(c *city.City) float32 {
+		n, all := 0, 0
+		for _, r := range c.Roads {
+			if r.Ring {
+				continue
+			}
+			all++
+			if r.Class == city.Arterial {
+				n++
+			}
+		}
+		return float32(n) / float32(all)
+	}
+	if v, c := main(village), main(town); v >= c {
+		t.Errorf("%.2f of the village's roads are main roads against %.2f of the city's", v, c)
 	}
 }

@@ -77,8 +77,8 @@ func roofOf(b city.Building) roofKind {
 }
 
 // drawBuilding draws one building: its walls, its roof and its shop front.
-func drawBuilding(b city.Building, shades *[6]rl.Color, night float32, snow bool) {
-	shade := shades[int(b.Shade)%len(shades)]
+func drawBuilding(b city.Building, town townLook, night float32, snow bool) {
+	shade := town.facades[int(b.Shade)%len(town.facades)]
 	h := scatter(b.Center.X, b.Center.Z, 11)
 	x, z, top := b.Center.X, b.Center.Z, b.Height
 
@@ -133,7 +133,7 @@ func drawBuilding(b city.Building, shades *[6]rl.Color, night float32, snow bool
 			pillar(at, top+0.7, top+2.5, 0.9, 0.9, 10, scaleColor(colPlant, 0.8))
 		}
 	}
-	drawShopFront(b, shade, h, night)
+	drawFront(b, town, shade, h, night)
 }
 
 // gable draws a pitched roof over a w by d rectangle centred on c: two slopes
@@ -188,9 +188,15 @@ func gable(c mathx.Vec, w, d, y, rise float32, roof, wall rl.Color) {
 func shopHasAwning(h [3]float32) bool  { return h[1] < 0.55 }
 func shopLitAtNight(h [3]float32) bool { return h[2] < 0.65 }
 
-// drawShopFront glazes the ground floor of the side of a building that faces
-// its street, and hangs an awning over some.
-func drawShopFront(b city.Building, shade rl.Color, h [3]float32, night float32) {
+// isShop decides whether a building is a shop or somebody's house, from
+// where it stands and how much of the place is shops.
+func isShop(b city.Building, town townLook) bool {
+	return scatter(b.Center.X, b.Center.Z, 17)[0] < town.shops
+}
+
+// drawFront dresses the side of a building that faces its street. A shop has
+// its ground floor glazed, and an awning over some; a house has a front door.
+func drawFront(b city.Building, town townLook, shade rl.Color, h [3]float32, night float32) {
 	f := b.Front
 	if f.X == 0 && f.Z == 0 {
 		return
@@ -210,6 +216,12 @@ func drawShopFront(b city.Building, shade rl.Color, h [3]float32, night float32)
 			return
 		}
 		rl.DrawCube(vec3(p.X, y, p.Z), wide, tall, thick, col)
+	}
+
+	if !isShop(b, town) {
+		slab(0.03, 1.05, 0.08, 2.1, 1.0, scaleColor(shade, 0.5))
+		slab(0.3, 0.09, 0.6, 0.18, 1.5, colStone)
+		return
 	}
 
 	glass := scaleColor(colGlass, 0.7)

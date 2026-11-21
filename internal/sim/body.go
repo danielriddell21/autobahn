@@ -32,37 +32,39 @@ const (
 	CityCar
 	IceCreamVan
 	Camper
+	// FourByFour is a boxy off-roader and SUV a big, quick, comfortable one.
+	// They come with the country, where a tractor is also to be met.
+	FourByFour
+	SUV
+	Tractor
 	numBodies
 )
 
+// bodyNames are what each shape is called.
+var bodyNames = [numBodies]string{
+	Hatchback:   "hatchback",
+	Saloon:      "saloon",
+	Estate:      "estate",
+	Van:         "van",
+	Taxi:        "taxi",
+	HotHatch:    "hot hatch",
+	Bus:         "bus",
+	Lorry:       "lorry",
+	Convertible: "convertible",
+	CityCar:     "city car",
+	IceCreamVan: "ice cream van",
+	Camper:      "camper",
+	FourByFour:  "4x4",
+	SUV:         "suv",
+	Tractor:     "tractor",
+}
+
 // Name returns the shape's name.
 func (b BodyKind) Name() string {
-	switch b {
-	case Saloon:
-		return "saloon"
-	case Estate:
-		return "estate"
-	case Van:
-		return "van"
-	case Taxi:
-		return "taxi"
-	case HotHatch:
-		return "hot hatch"
-	case Bus:
-		return "bus"
-	case Lorry:
-		return "lorry"
-	case Convertible:
-		return "convertible"
-	case CityCar:
-		return "city car"
-	case IceCreamVan:
-		return "ice cream van"
-	case Camper:
-		return "camper"
-	default:
-		return "hatchback"
+	if b < 0 || b >= numBodies {
+		return bodyNames[Hatchback]
 	}
+	return bodyNames[b]
 }
 
 // Body describes one shape: its dimensions, how it drives, and how the
@@ -100,42 +102,42 @@ func Bodies() []BodyKind {
 	return out
 }
 
-// BodyOf returns the description of a shape.
-func BodyOf(k BodyKind) Body {
-	base := TrafficSpec()
-	b := Body{
-		Kind: k, Spec: base, RoofFrac: 0.52, RoofRise: 0.44, Livery: -1,
-		Ride: carRide, Wheel: carWheel,
-	}
-
-	switch k {
-	case Saloon:
+// shapes is what turns the ordinary traffic car into each shape: its size,
+// its weight and what it has to pull it, and the proportions the renderer
+// builds it to.
+var shapes = [numBodies]func(b *Body){
+	Saloon: func(b *Body) {
 		b.Spec.HalfLength, b.Spec.HalfWidth, b.Spec.Height = 2.42, 0.95, 1.44
 		b.Spec.Mass, b.Spec.EngineForce = 1480, 7600
 		b.RoofFrac, b.RoofRise = 0.46, 0.42
-	case Estate:
+	},
+	Estate: func(b *Body) {
 		b.Spec.HalfLength, b.Spec.HalfWidth, b.Spec.Height = 2.55, 0.96, 1.52
 		b.Spec.Mass, b.Spec.EngineForce = 1580, 7400
 		b.RoofFrac, b.RoofRise = 0.62, 0.46
-	case Van:
+	},
+	Van: func(b *Body) {
 		b.Spec.HalfLength, b.Spec.HalfWidth, b.Spec.Height = 2.75, 1.05, 2.05
 		b.Spec.Mass, b.Spec.EngineForce = 2100, 7000
 		b.Spec.MaxSpeed, b.Spec.BrakeForce = 32, 13000
 		b.Spec.GripFront, b.Spec.GripRear = 78000, 84000
 		b.RoofFrac, b.RoofRise, b.Boxy = 0.7, 0.72, true
-	case Taxi:
+	},
+	Taxi: func(b *Body) {
 		b.Spec.HalfLength, b.Spec.HalfWidth, b.Spec.Height = 2.35, 0.98, 1.72
 		b.Spec.Mass, b.Spec.EngineForce = 1700, 7200
 		b.Spec.MaxSpeed = 34
 		b.RoofFrac, b.RoofRise, b.Boxy = 0.6, 0.62, true
 		b.Livery = 3 // the black cab
-	case HotHatch:
+	},
+	HotHatch: func(b *Body) {
 		b.Spec.HalfLength, b.Spec.HalfWidth, b.Spec.Height = 2.12, 0.93, 1.38
 		b.Spec.Mass, b.Spec.EngineForce = 1250, 9200
 		b.Spec.MaxSpeed = 46
 		b.Spec.GripFront, b.Spec.GripRear = 94000, 99000
 		b.RoofFrac, b.RoofRise = 0.48, 0.38
-	case Bus:
+	},
+	Bus: func(b *Body) {
 		b.Spec.HalfLength, b.Spec.HalfWidth, b.Spec.Height = 5.2, 1.25, 4.3
 		b.Spec.FrontAxle, b.Spec.RearAxle = 2.9, 2.6
 		b.Spec.haul(5600, 15000)
@@ -143,41 +145,83 @@ func BodyOf(k BodyKind) Body {
 		b.RoofFrac, b.RoofRise, b.Boxy = 1, 3.2, true
 		b.Ride, b.Wheel = 0.36, 0.5
 		b.Livery = 0 // the red bus
-	case Lorry:
+	},
+	Lorry: func(b *Body) {
 		b.Spec.HalfLength, b.Spec.HalfWidth, b.Spec.Height = 4.3, 1.25, 3.6
 		b.Spec.FrontAxle, b.Spec.RearAxle = 2.6, 2.2
 		b.Spec.haul(6400, 16000)
 		b.Spec.MaxSpeed = 25
 		b.RoofFrac, b.RoofRise, b.Boxy = 0.22, 2.45, true
 		b.Ride, b.Wheel = 0.5, 0.5
-	case Convertible:
+	},
+	Convertible: func(b *Body) {
 		b.Spec.HalfLength, b.Spec.HalfWidth, b.Spec.Height = 2.1, 0.93, 1.2
 		b.Spec.Mass, b.Spec.EngineForce = 1180, 9800
 		b.Spec.MaxSpeed = 50
 		b.Spec.GripFront, b.Spec.GripRear = 97000, 102000
 		b.RoofFrac, b.RoofRise = 0.36, 0.3
 		b.Ride = 0.22
-	case CityCar:
+	},
+	CityCar: func(b *Body) {
 		b.Spec.HalfLength, b.Spec.HalfWidth, b.Spec.Height = 1.6, 0.78, 1.34
 		b.Spec.Mass, b.Spec.EngineForce = 780, 6400
 		b.Spec.MaxSpeed = 36
 		b.RoofFrac, b.RoofRise = 0.6, 0.46
 		b.Wheel = 0.26
-	case IceCreamVan:
+	},
+	IceCreamVan: func(b *Body) {
 		b.Spec.HalfLength, b.Spec.HalfWidth, b.Spec.Height = 2.75, 1.05, 2.3
 		b.Spec.Mass, b.Spec.EngineForce = 2300, 6600
 		b.Spec.MaxSpeed, b.Spec.BrakeForce = 24, 13000
 		b.RoofFrac, b.RoofRise, b.Boxy = 0.72, 1.0, true
 		b.Livery = 2 // white, with its trimmings
-	case Camper:
+	},
+	Camper: func(b *Body) {
 		b.Spec.HalfLength, b.Spec.HalfWidth, b.Spec.Height = 2.3, 0.92, 2.0
 		b.Spec.Mass, b.Spec.EngineForce = 1500, 5600
 		b.Spec.MaxSpeed, b.Spec.BrakeForce = 28, 14000
 		b.RoofFrac, b.RoofRise, b.Boxy = 0.94, 0.95, true
-	default:
+	},
+	FourByFour: func(b *Body) {
+		b.Spec.HalfLength, b.Spec.HalfWidth, b.Spec.Height = 2.3, 0.96, 1.98
+		b.Spec.Mass, b.Spec.EngineForce = 1950, 7400
+		b.Spec.MaxSpeed = 34
+		b.Spec.GripFront, b.Spec.GripRear = 84000, 90000
+		b.RoofFrac, b.RoofRise, b.Boxy = 0.62, 0.74, true
+		b.Ride, b.Wheel = 0.44, 0.41
+	},
+	SUV: func(b *Body) {
+		b.Spec.HalfLength, b.Spec.HalfWidth, b.Spec.Height = 2.45, 1.0, 1.78
+		b.Spec.Mass, b.Spec.EngineForce = 2150, 9600
+		b.Spec.MaxSpeed = 46
+		b.RoofFrac, b.RoofRise = 0.64, 0.6
+		b.Ride, b.Wheel = 0.36, 0.4
+	},
+	Tractor: func(b *Body) {
+		b.Spec.HalfLength, b.Spec.HalfWidth, b.Spec.Height = 2.0, 1.0, 2.7
+		b.Spec.FrontAxle, b.Spec.RearAxle = 1.3, 1.1
+		b.Spec.haul(3200, 7000)
+		b.Spec.MaxSpeed = 9 // twenty miles an hour, flat out
+		b.RoofFrac, b.RoofRise, b.Boxy = 0.42, 1.35, true
+		b.Ride, b.Wheel = 0.62, 0.46
+		b.Livery = 5 // green
+	},
+	Hatchback: func(b *Body) {
 		b.Spec.HalfLength, b.Spec.HalfWidth, b.Spec.Height = 2.18, 0.92, 1.46
 		b.Spec.Mass = 1320
+	},
+}
+
+// BodyOf returns the description of a shape.
+func BodyOf(k BodyKind) Body {
+	if k < 0 || k >= numBodies {
+		k = Hatchback
 	}
+	b := Body{
+		Kind: k, Spec: TrafficSpec(), RoofFrac: 0.52, RoofRise: 0.44, Livery: -1,
+		Ride: carRide, Wheel: carWheel,
+	}
+	shapes[k](&b)
 	return b
 }
 
@@ -231,6 +275,22 @@ var mixes = map[city.Map]mix{
 		IceCreamVan: 2,
 		Camper:      4,
 	},
+	// The country runs on estates and four-wheel drive, and now and then
+	// everybody is stuck behind a tractor.
+	city.MapVillage: {
+		Hatchback:  26,
+		Saloon:     14,
+		Estate:     16,
+		Van:        10,
+		Taxi:       2,
+		HotHatch:   4,
+		Bus:        2,
+		Lorry:      2,
+		CityCar:    3,
+		FourByFour: 10,
+		SUV:        6,
+		Tractor:    5,
+	},
 }
 
 // mixFor returns the traffic mix of a map.
@@ -262,7 +322,10 @@ func RandomBody(rng *rand.Rand, m city.Map) Body {
 func PlayerBody() Body { return PlayerBodyOf(HotHatch) }
 
 // playerBodies are the shapes the garage offers, in the order it lists them.
-var playerBodies = []BodyKind{HotHatch, Hatchback, Saloon, Estate, Taxi, Van, Convertible, CityCar}
+var playerBodies = []BodyKind{
+	HotHatch, Hatchback, Saloon, Estate, Taxi, Van,
+	Convertible, CityCar, FourByFour, SUV,
+}
 
 // PlayerBodies returns the shapes the player may choose from.
 func PlayerBodies() []BodyKind { return slices.Clone(playerBodies) }

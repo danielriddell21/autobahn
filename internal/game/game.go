@@ -137,11 +137,11 @@ type Game struct {
 	// city with, and clock the hour that light belongs to.
 	scene sceneShader
 	light lighting
-	// look is how the map's season dresses the scene, and facades the
-	// colours its buildings are painted.
-	look    seasonLook
-	facades *[6]rl.Color
-	clock   dayClock
+	// look is how the map's season dresses the scene, and town how its
+	// buildings are finished.
+	look  seasonLook
+	town  townLook
+	clock dayClock
 	// outlines caches each block's kerb line, and trees what has been planted;
 	// treedBlocks and treedRoads say how much of the city that covers.
 	outlines    [][]mathx.Vec
@@ -307,7 +307,7 @@ func New(opts Options) *Game {
 
 	g.scene = loadSceneShader()
 	g.look = lookFor(opts.Map.Season())
-	g.facades = facadesFor(opts.Map)
+	g.town = townFor(opts.Map)
 	g.clock.minutes = opts.DayLength
 	g.SetTime(opts.Time)
 	g.fov = groundFov

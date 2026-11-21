@@ -3,6 +3,8 @@ package game
 import (
 	"testing"
 
+	rl "github.com/gen2brain/raylib-go/raylib"
+
 	"github.com/danielriddell21/autobahn/internal/city"
 	"github.com/danielriddell21/autobahn/internal/mathx"
 )
@@ -74,15 +76,27 @@ func TestSomeBeachesHaveAPier(t *testing.T) {
 	}
 }
 
-func TestTheSeasideIsPaintedAndTheCityIsNot(t *testing.T) {
-	if facadesFor(city.MapSeaside) == facadesFor(city.MapCity) {
-		t.Error("the seaside is the same colours as the city")
-	}
+func TestEveryMapIsFinishedItsOwnWay(t *testing.T) {
+	seen := map[*[6]rl.Color]string{}
 	for _, m := range city.Maps() {
-		for _, c := range facadesFor(m) {
+		town := townFor(m)
+		if other, dup := seen[town.facades]; dup && m != city.MapCity {
+			t.Errorf("%s is painted the same colours as %s", m.Name(), other)
+		}
+		seen[town.facades] = m.Name()
+		if town.shops <= 0 || town.shops > 1 {
+			t.Errorf("%s is %.2f shops", m.Name(), town.shops)
+		}
+		for _, c := range town.facades {
 			if c.R == 255 || c.G == 255 || c.B == 255 {
 				t.Errorf("%s paints a wall %v, with a channel at full", m.Name(), c)
 			}
 		}
+	}
+	if townFor(city.MapCity).shops != 1 {
+		t.Error("every building in the city should have a shop at its foot")
+	}
+	if townFor(city.MapVillage).shops >= townFor(city.MapSeaside).shops {
+		t.Error("the village should have fewer shops than the seaside")
 	}
 }

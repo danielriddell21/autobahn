@@ -12,6 +12,9 @@ import (
 // come from its body.
 const wheelWidth float32 = 0.25
 
+// tractorRear is how much bigger a tractor's back wheels are than its front.
+const tractorRear float32 = 1.7
+
 var (
 	// colCargo is the box on the back of a lorry, and the top half of a camper.
 	colCargo   = rl.NewColor(204, 202, 194, 255)
@@ -53,6 +56,10 @@ func bootShare(k sim.BodyKind) float32 {
 		return 0.04
 	case sim.IceCreamVan, sim.Camper:
 		return 0.02
+	case sim.FourByFour, sim.SUV:
+		return 0.03
+	case sim.Tractor:
+		return 0.04 // the cab sits over the back wheels
 	case sim.Bus:
 		return 0 // the decks run the whole length
 	case sim.Lorry:
@@ -161,6 +168,9 @@ func drawCabin(s sim.Spec, body sim.Body, look carLook, waist float32, paint, da
 	case sim.Convertible:
 		drawOpenCabin(rear, front, half, waist, roof, glass)
 		return
+	case sim.Tractor:
+		drawTractorCab(s, rear, front, waist, roof, paint, glass)
+		return
 	case sim.Camper:
 		drawCamper(s, waist, roof, glass)
 		return
@@ -193,6 +203,27 @@ func drawCabin(s sim.Spec, body sim.Body, look carLook, waist float32, paint, da
 		rl.DrawCube(vec3(mid, (waist+roof)/2-0.03, side*(half+top)/2),
 			0.13, roof-waist-0.04, 0.05, dark)
 	}
+	if body.Kind == sim.FourByFour {
+		// The spare on the back door, and a rack on the roof.
+		rl.DrawCube(vec3(-s.HalfLength-0.1, waist+0.05, 0), 0.2, 0.72, 0.72, colTyre)
+		rl.DrawCube(vec3((rear+front)/2, roof+0.07, 0), (front-rear)*0.7, 0.05, top*1.8, colTrim)
+	}
+}
+
+// drawTractorCab builds a tractor on its lower body: a glass cab over the
+// back axle, a bonnet out in front of it, and an exhaust up the side.
+func drawTractorCab(s sim.Spec, rear, front, waist, roof float32, paint, glass rl.Color) {
+	width := s.HalfWidth * 2
+	rl.DrawCube(vec3((rear+front)/2, (waist+roof)/2, 0), front-rear, roof-waist, width*0.7, glass)
+	rl.DrawCube(vec3((rear+front)/2, roof-0.04, 0), front-rear+0.1, 0.1, width*0.76, paint)
+	for _, x := range [2]float32{rear, front} {
+		for _, side := range [2]float32{1, -1} {
+			rl.DrawCube(vec3(x, (waist+roof)/2, side*width*0.35), 0.09, roof-waist, 0.09, paint)
+		}
+	}
+	// The bonnet, narrower than the body, running out to the nose.
+	rl.DrawCube(vec3((front+s.HalfLength)/2, waist+0.22, 0), s.HalfLength-front, 0.44, width*0.5, paint)
+	rl.DrawCube(vec3(front+0.25, waist+0.9, width*0.3), 0.09, 1.3, 0.09, colTrim)
 }
 
 // drawOpenCabin builds a car with no roof: a raked screen, the seats behind
@@ -308,7 +339,12 @@ func drawWheels(v *sim.Vehicle, body sim.Body, look carLook) {
 		return
 	}
 	for _, side := range [2]float32{1, -1} {
-		wheel(-s.RearAxle, side*z, r, wheelWidth, colTyre, colHub)
+		if body.Kind == sim.Tractor {
+			// The big wheels are at the back.
+			wheel(-s.RearAxle, side*z, r*tractorRear, wheelWidth*1.8, colTyre, colWafer)
+		} else {
+			wheel(-s.RearAxle, side*z, r, wheelWidth, colTyre, colHub)
+		}
 		// The front pair turns with the steering.
 		rl.PushMatrix()
 		rl.Translatef(s.FrontAxle, 0, side*z)
