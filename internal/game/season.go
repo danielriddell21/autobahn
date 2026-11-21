@@ -15,9 +15,9 @@ import (
 
 // seasonLook is how a season dresses the scene.
 type seasonLook struct {
-	// ground is the open land beyond the streets, and park the grass within
-	// them.
-	ground, park rl.Color
+	// ground is the open land beyond the streets, park the grass within
+	// them, and pave the pavements.
+	ground, park, pave rl.Color
 	// leaves are the shades a tree in leaf may be. bare is the share of
 	// trees with none, and blossom the share in flower instead.
 	leaves  [4]rl.Color
@@ -38,6 +38,8 @@ type seasonLook struct {
 var (
 	colSnow     = rl.NewColor(226, 230, 236, 255)
 	colSnowPark = rl.NewColor(214, 220, 228, 255)
+	// colSnowPave is a pavement the snow has been trodden into.
+	colSnowPave = rl.NewColor(196, 200, 206, 255)
 	colBlossom  = [2]rl.Color{
 		rl.NewColor(232, 190, 204, 255),
 		rl.NewColor(238, 230, 226, 255),
@@ -50,6 +52,7 @@ func lookFor(s city.Season) seasonLook {
 	switch s {
 	case city.Summer:
 		return seasonLook{
+			pave:   colSidewalk,
 			ground: rl.NewColor(116, 128, 78, 255), park: rl.NewColor(96, 138, 70, 255),
 			leaves: [4]rl.Color{
 				rl.NewColor(62, 118, 58, 255), rl.NewColor(78, 132, 62, 255),
@@ -58,6 +61,7 @@ func lookFor(s city.Season) seasonLook {
 		}
 	case city.Spring:
 		return seasonLook{
+			pave:   colSidewalk,
 			ground: rl.NewColor(98, 132, 80, 255), park: rl.NewColor(100, 150, 78, 255),
 			leaves: [4]rl.Color{
 				rl.NewColor(108, 158, 82, 255), rl.NewColor(124, 170, 88, 255),
@@ -69,6 +73,7 @@ func lookFor(s city.Season) seasonLook {
 		}
 	case city.Winter:
 		return seasonLook{
+			pave:   colSnowPave,
 			ground: colSnow, park: colSnowPark,
 			leaves: [4]rl.Color{colEvergreen, colEvergreen, colEvergreen, colEvergreen},
 			bare:   0.72,
@@ -78,6 +83,7 @@ func lookFor(s city.Season) seasonLook {
 		}
 	default: // autumn
 		return seasonLook{
+			pave:   colSidewalk,
 			ground: rl.NewColor(112, 110, 74, 255), park: rl.NewColor(104, 118, 68, 255),
 			leaves: [4]rl.Color{
 				rl.NewColor(190, 122, 52, 255), rl.NewColor(168, 82, 48, 255),
@@ -96,10 +102,10 @@ func lookFor(s city.Season) seasonLook {
 // colours returns every colour a season puts in the scene, for whoever has to
 // be sure none of them is one the vision system has reserved.
 func (lk seasonLook) colours() []rl.Color {
-	out := []rl.Color{lk.ground, lk.park}
+	out := []rl.Color{lk.ground, lk.park, lk.pave}
 	out = append(out, lk.leaves[:]...)
 	out = append(out, lk.fallShade[:]...)
-	return append(out, colSnow, colSnowPark, colBlossom[0], colBlossom[1], colEvergreen)
+	return append(out, colSnow, colSnowPark, colSnowPave, colBlossom[0], colBlossom[1], colEvergreen)
 }
 
 // relight turns the light for an hour into the light for that hour in a

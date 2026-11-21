@@ -164,7 +164,7 @@ func TestALooseSurfaceTakesGripAndBrakingButNotPower(t *testing.T) {
 	if snow.BrakeForce >= dry.BrakeForce {
 		t.Error("a car on snow stops as well as one in the dry")
 	}
-	// It loses less braking than cornering, and nothing else.
+	// It loses far less braking than cornering, and nothing else.
 	if snow.BrakeForce/dry.BrakeForce <= snow.MaxLateral/dry.MaxLateral {
 		t.Error("braking fell away as far as cornering")
 	}

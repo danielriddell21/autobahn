@@ -107,3 +107,46 @@ func TestTheVillageIsLowQuietAndMostlyFields(t *testing.T) {
 		t.Errorf("%.2f of the village's roads are main roads against %.2f of the city's", v, c)
 	}
 }
+
+func TestTheMotorwayTownIsFastAndHasNoSideStreets(t *testing.T) {
+	c := city.NewGrowing(city.ParamsFor(city.MapMotorway, 7))
+	c.EnsureAround(mathx.V(0, 0), 1500)
+	fast := 0
+	for _, r := range c.Roads {
+		if r.Ring {
+			continue
+		}
+		if r.Class == city.Local {
+			t.Fatalf("road %d in the motorway town is a side street", r.ID)
+		}
+		want := mathx.MPH(40)
+		if r.Class == city.Arterial {
+			want = mathx.MPH(50)
+			fast++
+		}
+		for _, id := range append(append([]int{}, r.LanesAB...), r.LanesBA...) {
+			if got := c.Lanes[id].SpeedLimit; mathx.Abs(got-want) > 0.01 {
+				t.Fatalf("a lane on a %s road is limited to %.0f mph, want %.0f",
+					r.Class.Name(), mathx.ToMPH(got), mathx.ToMPH(want))
+			}
+		}
+	}
+	if fast == 0 {
+		t.Fatal("the motorway town has no fast roads")
+	}
+	for _, p := range c.Props {
+		if p.Kind == city.PropSpeedSign && p.Limit > mathx.MPH(51) {
+			t.Fatalf("a sign is posted at %.0f mph", mathx.ToMPH(p.Limit))
+		}
+	}
+	// Everywhere else keeps the usual urban limits.
+	town := city.Generate(city.DefaultParams(7))
+	for _, l := range town.Lanes {
+		if l.SpeedLimit > mathx.MPH(40)+0.01 {
+			t.Fatalf("a lane in the city is limited to %.0f mph", mathx.ToMPH(l.SpeedLimit))
+		}
+	}
+	if city.MapMotorway.Season() != city.Winter {
+		t.Error("the motorway town should be driven in winter")
+	}
+}

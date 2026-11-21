@@ -156,6 +156,9 @@ type Game struct {
 	bays           []city.Bay
 	bayedRoads     int
 	parked         []parkedCar
+	// barriers are the crash barriers along the fast roads.
+	barriers       []barrier
+	barrieredRoads int
 	fx             effects
 	// fov is the chase camera's lens, which opens up with speed.
 	fov float32

@@ -148,10 +148,11 @@ func (a *Agent) Pursuing() bool { return a.pursuing }
 func (a *Agent) style() Style {
 	// Returns the style currently in force, which is the pursuit style while
 	// a police unit is running to a call.
+	st := a.Style
 	if a.pursuing {
-		return Pursuit()
+		st = Pursuit()
 	}
-	return a.Style
+	return st.onSurface(a.surface)
 }
 
 // Indicator returns the turn signal implied by the agent's next manoeuvre.
@@ -771,11 +772,27 @@ func (a *Agent) junctionStop(w *World) (dist float32, stop bool) {
 
 	// Even with the right to go, do not drive into something: wait for a gap
 	// in whatever has priority, and for the way out to be clear.
-	if d < yieldRange && w.mustYield(a) {
+	if d < a.yieldFrom(style) && w.mustYield(a) {
 		a.yielding = true
 		return d, true
 	}
 	return 0, false
+}
+
+// fastRoad is the limit above which a driver has to start judging a junction
+// from further back than yieldRange, in m/s: anything over forty.
+var fastRoad = mathx.MPH(41)
+
+// yieldFrom is how far from the line a driver starts judging the gap. On a
+// town street that is yieldRange, which is room enough to stop from any speed
+// a town street allows. On a fast road it is not, so there it is however far
+// the driver would take to stop, and a little over.
+func (a *Agent) yieldFrom(st Style) float32 {
+	if a.lane == nil || a.lane.SpeedLimit < fastRoad {
+		return yieldRange
+	}
+	v := a.V.Speed()
+	return max(yieldRange, v*v/(2*st.Decel)+8)
 }
 
 func (a *Agent) controlStop(w *World, style Style, d float32) bool {

@@ -284,8 +284,10 @@ func speedClass(limit float32) vision.Class {
 		return vision.ClassSpeed20
 	case mph < 35:
 		return vision.ClassSpeed30
-	default:
+	case mph < 45:
 		return vision.ClassSpeed40
+	default:
+		return vision.ClassSpeed50
 	}
 }
 

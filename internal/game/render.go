@@ -131,6 +131,7 @@ func (g *Game) drawWorld(cam rl.Camera3D, drawPlayer bool) {
 	g.drawTrees(eye)
 	g.drawProps(eye)
 	g.drawFurniture(eye)
+	g.drawBarriers(eye)
 	g.drawParking(eye)
 	g.drawTraffic(eye, drawPlayer)
 	g.drawLightPools(eye, drawPlayer)
@@ -211,7 +212,7 @@ func (g *Game) drawBlocks(eye mathx.Vec) {
 		// The pavement slab, raised to make a kerb, with its corners rounded
 		// off for the junctions they face.
 		kerb := g.outline(i)
-		surface := colSidewalk
+		surface := g.look.pave
 		field := fieldOf(b, g.opts.Map)
 		switch {
 		case b.Park:

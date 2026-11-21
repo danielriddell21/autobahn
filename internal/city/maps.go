@@ -1,6 +1,10 @@
 package city
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/danielriddell21/autobahn/internal/mathx"
+)
 
 // Map is a place to drive: the same growing generator, tuned and dressed
 // differently. A map changes what the generator is asked for and never how it
@@ -18,6 +22,9 @@ const (
 	// MapVillage is a village in the country: cottages along long lanes,
 	// with fields between them.
 	MapVillage
+	// MapMotorway is a town built round its dual carriageways: fast roads
+	// a long way apart, big junctions, and sheds rather than streets.
+	MapMotorway
 	numMaps
 )
 
@@ -40,6 +47,8 @@ func (m Map) Name() string {
 		return "seaside"
 	case MapVillage:
 		return "village"
+	case MapMotorway:
+		return "motorway"
 	default:
 		return "city"
 	}
@@ -89,6 +98,8 @@ func (m Map) Season() Season {
 		return Summer
 	case MapVillage:
 		return Spring
+	case MapMotorway:
+		return Winter
 	default:
 		return Autumn
 	}
@@ -132,7 +143,20 @@ func ParamsFor(m Map, seed uint64) Params {
 		// blocks in five left as fields, and nothing over three storeys.
 		p.MinSpan, p.MaxSpan = 110, 200
 		p.Roundabouts, p.Parks, p.Rise = 0.4, 0.42, 0
-		p.Floor, p.Storeys, p.MainEvery = 5.5, 4.5, 5
+		p.Floor, p.Storeys, p.MainEvery, p.Balanced = 5.5, 4.5, 5, true
+	}
+	if m == MapMotorway {
+		// Every other grid line is a dual carriageway and the ones between
+		// are its feeders, a long way apart, with no side streets at all.
+		// Nearly every junction is under lights: a roundabout between two
+		// dual carriageways is the one place the autopilot comes to grief,
+		// and a town built of them fails the gate.
+		// The limits are the fast ones: fifty on the main roads, forty off
+		// them.
+		p.MinSpan, p.MaxSpan = 170, 290
+		p.Roundabouts, p.Parks, p.Rise = 0.1, 0.14, 0.12
+		p.Floor, p.Storeys, p.MainEvery, p.Balanced = 6, 6, 2, true
+		p.Limits = [3]float32{mathx.MPH(30), mathx.MPH(40), mathx.MPH(50)}
 	}
 	return p
 }

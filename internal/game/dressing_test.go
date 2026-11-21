@@ -10,9 +10,10 @@ import (
 
 func TestTheRoofFollowsTheHeight(t *testing.T) {
 	c := city.Generate(city.DefaultParams(7))
+	town := townFor(city.MapCity)
 	seen := map[roofKind]int{}
 	for _, b := range c.Buildings {
-		k := roofOf(b)
+		k := roofOf(b, town)
 		seen[k]++
 		switch {
 		case b.Height > towerHeight && k != roofTower:
@@ -24,7 +25,7 @@ func TestTheRoofFollowsTheHeight(t *testing.T) {
 		case k == roofStepped && b.Height < steppedHeight:
 			t.Fatalf("a building %.0f m tall is stepped", b.Height)
 		}
-		if roofOf(b) != k {
+		if roofOf(b, town) != k {
 			t.Fatal("the same building got two roofs")
 		}
 	}

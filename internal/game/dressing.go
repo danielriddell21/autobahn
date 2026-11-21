@@ -62,13 +62,14 @@ const (
 	steppedHeight float32 = 18
 )
 
-// roofOf decides a building's roof from its height and where it stands.
-func roofOf(b city.Building) roofKind {
+// roofOf decides a building's roof from its height, where it stands and how
+// the place is built.
+func roofOf(b city.Building, town townLook) roofKind {
 	h := scatter(b.Center.X, b.Center.Z, 11)
 	switch {
 	case b.Height > towerHeight:
 		return roofTower
-	case b.Height < gableHeight && h[0] < 0.6:
+	case b.Height < gableHeight && h[0] < town.pitched:
 		return roofGable
 	case b.Height >= steppedHeight && h[0] < 0.4:
 		return roofStepped
@@ -94,7 +95,7 @@ func drawBuilding(b city.Building, town townLook, night float32, snow bool) {
 			rl.DrawCube(vec3(x, top+0.74, z), b.W*0.93, 0.1, b.D*0.93, colSnow)
 		}
 	}
-	switch roofOf(b) {
+	switch roofOf(b, town) {
 	case roofGable:
 		rise := 1.6 + h[1]*1.8
 		rl.DrawCube(vec3(x, top+0.1, z), b.W*1.03, 0.2, b.D*1.03, scaleColor(shade, 0.7))

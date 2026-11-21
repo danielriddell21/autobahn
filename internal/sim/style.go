@@ -212,3 +212,19 @@ func (s Style) StopsForAmber(dist, speed float32) bool {
 	// Only stop if there is room to do it comfortably.
 	return dist > speed*speed/(2*s.Decel)
 }
+
+// onSurface is the same driver on a road giving that share of full grip.
+// People who live with snow drive to it: they count on less from the brakes,
+// leave more room, and take a bend more gently. Without that, traffic plans
+// its stops for a dry road and slides into whatever is in front.
+func (s Style) onSurface(grip float32) Style {
+	if grip <= 0 || grip >= 1 {
+		return s
+	}
+	// The brakes keep most of what the tyres lose, as [Spec.OnSurface] has
+	// it, and the driver plans on a little less than that.
+	s.Decel *= (3 + grip) / 4 * 0.92
+	s.Headway *= 1 + (1-grip)*0.8
+	s.CornerBias *= mathx.Sqrt(grip)
+	return s
+}

@@ -21,6 +21,7 @@ var (
 	colSeat    = rl.NewColor(104, 72, 54, 255)
 	colIcePink = rl.NewColor(222, 150, 170, 255)
 	colWafer   = rl.NewColor(204, 164, 104, 255)
+	colHopper  = rl.NewColor(214, 160, 52, 255)
 )
 
 // carLook is everything about how one car is drawn that is not its shape.
@@ -58,6 +59,12 @@ func bootShare(k sim.BodyKind) float32 {
 		return 0.02
 	case sim.FourByFour, sim.SUV:
 		return 0.03
+	case sim.Minibus:
+		return 0.02
+	case sim.GrandTourer:
+		return 0.14 // a long bonnet, so the cabin sits well back
+	case sim.Gritter:
+		return 0.76 // the hopper; the cab is over the front axle
 	case sim.Tractor:
 		return 0.04 // the cab sits over the back wheels
 	case sim.Bus:
@@ -163,7 +170,16 @@ func drawCabin(s sim.Spec, body sim.Body, look carLook, waist float32, paint, da
 		drawDecks(s, waist, roof, paint, glass)
 		return
 	case sim.Lorry:
-		drawCabAndBox(s, front-cabin, front, waist, roof, paint, glass)
+		drawCabAndBox(s, front-cabin, front, waist, roof, paint, glass, colCargo, 1)
+		return
+	case sim.Gritter:
+		drawCabAndBox(s, front-cabin, front, waist, roof, paint, glass, colHopper, 0.7)
+		// The beacon on the cab, which never stops.
+		beacon := colBeaconDark
+		if look.blink {
+			beacon = as(bulbAmber, matGlow)
+		}
+		rl.DrawCube(vec3(front-cabin/2, waist+(roof-waist)*0.62+0.1, 0), 0.3, 0.2, 0.3, beacon)
 		return
 	case sim.Convertible:
 		drawOpenCabin(rear, front, half, waist, roof, glass)
@@ -279,7 +295,11 @@ func drawDecks(s sim.Spec, waist, roof float32, paint, glass rl.Color) {
 
 // drawCabAndBox builds a lorry: a cab over the front axle, with the load in a
 // box behind it that stands taller than the cab.
-func drawCabAndBox(s sim.Spec, cabRear, front, waist, roof float32, paint, glass rl.Color) {
+//
+// load is the colour of the box and fill how much of the height above the
+// waist it stands to: a lorry's box stands to the top, a gritter's hopper
+// stops short.
+func drawCabAndBox(s sim.Spec, cabRear, front, waist, roof float32, paint, glass, load rl.Color, fill float32) {
 	width := s.HalfWidth * 2
 	cabTop := waist + (roof-waist)*0.62
 	rl.DrawCube(vec3((cabRear+front)/2, (waist+cabTop)/2, 0), front-cabRear, cabTop-waist, width*0.98, paint)
@@ -289,7 +309,8 @@ func drawCabAndBox(s sim.Spec, cabRear, front, waist, roof float32, paint, glass
 		(front-cabRear)*0.5, (cabTop-waist)*0.4, width*0.992, glass)
 	rear := -s.HalfLength
 	gap := float32(0.3)
-	rl.DrawCube(vec3((rear+cabRear-gap)/2, (waist+roof)/2, 0), cabRear-gap-rear, roof-waist, width, colCargo)
+	top := waist + (roof-waist)*fill
+	rl.DrawCube(vec3((rear+cabRear-gap)/2, (waist+top)/2, 0), cabRear-gap-rear, top-waist, width, load)
 }
 
 func drawLamps(v *sim.Vehicle, look carLook, waist float32) {

@@ -37,6 +37,11 @@ const (
 	FourByFour
 	SUV
 	Tractor
+	// Minibus carries a dozen people slowly and GrandTourer two of them very
+	// fast. They come with the motorway, whose roads a gritter keeps open.
+	Minibus
+	GrandTourer
+	Gritter
 	numBodies
 )
 
@@ -57,6 +62,9 @@ var bodyNames = [numBodies]string{
 	FourByFour:  "4x4",
 	SUV:         "suv",
 	Tractor:     "tractor",
+	Minibus:     "minibus",
+	GrandTourer: "grand tourer",
+	Gritter:     "gritter",
 }
 
 // Name returns the shape's name.
@@ -197,6 +205,31 @@ var shapes = [numBodies]func(b *Body){
 		b.RoofFrac, b.RoofRise = 0.64, 0.6
 		b.Ride, b.Wheel = 0.36, 0.4
 	},
+	Minibus: func(b *Body) {
+		b.Spec.HalfLength, b.Spec.HalfWidth, b.Spec.Height = 2.95, 1.02, 2.35
+		b.Spec.Mass, b.Spec.EngineForce = 2500, 7600
+		b.Spec.MaxSpeed, b.Spec.BrakeForce = 34, 14000
+		b.Spec.GripFront, b.Spec.GripRear = 80000, 86000
+		b.RoofFrac, b.RoofRise, b.Boxy = 0.86, 1.05, true
+		b.Ride, b.Wheel = 0.32, 0.36
+	},
+	GrandTourer: func(b *Body) {
+		b.Spec.HalfLength, b.Spec.HalfWidth, b.Spec.Height = 2.5, 0.98, 1.3
+		b.Spec.Mass, b.Spec.EngineForce = 1750, 12400
+		b.Spec.MaxSpeed = 62
+		b.Spec.GripFront, b.Spec.GripRear = 98000, 104000
+		b.RoofFrac, b.RoofRise = 0.38, 0.36
+		b.Ride = 0.22
+	},
+	Gritter: func(b *Body) {
+		b.Spec.HalfLength, b.Spec.HalfWidth, b.Spec.Height = 3.9, 1.25, 3.0
+		b.Spec.FrontAxle, b.Spec.RearAxle = 2.4, 2.0
+		b.Spec.haul(6800, 15000)
+		b.Spec.MaxSpeed = 18 // it is working, not going anywhere
+		b.RoofFrac, b.RoofRise, b.Boxy = 0.24, 1.85, true
+		b.Ride, b.Wheel = 0.5, 0.5
+		b.Livery = 4 // amber
+	},
 	Tractor: func(b *Body) {
 		b.Spec.HalfLength, b.Spec.HalfWidth, b.Spec.Height = 2.0, 1.0, 2.7
 		b.Spec.FrontAxle, b.Spec.RearAxle = 1.3, 1.1
@@ -291,6 +324,22 @@ var mixes = map[city.Map]mix{
 		SUV:        6,
 		Tractor:    5,
 	},
+	// The motorway town is freight and commuters, with four-wheel drive out
+	// for the snow and a gritter working the main roads.
+	city.MapMotorway: {
+		Hatchback:  24,
+		Saloon:     20,
+		Estate:     12,
+		Van:        12,
+		Taxi:       2,
+		HotHatch:   4,
+		Bus:        3,
+		Lorry:      9,
+		FourByFour: 5,
+		SUV:        5,
+		Minibus:    2,
+		Gritter:    2,
+	},
 }
 
 // mixFor returns the traffic mix of a map.
@@ -324,7 +373,7 @@ func PlayerBody() Body { return PlayerBodyOf(HotHatch) }
 // playerBodies are the shapes the garage offers, in the order it lists them.
 var playerBodies = []BodyKind{
 	HotHatch, Hatchback, Saloon, Estate, Taxi, Van,
-	Convertible, CityCar, FourByFour, SUV,
+	Convertible, CityCar, FourByFour, SUV, Minibus, GrandTourer,
 }
 
 // PlayerBodies returns the shapes the player may choose from.

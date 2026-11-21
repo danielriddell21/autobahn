@@ -74,7 +74,9 @@ var packs = [numPacks]Pack{
 	},
 	Motorway: {
 		ID: Motorway, Name: "motorway", Price: priceMotorway,
-		Blurb: "a motorway town in winter",
+		Blurb:  "a motorway town in winter",
+		Maps:   []city.Map{city.MapMotorway},
+		Bodies: []sim.BodyKind{sim.Minibus, sim.GrandTourer},
 	},
 }
 

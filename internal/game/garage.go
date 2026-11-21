@@ -210,6 +210,10 @@ func carBlurb(k sim.BodyKind) string {
 		return "tall, square and unhurried, built for a muddy lane"
 	case sim.SUV:
 		return "big and quick, and it would rather go straight on"
+	case sim.Minibus:
+		return "seats for twelve, and in no hurry to get them anywhere"
+	case sim.GrandTourer:
+		return "the fastest thing here, long and settled, lazy in a tight bend"
 	default:
 		return "quick, small and eager: the one being chased"
 	}

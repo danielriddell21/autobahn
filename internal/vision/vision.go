@@ -37,6 +37,7 @@ const (
 	ClassSpeed20
 	ClassSpeed30
 	ClassSpeed40
+	ClassSpeed50
 	ClassLaneMarker
 	ClassLaneMarkerAlt
 	ClassStopLine
@@ -62,6 +63,7 @@ var classNames = [numClasses]string{
 	ClassSpeed20:       "LIMIT 20",
 	ClassSpeed30:       "LIMIT 30",
 	ClassSpeed40:       "LIMIT 40",
+	ClassSpeed50:       "LIMIT 50",
 	ClassLaneMarker:    "LANE",
 	ClassLaneMarkerAlt: "LANE",
 	ClassStopLine:      "STOP LINE",
@@ -88,6 +90,8 @@ func (c Class) SpeedValue() (float32, bool) {
 		return mathx.MPH(30), true
 	case ClassSpeed40:
 		return mathx.MPH(40), true
+	case ClassSpeed50:
+		return mathx.MPH(50), true
 	default:
 		return 0, false
 	}
@@ -115,6 +119,7 @@ var classColors = [numClasses]color.RGBA{
 	ClassSpeed20:       {0, 128, 255, 255},
 	ClassSpeed30:       {0, 255, 255, 255},
 	ClassSpeed40:       {128, 0, 255, 255},
+	ClassSpeed50:       {255, 255, 128, 255},
 	ClassLaneMarker:    {0, 0, 255, 255},
 	ClassLaneMarkerAlt: {0, 255, 128, 255},
 	ClassStopLine:      {128, 255, 0, 255},

@@ -94,9 +94,10 @@ func (s Spec) OnSurface(grip float32) Spec {
 	s.GripFront *= grip
 	s.GripRear *= grip
 	s.MaxLateral *= grip
-	// Braking loses half as much as cornering: a locked wheel still slows a
-	// car on snow, it just does it badly.
-	s.BrakeForce *= (1 + grip) / 2
+	// Braking loses a quarter of what cornering does. The roads are gritted,
+	// so a car going straight has most of its grip; it is in a bend, on the
+	// snow the tyres have pushed aside, that it finds out.
+	s.BrakeForce *= (3 + grip) / 4
 	return s
 }
 

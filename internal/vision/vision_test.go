@@ -162,6 +162,7 @@ func TestSpeedClassesCarryTheirLimit(t *testing.T) {
 		{vision.ClassSpeed20, 20},
 		{vision.ClassSpeed30, 30},
 		{vision.ClassSpeed40, 40},
+		{vision.ClassSpeed50, 50},
 	} {
 		v, ok := tc.class.SpeedValue()
 		if !ok {

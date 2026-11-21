@@ -358,6 +358,7 @@ func (g *Game) drawClassLegend(x, y int32) {
 		vision.ClassLightAmber, vision.ClassLightGreen,
 		vision.ClassStopSign, vision.ClassGiveWay, vision.ClassStopLine,
 		vision.ClassSpeed20, vision.ClassSpeed30, vision.ClassSpeed40,
+		vision.ClassSpeed50,
 		vision.ClassLaneMarker, vision.ClassLaneMarkerAlt,
 		vision.ClassLaneSide, vision.ClassLaneOncoming,
 	}

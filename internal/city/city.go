@@ -74,6 +74,14 @@ func (c RoadClass) SpeedLimit() float32 {
 	}
 }
 
+// limitOf returns the speed limit of a class of road in this place.
+func (c *City) limitOf(cls RoadClass) float32 {
+	if cls >= 0 && int(cls) < len(c.params.Limits) && c.params.Limits[cls] > 0 {
+		return c.params.Limits[cls]
+	}
+	return cls.SpeedLimit()
+}
+
 // Name returns a human-readable name for the class.
 func (c RoadClass) Name() string {
 	switch c {
@@ -394,6 +402,16 @@ type Params struct {
 	// after each is a collector and the rest are side streets, so a larger
 	// number is a quieter place.
 	MainEvery int
+	// Balanced grades the grid lines the same way either side of where a
+	// drive begins. Without it the lines on the far side of the origin are
+	// never collectors, which is how the city has always been laid out and
+	// what its gate numbers are measured on; a place that sets it has its
+	// main roads and collectors evenly spread.
+	Balanced bool
+	// Limits are the speed limits of the side streets, the collectors and
+	// the main roads, in metres per second. A zero leaves that class of
+	// road at the usual British urban limit.
+	Limits [3]float32
 	// Coast puts the sea along one side. Nothing is built beyond the grid
 	// line CoastRow, which becomes the seafront, with a beach below it.
 	Coast    bool
@@ -440,10 +458,10 @@ func axisOf(e *worldgen.LatticeEdge) int {
 // classOf grades an edge before the city proper exists, which is what
 // lets the thinning pass protect the main roads.
 func (c *City) classOf(e *worldgen.LatticeEdge) RoadClass {
-	return classFor(c.lat.Nodes[e.A].Col, c.lat.Nodes[e.A].Row, axisOf(e), c.params.MainEvery)
+	return classFor(c.lat.Nodes[e.A].Col, c.lat.Nodes[e.A].Row, axisOf(e), c.params.MainEvery, c.params.Balanced)
 }
 
-func classFor(i, j, axis, every int) RoadClass {
+func classFor(i, j, axis, every int, balanced bool) RoadClass {
 	// Every few grid lines is an arterial, three apart in the city, which
 	// gives a place a clear skeleton of fast roads with quieter streets
 	// between them.
@@ -451,7 +469,12 @@ func classFor(i, j, axis, every int) RoadClass {
 	if axis == 0 {
 		line = j
 	}
-	switch line % max(every, 2) {
+	every = max(every, 2)
+	at := line % every
+	if balanced && at < 0 {
+		at += every
+	}
+	switch at {
 	case 0:
 		return Arterial
 	case 1:
@@ -502,7 +525,7 @@ func (c *City) buildRoadLanes(r *Road) {
 			ab := &Lane{
 				ID: len(c.Lanes), Road: r.ID, Dir: +1, Index: idx,
 				FromNode: r.A, ToNode: r.B,
-				SpeedLimit: r.Class.SpeedLimit(), Class: r.Class,
+				SpeedLimit: c.limitOf(r.Class), Class: r.Class,
 			}
 			shift := r.Dir.Right().Mul(off)
 			ab.A, ab.B = startA.Add(shift), endB.Add(shift)
@@ -514,7 +537,7 @@ func (c *City) buildRoadLanes(r *Road) {
 			ba := &Lane{
 				ID: len(c.Lanes), Road: r.ID, Dir: -1, Index: idx,
 				FromNode: r.B, ToNode: r.A,
-				SpeedLimit: r.Class.SpeedLimit(), Class: r.Class,
+				SpeedLimit: c.limitOf(r.Class), Class: r.Class,
 			}
 			shift = r.Dir.Mul(-1).Right().Mul(off)
 			ba.A, ba.B = endB.Add(shift), startA.Add(shift)
