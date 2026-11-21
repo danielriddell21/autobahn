@@ -207,6 +207,9 @@ type Building struct {
 	Height float32
 	Shade  uint8 // index into the façade palette
 	Floors int
+	// Front points from the building toward the street it faces, which is
+	// the side its shop front is on.
+	Front mathx.Vec
 }
 
 // Block is a city block bounded by roads, measured kerb to kerb.
@@ -344,7 +347,9 @@ type City struct {
 	Blocks    []Block
 	Buildings []Building
 	Props     []Prop
-	Min, Max  mathx.Vec
+	// Parked is the cars left in the bays along the quieter streets.
+	Parked   []Parked
+	Min, Max mathx.Vec
 
 	// lanes indexes lane IDs by position, so Project narrows to a handful of
 	// candidates instead of sweeping every lane in the city.
@@ -737,6 +742,7 @@ func (c *City) placeNodeProps(n *Node) {
 		// so it is not put up twice from either end.
 		if r.A == n.ID {
 			c.placeRoadProps(r, side)
+			c.placeParking(r)
 		}
 	}
 }
@@ -916,7 +922,7 @@ func (c *City) fillBlock(col, row int, lo, hi mathx.Vec, downtown float32) {
 		n++
 		return cellValue(c.Seed, buildingSalt, col, row, n)
 	}
-	add := func(cx, cz, w, d float32) {
+	add := func(cx, cz, w, d float32, front mathx.Vec) {
 		if w < 5 || d < 5 {
 			return
 		}
@@ -925,24 +931,27 @@ func (c *City) fillBlock(col, row int, lo, hi mathx.Vec, downtown float32) {
 			Center: mathx.V(cx, cz), W: w, D: d, Height: h,
 			Shade:  uint8(draw() * 6),
 			Floors: max(1, int(h/3.2)),
+			Front:  front,
 		})
 	}
 
-	for _, zc := range [2]float32{z0 + depth/2, z1 - depth/2} {
+	for i, zc := range [2]float32{z0 + depth/2, z1 - depth/2} {
+		front := mathx.V(0, float32(2*i-1))
 		for x := x0; x < x1-4; {
 			w := min(11+draw()*15, x1-x)
 			if draw() >= alleyShare { // occasional gap: an alley or courtyard
-				add(x+w/2, zc, w-1.2, depth)
+				add(x+w/2, zc, w-1.2, depth, front)
 			}
 			x += w
 		}
 	}
 	// The side strips skip the corners already covered above.
-	for _, xc := range [2]float32{x0 + depth/2, x1 - depth/2} {
+	for i, xc := range [2]float32{x0 + depth/2, x1 - depth/2} {
+		front := mathx.V(float32(2*i-1), 0)
 		for z := z0 + depth; z < z1-depth-4; {
 			d := min(11+draw()*15, z1-depth-z)
 			if draw() >= alleyShare {
-				add(xc, z+d/2, depth, d-1.2)
+				add(xc, z+d/2, depth, d-1.2, front)
 			}
 			z += d
 		}

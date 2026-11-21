@@ -8,12 +8,12 @@ import (
 	"github.com/danielriddell21/autobahn/internal/sim"
 )
 
-// Car proportions, in metres.
-const (
-	rideHeight  float32 = 0.27 // sill above the road
-	wheelRadius float32 = 0.33
-	wheelWidth  float32 = 0.25
-)
+// Car proportions, in metres. How high a car rides and the size of its wheels
+// come from its body.
+const wheelWidth float32 = 0.25
+
+// colCargo is the box on the back of a lorry.
+var colCargo = rl.NewColor(204, 202, 194, 255)
 
 // carLook is everything about how one car is drawn that is not its shape.
 type carLook struct {
@@ -29,6 +29,8 @@ type carLook struct {
 	police bool
 	unit   sim.UnitKind
 	lit    bool
+	// parked is set for a car nobody is in, whose lamps stay off after dark.
+	parked bool
 }
 
 // bootShare is how much of a car's length is boot behind the cabin, by shape.
@@ -40,6 +42,10 @@ func bootShare(k sim.BodyKind) float32 {
 		return 0.02
 	case sim.Taxi:
 		return 0.07
+	case sim.Bus:
+		return 0 // the decks run the whole length
+	case sim.Lorry:
+		return 0.78 // the load; the cab is over the front axle
 	default:
 		return 0.06
 	}
@@ -107,8 +113,9 @@ func drawCar(v *sim.Vehicle, body sim.Body, look carLook) {
 	dark := scaleColor(look.paint, 0.72)
 
 	// The lower body, with a bumper at each end and a sill along the bottom.
-	rl.DrawCube(vec3(0, (rideHeight+waist)/2, 0), length*0.97, waist-rideHeight, width, paint)
-	rl.DrawCube(vec3(0, rideHeight+0.07, 0), length, 0.2, width*1.02, colTrim)
+	ride := body.Ride
+	rl.DrawCube(vec3(0, (ride+waist)/2, 0), length*0.97, waist-ride, width, paint)
+	rl.DrawCube(vec3(0, ride+0.07, 0), length, 0.2, width*1.02, colTrim)
 	rl.DrawCube(vec3(s.HalfLength-0.1, waist-0.2, 0), 0.22, 0.2, width*0.7, colTrim)
 
 	drawCabin(s, body, look, waist, paint, dark)
@@ -119,7 +126,7 @@ func drawCar(v *sim.Vehicle, body sim.Body, look carLook) {
 	if look.player {
 		drawPlayerFittings(s, body, look, waist)
 	}
-	drawWheels(v, look)
+	drawWheels(v, body, look)
 
 	rl.PopMatrix()
 }
@@ -133,12 +140,20 @@ func drawCabin(s sim.Spec, body sim.Body, look carLook, waist float32, paint, da
 	half := s.HalfWidth * 0.9
 	glass := scaleColor(colGlass, 0.62+0.2*(1-look.night))
 
-	if body.Kind == sim.Van {
+	switch body.Kind {
+	case sim.Bus:
+		drawDecks(s, waist, roof, paint, glass)
+		return
+	case sim.Lorry:
+		drawCabAndBox(s, front-cabin, front, waist, roof, paint, glass)
+		return
+	case sim.Van:
 		// A van is a cab and a box: glass only at the front.
 		split := front - cabin*0.3
 		rl.DrawCube(vec3((rear+split)/2, (waist+roof)/2, 0), split-rear, roof-waist, s.HalfWidth*1.96, paint)
 		taperBox(split, front, half, waist, split, front-0.45, half*0.94, roof-0.06, glass, dark)
 		return
+	default:
 	}
 	rake, slope := float32(0.55), float32(0.4)
 	if body.Boxy {
@@ -160,13 +175,40 @@ func drawCabin(s sim.Spec, body sim.Body, look carLook, waist float32, paint, da
 	}
 }
 
+// drawDecks builds a double-decker on top of its lower body: one slab the
+// height of both decks, with a band of glass round each.
+func drawDecks(s sim.Spec, waist, roof float32, paint, glass rl.Color) {
+	length, width := s.HalfLength*2, s.HalfWidth*2
+	rl.DrawCube(vec3(0, (waist+roof)/2, 0), length*0.97, roof-waist, width, paint)
+	deck := (roof - waist) / 2
+	for i := range 2 {
+		y := waist + deck*float32(i) + deck*0.5
+		rl.DrawCube(vec3(0.03, y, 0), length*0.975, deck*0.52, width*1.012, glass)
+	}
+}
+
+// drawCabAndBox builds a lorry: a cab over the front axle, with the load in a
+// box behind it that stands taller than the cab.
+func drawCabAndBox(s sim.Spec, cabRear, front, waist, roof float32, paint, glass rl.Color) {
+	width := s.HalfWidth * 2
+	cabTop := waist + (roof-waist)*0.62
+	rl.DrawCube(vec3((cabRear+front)/2, (waist+cabTop)/2, 0), front-cabRear, cabTop-waist, width*0.98, paint)
+	// The windscreen, and a window in each door.
+	rl.DrawCube(vec3(front-0.02, waist+(cabTop-waist)*0.62, 0), 0.08, (cabTop-waist)*0.46, width*0.86, glass)
+	rl.DrawCube(vec3((cabRear+front)/2+0.2, waist+(cabTop-waist)*0.64, 0),
+		(front-cabRear)*0.5, (cabTop-waist)*0.4, width*0.992, glass)
+	rear := -s.HalfLength
+	gap := float32(0.3)
+	rl.DrawCube(vec3((rear+cabRear-gap)/2, (waist+roof)/2, 0), cabRear-gap-rear, roof-waist, width, colCargo)
+}
+
 func drawLamps(v *sim.Vehicle, look carLook, waist float32) {
 	s := v.Spec
 	// Lamps: white at the front, red at the back, brighter under braking. Once
 	// it is dark they are all lit.
 	head := rl.NewColor(232, 228, 206, 255)
 	tail := rl.NewColor(132, 40, 36, 255)
-	if look.night > 0.3 {
+	if look.night > 0.3 && !look.parked {
 		head = as(rl.NewColor(246, 242, 222, 255), matGlow)
 		tail = as(rl.NewColor(178, 44, 38, 255), matGlow)
 	}
@@ -194,25 +236,25 @@ func drawLamps(v *sim.Vehicle, look carLook, waist float32) {
 	}
 }
 
-func drawWheels(v *sim.Vehicle, look carLook) {
-	s := v.Spec
+func drawWheels(v *sim.Vehicle, body sim.Body, look carLook) {
+	s, r := v.Spec, body.Wheel
 	z := s.HalfWidth - wheelWidth/2 + 0.02
 	if !look.wheels {
 		// Too far off to tell a wheel from a block.
 		for _, x := range [2]float32{s.FrontAxle, -s.RearAxle} {
 			for _, side := range [2]float32{1, -1} {
-				rl.DrawCube(vec3(x, wheelRadius, side*z), wheelRadius*1.8, wheelRadius*2, wheelWidth, colTyre)
+				rl.DrawCube(vec3(x, r, side*z), r*1.8, r*2, wheelWidth, colTyre)
 			}
 		}
 		return
 	}
 	for _, side := range [2]float32{1, -1} {
-		wheel(-s.RearAxle, side*z, wheelRadius, wheelWidth, colTyre, colHub)
+		wheel(-s.RearAxle, side*z, r, wheelWidth, colTyre, colHub)
 		// The front pair turns with the steering.
 		rl.PushMatrix()
 		rl.Translatef(s.FrontAxle, 0, side*z)
 		rl.Rotatef(-v.Steer*rad2deg, 0, 1, 0)
-		wheel(0, 0, wheelRadius, wheelWidth, colTyre, colHub)
+		wheel(0, 0, r, wheelWidth, colTyre, colHub)
 		rl.PopMatrix()
 	}
 }
@@ -228,14 +270,14 @@ func drawPoliceFittings(s sim.Spec, body sim.Body, look carLook, waist float32) 
 			block = colPoliceYellow
 		}
 		for _, side := range [2]float32{1, -1} {
-			rl.DrawCube(vec3(x, rideHeight+(waist-rideHeight)*0.55, side*(s.HalfWidth+0.012)),
-				length*0.92/float32(blocks)*0.98, (waist-rideHeight)*0.5, 0.03, block)
+			rl.DrawCube(vec3(x, body.Ride+(waist-body.Ride)*0.55, side*(s.HalfWidth+0.012)),
+				length*0.92/float32(blocks)*0.98, (waist-body.Ride)*0.5, 0.03, block)
 		}
 	}
 	if look.unit == sim.UnitHeavy {
 		// A bull bar, which is the whole point of sending one.
 		rl.DrawCube(vec3(s.HalfLength+0.12, waist-0.32, 0), 0.14, 0.62, s.HalfWidth*1.7, colTrim)
-		rl.DrawCube(vec3(s.HalfLength+0.06, rideHeight+0.1, 0), 0.26, 0.2, s.HalfWidth*1.9, colTrim)
+		rl.DrawCube(vec3(s.HalfLength+0.06, body.Ride+0.1, 0), 0.26, 0.2, s.HalfWidth*1.9, colTrim)
 	}
 
 	// The light bar. Both halves sit dark until the unit is on a call, then
@@ -275,9 +317,9 @@ func drawPlayerFittings(s sim.Spec, body sim.Body, look carLook, waist float32) 
 		flick = 1.05
 	}
 	for _, z := range [2]float32{0.34, -0.34} {
-		rl.DrawCube(vec3(-s.HalfLength-0.42*flick, rideHeight+0.06, z), 0.84*flick, 0.13, 0.13,
+		rl.DrawCube(vec3(-s.HalfLength-0.42*flick, body.Ride+0.06, z), 0.84*flick, 0.13, 0.13,
 			as(rl.NewColor(110, 176, 250, 255), matGlow))
-		rl.DrawCube(vec3(-s.HalfLength-0.2*flick, rideHeight+0.06, z), 0.4*flick, 0.17, 0.17,
+		rl.DrawCube(vec3(-s.HalfLength-0.2*flick, body.Ride+0.06, z), 0.4*flick, 0.17, 0.17,
 			as(rl.NewColor(226, 240, 250, 255), matGlow))
 	}
 }

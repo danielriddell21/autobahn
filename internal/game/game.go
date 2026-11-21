@@ -144,7 +144,15 @@ type Game struct {
 	trees       []tree
 	treedBlocks int
 	treedRoads  int
-	fx          effects
+	// furniture is what stands on the pavements, bays the parking marked on
+	// them and parked the cars left there; the counts say how much of the
+	// city each covers.
+	furniture      []furnishing
+	furnishedRoads int
+	bays           []city.Bay
+	bayedRoads     int
+	parked         []parkedCar
+	fx             effects
 	// fov is the chase camera's lens, which opens up with speed.
 	fov float32
 	// banner is the word across the screen when a pursuit ends, bannerFor how

@@ -132,14 +132,17 @@ func TestSkidMarksAreBounded(t *testing.T) {
 }
 
 func TestEveryBodyHasRoomForItsCabin(t *testing.T) {
-	for k := sim.Hatchback; k <= sim.HotHatch; k++ {
+	for _, k := range sim.Bodies() {
 		b := sim.BodyOf(k)
 		if boot := bootShare(k); boot < 0 || boot+b.RoofFrac > 1 {
 			t.Errorf("a %s has %.2f of boot and %.2f of cabin, which is more car than there is",
 				k.Name(), boot, b.RoofFrac)
 		}
-		if b.Spec.Height-b.RoofRise <= rideHeight {
+		if b.Spec.Height-b.RoofRise <= b.Ride {
 			t.Errorf("a %s has a waist below its own sill", k.Name())
+		}
+		if b.Wheel <= 0 || b.Ride <= 0 || b.Ride > b.Wheel*2 {
+			t.Errorf("a %s rides %.2f m up on %.2f m wheels", k.Name(), b.Ride, b.Wheel)
 		}
 	}
 }

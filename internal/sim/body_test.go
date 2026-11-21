@@ -1,8 +1,11 @@
 package sim_test
 
 import (
+	"math/rand/v2"
 	"testing"
 
+	"github.com/danielriddell21/autobahn/internal/city"
+	"github.com/danielriddell21/autobahn/internal/mathx"
 	"github.com/danielriddell21/autobahn/internal/sim"
 )
 
@@ -59,5 +62,83 @@ func TestWorldTakesThePlayersCar(t *testing.T) {
 	}
 	if sim.NewWorld(sim.Config{Seed: 7}).PlayerBody.Kind != sim.HotHatch {
 		t.Error("with no car asked for, the player drives the hot hatch")
+	}
+}
+
+func TestEveryShapeHasASpecThatCanDrive(t *testing.T) {
+	seen := map[string]bool{}
+	for _, k := range sim.Bodies() {
+		b := sim.BodyOf(k)
+		s := b.Spec
+		if b.Kind != k {
+			t.Errorf("BodyOf(%s) describes a %s", k.Name(), b.Kind.Name())
+		}
+		if k.Name() == "" || seen[k.Name()] {
+			t.Errorf("shape %d has no name of its own: %q", k, k.Name())
+		}
+		seen[k.Name()] = true
+		if s.Mass <= 0 || s.Inertia <= 0 || s.EngineForce <= 0 || s.BrakeForce <= 0 || s.MaxSpeed <= 0 {
+			t.Errorf("a %s has a broken spec: %+v", k.Name(), s)
+		}
+		// The axles have to be under the body, and it has to stop harder than
+		// it goes or traffic would run into whatever it follows.
+		if s.FrontAxle >= s.HalfLength || s.RearAxle >= s.HalfLength {
+			t.Errorf("a %s has an axle beyond its bumper", k.Name())
+		}
+		if s.BrakeForce <= s.EngineForce {
+			t.Errorf("a %s goes harder than it stops", k.Name())
+		}
+		// Enough lock to make the tightest turn in town, which is the one
+		// round a kerb.
+		if radius := s.Wheelbase() / mathx.Tan(s.MaxSteer); radius > 8.5 {
+			t.Errorf("a %s turns in %.1f m, too wide for a street corner", k.Name(), radius)
+		}
+	}
+}
+
+func TestTheHeavyShapesAreHeavyAndSlow(t *testing.T) {
+	car := sim.TrafficSpec()
+	for _, k := range []sim.BodyKind{sim.Bus, sim.Lorry} {
+		s := sim.BodyOf(k).Spec
+		if s.Mass < car.Mass*3 || s.MaxSpeed >= car.MaxSpeed || s.HalfLength < car.HalfLength*1.5 {
+			t.Errorf("a %s should be far heavier, slower and longer than a car: %+v", k.Name(), s)
+		}
+		if s.EngineForce/s.Mass >= car.EngineForce/car.Mass {
+			t.Errorf("a %s pulls away as hard as a car", k.Name())
+		}
+		// It keeps a car's grip for its weight, so it is slow rather than loose.
+		if g, want := s.GripRear/s.Mass, car.GripRear/car.Mass; g < want*0.99 || g > want*1.01 {
+			t.Errorf("a %s grips at %.1f per kg, want a car's %.1f", k.Name(), g, want)
+		}
+		if sim.IsPlayerBody(k) {
+			t.Errorf("the garage offers a %s", k.Name())
+		}
+	}
+}
+
+func TestEveryMapsTrafficIsAMixOfAHundred(t *testing.T) {
+	for _, m := range city.Maps() {
+		rng := rand.New(rand.NewPCG(1, uint64(m)))
+		seen := map[sim.BodyKind]int{}
+		for range 4000 {
+			seen[sim.RandomBody(rng, m).Kind]++
+		}
+		if len(seen) < 4 {
+			t.Errorf("%s traffic is only %d shapes", m.Name(), len(seen))
+		}
+		if seen[sim.Hatchback] == 0 {
+			t.Errorf("%s has no hatchbacks, which is not a street", m.Name())
+		}
+	}
+	// The city has its buses and lorries, but they are the exception.
+	rng := rand.New(rand.NewPCG(3, 3))
+	big := 0
+	for range 4000 {
+		if k := sim.RandomBody(rng, city.MapCity).Kind; k == sim.Bus || k == sim.Lorry {
+			big++
+		}
+	}
+	if big == 0 || big > 4000/8 {
+		t.Errorf("%d of 4000 city vehicles are buses or lorries", big)
 	}
 }

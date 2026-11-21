@@ -130,6 +130,8 @@ func (g *Game) drawWorld(cam rl.Camera3D, drawPlayer bool) {
 	g.drawBuildings(eye)
 	g.drawTrees(eye)
 	g.drawProps(eye)
+	g.drawFurniture(eye)
+	g.drawParking(eye)
 	g.drawTraffic(eye, drawPlayer)
 	g.drawLightPools(eye, drawPlayer)
 	g.drawSmoke()
@@ -208,6 +210,7 @@ func (g *Game) drawBlocks(eye mathx.Vec) {
 		}
 		groundWall(centre, kerb, -0.02, city.KerbHeight, colKerb)
 		groundFan(centre, kerb, city.KerbHeight, surface)
+		drawPark(b)
 	}
 }
 
@@ -347,20 +350,7 @@ func (g *Game) drawBuildings(eye mathx.Vec) {
 		if b.Center.DistTo(eye) > g.cullRange() {
 			continue
 		}
-		shade := buildingShades[int(b.Shade)%len(buildingShades)]
-		// The walls are marked as a façade, which is what tells the shader to
-		// put windows in them.
-		rl.DrawCube(vec3(b.Center.X, b.Height/2, b.Center.Z), b.W, b.Height, b.D, as(shade, matFacade))
-		// A darker parapet caps the roof and reads as a silhouette detail.
-		rl.DrawCube(vec3(b.Center.X, b.Height+0.35, b.Center.Z),
-			b.W*0.97, 0.7, b.D*0.97, scaleColor(shade, 0.74))
-		// Tall buildings get a setback tower so the skyline is not all boxes.
-		if b.Height > 34 {
-			rl.DrawCube(vec3(b.Center.X, b.Height+4.5, b.Center.Z),
-				b.W*0.55, 8, b.D*0.55, as(scaleColor(shade, 0.88), matFacade))
-		}
-		// A fascia over the shop fronts, which is where the signs would hang.
-		rl.DrawCube(vec3(b.Center.X, 3.5, b.Center.Z), b.W*1.012, 0.5, b.D*1.012, scaleColor(shade, 0.55))
+		drawBuilding(b, g.light.night)
 	}
 }
 
@@ -507,39 +497,54 @@ const (
 func (g *Game) plantTrees() {
 	c := g.world.City
 	for ; g.treedBlocks < len(c.Blocks); g.treedBlocks++ {
-		b := c.Blocks[g.treedBlocks]
-		if !b.Park {
-			continue
-		}
-		size := b.Max.Sub(b.Min)
-		n := int(size.X * size.Z / parkPerTree)
-		for i := range n {
-			h := scatter(b.Min.X, b.Min.Z, i)
-			at := mathx.V(b.Min.X+6+h[0]*(size.X-12), b.Min.Z+6+h[1]*(size.Z-12))
-			g.trees = append(g.trees, tree{
-				at: at, height: 4.5 + h[2]*4, spread: 1.6 + h[2]*1.5, shade: i,
-			})
-		}
+		g.plantPark(c.Blocks[g.treedBlocks])
 	}
 	for ; g.treedRoads < len(c.Roads); g.treedRoads++ {
-		r := c.Roads[g.treedRoads]
-		if r.Ring || r.Class == city.Arterial {
-			continue // the main roads are lined with lamps instead
+		g.plantStreet(c, c.Roads[g.treedRoads])
+	}
+}
+
+// plantPark scatters trees over a park, keeping them off its paths.
+func (g *Game) plantPark(b city.Block) {
+	if !b.Park {
+		return
+	}
+	size := b.Max.Sub(b.Min)
+	n := int(size.X * size.Z / parkPerTree)
+	for i := range n {
+		h := scatter(b.Min.X, b.Min.Z, i)
+		at := mathx.V(b.Min.X+6+h[0]*(size.X-12), b.Min.Z+6+h[1]*(size.Z-12))
+		if onParkPath(b, at) {
+			continue
 		}
-		from := c.Nodes[r.A].Radius + 9
-		to := r.Length - c.Nodes[r.B].Radius - 9
-		for d, i := from, 0; d < to; d, i = d+treeSpacing, i+1 {
-			for _, s := range [2]float32{-1, 1} {
-				h := scatter(float32(r.ID), d, int(s)+2)
-				if h[0] < 0.25 {
-					continue // gaps, so it is not a row of soldiers
-				}
-				at := c.Nodes[r.A].Pos.Add(r.Dir.Mul(d + h[1]*4)).
-					Add(r.Dir.Right().Mul(s * (r.HalfWidth + treeSetback)))
-				g.trees = append(g.trees, tree{
-					at: at, height: 3.8 + h[2]*2.4, spread: 1.2 + h[2]*0.7, shade: i + int(s),
-				})
+		g.trees = append(g.trees, tree{
+			at: at, height: 4.5 + h[2]*4, spread: 1.6 + h[2]*1.5, shade: i,
+		})
+	}
+}
+
+// plantStreet lines a side street with trees, leaving the parking bays clear.
+func (g *Game) plantStreet(c *city.City, r *city.Road) {
+	if r.Ring || r.Class == city.Arterial {
+		return // the main roads are lined with lamps instead
+	}
+	from := c.Nodes[r.A].Radius + 9
+	to := r.Length - c.Nodes[r.B].Radius - 9
+	bays := c.Bays(r)
+	for d, i := from, 0; d < to; d, i = d+treeSpacing, i+1 {
+		for _, s := range [2]float32{-1, 1} {
+			h := scatter(float32(r.ID), d, int(s)+2)
+			if h[0] < 0.25 {
+				continue // gaps, so it is not a row of soldiers
 			}
+			if inBay(bays, d+h[1]*4, s) {
+				continue // nobody plants a tree in a parking space
+			}
+			at := c.Nodes[r.A].Pos.Add(r.Dir.Mul(d + h[1]*4)).
+				Add(r.Dir.Right().Mul(s * (r.HalfWidth + treeSetback)))
+			g.trees = append(g.trees, tree{
+				at: at, height: 3.8 + h[2]*2.4, spread: 1.2 + h[2]*0.7, shade: i + int(s),
+			})
 		}
 	}
 }

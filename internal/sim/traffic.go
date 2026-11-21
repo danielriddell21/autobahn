@@ -190,7 +190,7 @@ func (a *Agent) SpeedLimit() float32 {
 
 // NewAgent spawns a traffic car at the given distance along a lane.
 func NewAgent(id int, c *city.City, lane *city.Lane, s float32, rng *rand.Rand) *Agent {
-	body := RandomBody(rng)
+	body := RandomBody(rng, c.Map())
 	paint := rng.IntN(8)
 	if body.Livery >= 0 {
 		paint = body.Livery

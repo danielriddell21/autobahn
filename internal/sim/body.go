@@ -3,6 +3,9 @@ package sim
 import (
 	"math/rand/v2"
 	"slices"
+
+	"github.com/danielriddell21/autobahn/internal/city"
+	"github.com/danielriddell21/autobahn/internal/mathx"
 )
 
 // BodyKind is the shape of a vehicle. It changes how a car looks, how big it
@@ -18,6 +21,10 @@ const (
 	Van
 	Taxi
 	HotHatch
+	// Bus is a double-decker, and Lorry a rigid box lorry: long, tall, slow
+	// to get going and slower to stop. Only traffic drives them.
+	Bus
+	Lorry
 	numBodies
 )
 
@@ -34,6 +41,10 @@ func (b BodyKind) Name() string {
 		return "taxi"
 	case HotHatch:
 		return "hot hatch"
+	case Bus:
+		return "bus"
+	case Lorry:
+		return "lorry"
 	default:
 		return "hatchback"
 	}
@@ -54,12 +65,33 @@ type Body struct {
 	// Livery picks a fixed paint scheme instead of a random one, for the shapes
 	// that have one.
 	Livery int
+	// Ride is how far the sill stands above the road, and Wheel the radius of
+	// the wheels under it.
+	Ride, Wheel float32
+}
+
+// The stance of an ordinary car, in metres.
+const (
+	carRide  float32 = 0.27
+	carWheel float32 = 0.33
+)
+
+// Bodies returns every shape there is, the ones only traffic drives included.
+func Bodies() []BodyKind {
+	out := make([]BodyKind, 0, numBodies)
+	for k := range numBodies {
+		out = append(out, k)
+	}
+	return out
 }
 
 // BodyOf returns the description of a shape.
 func BodyOf(k BodyKind) Body {
 	base := TrafficSpec()
-	b := Body{Kind: k, Spec: base, RoofFrac: 0.52, RoofRise: 0.44, Livery: -1}
+	b := Body{
+		Kind: k, Spec: base, RoofFrac: 0.52, RoofRise: 0.44, Livery: -1,
+		Ride: carRide, Wheel: carWheel,
+	}
 
 	switch k {
 	case Saloon:
@@ -88,6 +120,21 @@ func BodyOf(k BodyKind) Body {
 		b.Spec.MaxSpeed = 46
 		b.Spec.GripFront, b.Spec.GripRear = 94000, 99000
 		b.RoofFrac, b.RoofRise = 0.48, 0.38
+	case Bus:
+		b.Spec.HalfLength, b.Spec.HalfWidth, b.Spec.Height = 5.2, 1.25, 4.3
+		b.Spec.FrontAxle, b.Spec.RearAxle = 2.9, 2.6
+		b.Spec.haul(5600, 15000)
+		b.Spec.MaxSpeed = 22
+		b.RoofFrac, b.RoofRise, b.Boxy = 1, 3.2, true
+		b.Ride, b.Wheel = 0.36, 0.5
+		b.Livery = 0 // the red bus
+	case Lorry:
+		b.Spec.HalfLength, b.Spec.HalfWidth, b.Spec.Height = 4.3, 1.25, 3.6
+		b.Spec.FrontAxle, b.Spec.RearAxle = 2.6, 2.2
+		b.Spec.haul(6400, 16000)
+		b.Spec.MaxSpeed = 25
+		b.RoofFrac, b.RoofRise, b.Boxy = 0.22, 2.45, true
+		b.Ride, b.Wheel = 0.5, 0.5
 	default:
 		b.Spec.HalfLength, b.Spec.HalfWidth, b.Spec.Height = 2.18, 0.92, 1.46
 		b.Spec.Mass = 1320
@@ -95,24 +142,58 @@ func BodyOf(k BodyKind) Body {
 	return b
 }
 
-// bodyWeights is the mix on the road, out of 100.
-var bodyWeights = [numBodies]int{
-	Hatchback: 34,
-	Saloon:    24,
-	Estate:    14,
-	Van:       14,
-	Taxi:      8,
-	HotHatch:  6,
+// haul turns a car's profile into a heavy vehicle's. Everything that holds a
+// car on the road is scaled with the weight, so it corners and stops like a
+// heavier car rather than like one with bald tyres; the engine is given
+// outright, and is what makes it slow away from the lights.
+func (s *Spec) haul(mass, engine float32) {
+	weight := mass / s.Mass
+	// A longer body takes more turning as well as a heavier one.
+	reach := (s.HalfLength * s.HalfLength) / (2.25 * 2.25)
+	s.Mass = mass
+	s.Inertia *= weight * reach
+	s.BrakeForce *= weight * 0.8
+	s.GripFront *= weight
+	s.GripRear *= weight
+	s.MaxLateral *= weight
+	s.EngineForce = engine
 }
 
-// RandomBody draws a shape from the mix that fills an ordinary street.
-func RandomBody(rng *rand.Rand) Body {
+// mix is the share of each shape among a map's traffic, out of 100.
+type mix [numBodies]int
+
+// mixes is what is on the road in each place. A map with no mix of its own
+// has the city's.
+var mixes = map[city.Map]mix{
+	city.MapCity: {
+		Hatchback: 31,
+		Saloon:    22,
+		Estate:    13,
+		Van:       14,
+		Taxi:      8,
+		HotHatch:  6,
+		Bus:       3,
+		Lorry:     3,
+	},
+}
+
+// mixFor returns the traffic mix of a map.
+func mixFor(m city.Map) mix {
+	if w, ok := mixes[m]; ok {
+		return w
+	}
+	return mixes[city.MapCity]
+}
+
+// RandomBody draws a shape from the mix that fills a map's streets.
+func RandomBody(rng *rand.Rand, m city.Map) Body {
+	weights := mixFor(m)
 	total := 0
-	for _, w := range bodyWeights {
+	for _, w := range weights {
 		total += w
 	}
 	pick := rng.IntN(total)
-	for k, w := range bodyWeights {
+	for k, w := range weights {
 		if pick -= w; pick < 0 {
 			return BodyOf(BodyKind(k))
 		}
@@ -165,4 +246,19 @@ func PlayerBodyOf(k BodyKind) Body {
 	b.Spec.GripRear *= src.GripRear / ref.GripRear
 	b.Spec.MaxLateral *= weight
 	return b
+}
+
+// parkedShapes are the cars people leave at the kerb.
+var parkedShapes = []BodyKind{Hatchback, Hatchback, Saloon, Saloon, Estate, HotHatch, Van}
+
+// ParkedBody returns the car standing in a parking space. The city says only
+// that a car is there and gives a draw to choose it with.
+func ParkedBody(p city.Parked) Body {
+	return BodyOf(parkedShapes[int(p.Shape)%len(parkedShapes)])
+}
+
+// ParkedBox is the ground a parked car covers.
+func ParkedBox(p city.Parked) mathx.OBB {
+	s := ParkedBody(p).Spec
+	return mathx.OBB{Center: p.Pos, HalfL: s.HalfLength, HalfW: s.HalfWidth, Heading: p.Heading}
 }

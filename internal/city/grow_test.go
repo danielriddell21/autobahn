@@ -39,6 +39,14 @@ func fingerprint(c *city.City) []string {
 	for _, p := range c.Props {
 		out = append(out, fmt.Sprintf("prop %d at %.2f,%.2f", p.Kind, p.Pos.X, p.Pos.Z))
 	}
+	for _, p := range c.Parked {
+		out = append(out, fmt.Sprintf("parked %.2f,%.2f h=%.2f shape=%d paint=%d",
+			p.Pos.X, p.Pos.Z, p.Heading, p.Shape, p.Paint))
+	}
+	for _, b := range c.Buildings {
+		out = append(out, fmt.Sprintf("front %.2f,%.2f faces %.0f,%.0f",
+			b.Center.X, b.Center.Z, b.Front.X, b.Front.Z))
+	}
 	sort.Strings(out)
 	return out
 }

@@ -59,3 +59,6 @@ func ParamsFor(m Map, seed uint64) Params {
 	}
 	return p
 }
+
+// Map returns which place this city is.
+func (c *City) Map() Map { return c.params.Map }

@@ -77,7 +77,11 @@ type World struct {
 	cellSize  float32
 	// indexed is how many buildings have been filed, so growth only indexes
 	// what has just appeared.
-	indexed    int
+	indexed int
+	// parked files the parked cars the same way, and parkedSeen is how many
+	// of them have been.
+	parked     map[[2]int][]int
+	parkedSeen int
 	blocked    bool
 	sinceBlock float32
 	// units is scratch space for the police units that could answer a call,
@@ -107,6 +111,7 @@ func NewWorld(cfg Config) *World {
 		City: c, Signals: NewSignals(c, cfg.Seed),
 		Judge: NewJudge(c),
 		rng:   traffic, buildings: map[[2]int][]int{}, cellSize: 48,
+		parked: map[[2]int][]int{},
 	}
 	w.indexBuildings()
 
@@ -318,6 +323,14 @@ func (w *World) indexBuildings() {
 		}
 	}
 	w.indexed = len(w.City.Buildings)
+
+	// A parked car is small enough to file under the one cell its middle is
+	// in; a collision looks in the cells either side as well.
+	for i := w.parkedSeen; i < len(w.City.Parked); i++ {
+		key := w.cellOf(w.City.Parked[i].Pos)
+		w.parked[key] = append(w.parked[key], i)
+	}
+	w.parkedSeen = len(w.City.Parked)
 }
 
 func (w *World) tooClose(p mathx.Vec, r float32) bool {
@@ -726,27 +739,36 @@ func footprint(b city.Building) mathx.OBB {
 
 func (w *World) collideBuildings(v *Vehicle, report bool) {
 	key := [2]int{int(v.Pos.X / w.cellSize), int(v.Pos.Z / w.cellSize)}
-	box := v.Box()
 	for dx := -1; dx <= 1; dx++ {
 		for dz := -1; dz <= 1; dz++ {
 			for _, bi := range w.buildings[[2]int{key[0] + dx, key[1] + dz}] {
-				b := w.City.Buildings[bi]
-				axis, depth, hit := box.Penetration(footprint(b))
-				if !hit {
-					continue
-				}
-				// A building is immovable, so the car absorbs all of it.
-				v.Pos = v.Pos.Sub(axis.Mul(depth))
-				closing := v.Vel.Dot(axis)
-				if closing > 0 {
-					v.Vel = v.Vel.Sub(axis.Mul(closing * (1 + restitution)))
-					if report {
-						w.Judge.ReportCollision(v, "hit a building", closing, w.Time)
-						w.batter(closing)
-					}
-				}
-				box = v.Box()
+				w.collideSolid(v, footprint(w.City.Buildings[bi]), "hit a building", report)
 			}
+		}
+	}
+	for dx := -1; dx <= 1; dx++ {
+		for dz := -1; dz <= 1; dz++ {
+			for _, pi := range w.parked[[2]int{key[0] + dx, key[1] + dz}] {
+				w.collideSolid(v, ParkedBox(w.City.Parked[pi]), "hit a parked car", report)
+			}
+		}
+	}
+}
+
+// collideSolid pushes a vehicle out of something that does not move.
+func (w *World) collideSolid(v *Vehicle, solid mathx.OBB, what string, report bool) {
+	axis, depth, hit := v.Box().Penetration(solid)
+	if !hit {
+		return
+	}
+	// It is immovable, so the car absorbs all of it.
+	v.Pos = v.Pos.Sub(axis.Mul(depth))
+	closing := v.Vel.Dot(axis)
+	if closing > 0 {
+		v.Vel = v.Vel.Sub(axis.Mul(closing * (1 + restitution)))
+		if report {
+			w.Judge.ReportCollision(v, what, closing, w.Time)
+			w.batter(closing)
 		}
 	}
 }

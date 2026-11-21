@@ -137,16 +137,18 @@ func (r *showroom) unload() {
 
 // render draws the car in the given shape and paint into the preview,
 // turning it a little further round.
-func (r *showroom) render(k sim.BodyKind, p carPaint, dt float32) rl.Texture2D {
+func (r *showroom) render(body sim.Body, p carPaint, dt float32) rl.Texture2D {
 	r.load()
 	r.angle = float32(math.Mod(float64(r.angle+previewSpin*dt), 2*math.Pi))
-	body := sim.PlayerBodyOf(k)
 	v := sim.NewVehicle(body.Spec, mathx.V(0, 0), r.angle)
 
 	light := lightingFor(TimeDay)
-	eye := vec3(5.8, 2.3, 3.8)
+	// The camera stands back far enough to take in whatever is on the
+	// turntable, which for most cars is where it has always stood.
+	reach := max(1, body.Spec.HalfLength/2.6, body.Spec.Height/1.9)
+	eye := vec3(5.8*reach, 2.3*reach, 3.8*reach)
 	cam := rl.Camera3D{
-		Position: eye, Target: vec3(0, 0.45, 0), Up: vec3(0, 1, 0),
+		Position: eye, Target: vec3(0, 0.45*reach, 0), Up: vec3(0, 1, 0),
 		Fovy: 33, Projection: rl.CameraPerspective,
 	}
 
@@ -160,7 +162,7 @@ func (r *showroom) render(k sim.BodyKind, p carPaint, dt float32) rl.Texture2D {
 		rl.BeginShaderMode(r.scene.shader)
 	}
 	// The turntable, then the car on it.
-	turntable(3.3, 48, rl.NewColor(64, 70, 80, 255))
+	turntable(3.3*reach, 48, rl.NewColor(64, 70, 80, 255))
 	drawCar(v, body, carLook{paint: p.col, wheels: true, player: true})
 	if r.scene.ok {
 		rl.EndShaderMode()
@@ -256,7 +258,7 @@ func ShowroomShot(k sim.BodyKind, paintIdx int, angle float32) image.Image {
 	var r showroom
 	defer r.unload()
 	r.angle = angle
-	tex := r.render(k, paintOf(paintIdx), 0)
+	tex := r.render(sim.PlayerBodyOf(k), paintOf(paintIdx), 0)
 	shot := rl.LoadImageFromTexture(tex)
 	if shot == nil {
 		return nil

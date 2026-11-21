@@ -6,6 +6,8 @@ import (
 	"github.com/danielriddell21/crucible/keymap"
 	"github.com/danielriddell21/crucible/menu"
 	"github.com/danielriddell21/crucible/netplay"
+
+	"github.com/danielriddell21/autobahn/internal/sim"
 )
 
 // Menu layout, in pixels.
@@ -89,7 +91,7 @@ func (s *Shell) drawMenuAt(m *menu.Menu, titleY, top int32) {
 // that change it.
 func (s *Shell) drawGarage(dt float32) {
 	w, h := int32(s.opts.Width), int32(s.opts.Height)
-	tex := s.showroom.render(s.settings.Car, paintOf(s.settings.Paint), dt)
+	tex := s.showroom.render(sim.PlayerBodyOf(s.settings.Car), paintOf(s.settings.Paint), dt)
 	// The title at the top, the car below it, and the rows under the car,
 	// the whole stack centred in the window.
 	stack := menuTitleSize + 40 + previewH + 44 + int32(len(s.menu.Items))*menuRowHeight
