@@ -1,6 +1,9 @@
 package sim
 
-import "math/rand/v2"
+import (
+	"math/rand/v2"
+	"slices"
+)
 
 // BodyKind is the shape of a vehicle. It changes how a car looks, how big it
 // is, and how it drives: a van is slow and tall and takes an age to stop, a
@@ -117,11 +120,49 @@ func RandomBody(rng *rand.Rand) Body {
 	return BodyOf(Hatchback)
 }
 
-// PlayerBody returns the car the player drives: quick, small and eager, since
-// it is the one being chased.
-func PlayerBody() Body {
-	b := BodyOf(HotHatch)
+// PlayerBody returns the car the player drives unless they choose another:
+// quick, small and eager, since it is the one being chased.
+func PlayerBody() Body { return PlayerBodyOf(HotHatch) }
+
+// playerBodies are the shapes the garage offers, in the order it lists them.
+var playerBodies = []BodyKind{HotHatch, Hatchback, Saloon, Estate, Taxi, Van}
+
+// PlayerBodies returns the shapes the player may choose from.
+func PlayerBodies() []BodyKind { return slices.Clone(playerBodies) }
+
+// IsPlayerBody reports whether the player may drive a shape.
+func IsPlayerBody(k BodyKind) bool { return slices.Contains(playerBodies, k) }
+
+// PlayerBodyOf returns the player's car in the given shape.
+//
+// It is the player's car first and the shape second. The player's car is a
+// good deal livelier than traffic, and every shape keeps that, but each one
+// gives and takes against the hot hatch the way it does on the road: a van is
+// heavier, slower and less sure in a corner. The axles and the steering are
+// left alone, because the autopilot is calibrated to them, and the brakes keep
+// pace with the weight, so the stopping distances it plans around still hold.
+func PlayerBodyOf(k BodyKind) Body {
+	if !IsPlayerBody(k) {
+		k = HotHatch
+	}
+	ref, shape := BodyOf(HotHatch).Spec, BodyOf(k)
+	b := shape
+	b.Livery = -1 // the player picks the paint
 	b.Spec = CarSpec()
 	b.Spec.HalfLength, b.Spec.HalfWidth, b.Spec.Height = 2.18, 0.94, 1.4
+	if k == HotHatch {
+		return b
+	}
+	src := shape.Spec
+	weight := src.Mass / ref.Mass
+	b.Spec.HalfLength, b.Spec.HalfWidth, b.Spec.Height = src.HalfLength, src.HalfWidth, src.Height
+	b.Spec.Mass *= weight
+	b.Spec.Inertia *= weight
+	b.Spec.BrakeForce *= weight
+	b.Spec.EngineForce *= src.EngineForce / ref.EngineForce
+	b.Spec.MaxSpeed *= src.MaxSpeed / ref.MaxSpeed
+	b.Spec.GripFront *= src.GripFront / ref.GripFront
+	b.Spec.GripRear *= src.GripRear / ref.GripRear
+	b.Spec.MaxLateral *= weight
 	return b
 }

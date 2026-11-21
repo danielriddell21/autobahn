@@ -6,6 +6,7 @@ import (
 
 	"github.com/danielriddell21/autobahn/internal/autopilot"
 	"github.com/danielriddell21/autobahn/internal/game"
+	"github.com/danielriddell21/autobahn/internal/sim"
 )
 
 func TestParseVersionAnswersWithoutAskingForAGame(t *testing.T) {
@@ -130,5 +131,18 @@ func TestParseReadsTheAutopilotMode(t *testing.T) {
 	}
 	if opts.Mode != autopilot.ModeGetaway || !opts.Given["mode"] {
 		t.Errorf("-mode getaway gave %v (given %v)", opts.Mode, opts.Given["mode"])
+	}
+}
+
+func TestParseCarAndPaint(t *testing.T) {
+	opts, _, err := parse("autobahn", []string{"-car", "estate", "-paint", "teal"}, &strings.Builder{})
+	if err != nil {
+		t.Fatalf("parse() error = %v", err)
+	}
+	if opts.Car != sim.Estate || !opts.Given["car"] || !opts.Given["paint"] {
+		t.Errorf("Car = %v, Given = %v", opts.Car, opts.Given)
+	}
+	if _, _, err := parse("autobahn", []string{"-car", "tank"}, &strings.Builder{}); err == nil {
+		t.Error("an unknown car should be refused")
 	}
 }

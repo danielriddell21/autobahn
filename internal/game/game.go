@@ -82,7 +82,11 @@ type Options struct {
 	// Mode is how the autopilot drives.
 	Mode autopilot.Mode
 	// Time is the light the city is seen in.
-	Time       TimeOfDay
+	Time TimeOfDay
+	// Car is the shape of the player's car, and Paint the index of its colour
+	// among the garage's paints.
+	Car        sim.BodyKind
+	Paint      int
 	Frames     int // when > 0, run this many frames then exit
 	Screenshot string
 	Stats      bool // print a session summary on exit
@@ -109,6 +113,7 @@ func DefaultOptions() Options {
 	return Options{
 		Seed: 7, Traffic: 70, Police: 7, Width: 1280, Height: 720,
 		CamWidth: 420, CamHeight: 236, ShowPanel: true, PerceptionH: 20,
+		Car: sim.HotHatch,
 		// A 1280x720 scene needs downscaling to make a sensible GIF, and half
 		// a minute at sixty frames a second is long enough for any clip.
 		Rec: record.Options{FPS: 30, Scale: 3, Frames: 1800},
@@ -255,6 +260,7 @@ func New(opts Options) *Game {
 		opts: opts,
 		world: sim.NewWorld(sim.Config{
 			Seed: opts.Seed, Traffic: opts.Traffic, Police: opts.Police,
+			PlayerBody: sim.PlayerBodyOf(opts.Car),
 		}),
 		// In a chase against the machine the runner is always the autopilot;
 		// that is what makes it a chase against the machine.

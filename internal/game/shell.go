@@ -30,6 +30,9 @@ const (
 	screenLobby
 	// screenJoin takes the address to connect to.
 	screenJoin
+	// screenGarage chooses the player's car, from the title screen or the
+	// pause menu.
+	screenGarage
 )
 
 // Shell is the menu layer around a session: the title screen a run opens on,
@@ -48,6 +51,8 @@ type Shell struct {
 	prev   screen // where the settings screen returns to
 	menu   *menu.Menu
 	game   *Game
+	// showroom is the garage's turntable.
+	showroom showroom
 
 	joinAddr string // the address being typed on screenJoin
 	notice   string // the last thing that went wrong, shown under the title
@@ -72,6 +77,7 @@ func (s *Shell) Close() {
 	if s.game != nil {
 		s.game.Close()
 	}
+	s.showroom.unload()
 	s.net.Leave()
 }
 
@@ -151,6 +157,7 @@ func (s *Shell) showTitle() {
 			{Label: text("Autopilot"), Action: func() { s.startGame(true) }},
 			{Label: text("Host a chase"), Action: s.hostChase},
 			{Label: text("Join a chase"), Action: s.showJoin},
+			{Label: text("Garage"), Action: func() { s.showGarage(screenTitle) }},
 			{Label: text("Settings"), Action: func() { s.showSettings(screenTitle) }},
 			{Label: text("Quit"), Action: func() { s.quit = true }},
 		},
@@ -171,6 +178,7 @@ func (s *Shell) showPause() {
 		Title: "PAUSED",
 		Items: []menu.Item{
 			{Label: text("Resume"), Action: s.resume},
+			{Label: text("Garage"), Action: func() { s.showGarage(screenPaused) }},
 			{Label: text("Settings"), Action: func() { s.showSettings(screenPaused) }},
 			{Label: text("Restart"), Action: func() { s.startGame(s.game.Autopilot()) }},
 			{Label: text("Abandon the drive"), Action: s.endGame},
@@ -232,6 +240,39 @@ func (s *Shell) showSettings(from screen) {
 			},
 			{Label: text("Back"), Action: s.leaveSettings},
 		},
+	}
+}
+
+// showGarage opens the garage, where the player's car is chosen. Changes take
+// effect at once on a game that is running.
+func (s *Shell) showGarage(from screen) {
+	s.prev, s.screen = from, screenGarage
+	set := &s.settings
+	sub := "left and right choose, enter goes back"
+	if from == screenPaused && s.game != nil && s.game.Networked() {
+		sub = "the shape of the car is fixed for this chase"
+	}
+	s.menu = &menu.Menu{
+		Title:    "GARAGE",
+		Subtitle: []string{sub},
+		Items: []menu.Item{
+			{
+				Label:  func() string { return "Car     " + set.Car.Name() },
+				Adjust: func(d int) { set.Car = cycleBody(set.Car, d); s.applyCar() },
+			},
+			{
+				Label:  func() string { return "Paint   " + paintOf(set.Paint).name },
+				Adjust: func(d int) { set.Paint = cyclePaint(set.Paint, d); s.applyCar() },
+			},
+			{Label: text("Back"), Action: s.leaveSettings},
+		},
+	}
+}
+
+// applyCar puts the garage's choice on the car of a game that is running.
+func (s *Shell) applyCar() {
+	if s.game != nil {
+		s.game.SetCar(s.settings.Car, s.settings.Paint)
 	}
 }
 

@@ -604,28 +604,30 @@ func drawBoxes(boxes []annotate.Box, labels bool) {
 	}
 }
 
-// PaletteBases returns the world's key colours together with the vision
-// system's annotation colours. Feeding these through crucible's demo.Ramp
-// builds a GIF palette that reproduces both the city and the detection boxes
-// without banding.
+// PaletteBases returns the world's key colours, which a GIF palette ramps
+// through light and shade to reproduce the city without banding. The
+// detection boxes are not among them: they are flat, and go in exactly as
+// they are, from [BoxColours].
 func PaletteBases() []color.RGBA {
-	out := []color.RGBA{
-		toRGBAColor(colSky), toRGBAColor(colGround), toRGBAColor(colAsphalt),
-		toRGBAColor(colSidewalk), toRGBAColor(colKerb), toRGBAColor(colPark),
-		toRGBAColor(colLinePale), toRGBAColor(colLineWarm), toRGBAColor(colPole),
-		toRGBAColor(colStopFace), toRGBAColor(colSignFace), toRGBAColor(colGlass),
-		toRGBAColor(colTyre), toRGBAColor(hudPanel), toRGBAColor(hudText),
-		toRGBAColor(colPoliceBody), toRGBAColor(colBeaconBlue), toRGBAColor(colBeaconRed),
+	key := [...]rl.Color{
+		colSky, colGround, colAsphalt, colSidewalk, colKerb, colPark,
+		colLinePale, colLineWarm, colPole, colStopFace, colSignFace, colGlass,
+		colTyre, hudPanel, hudText, colPoliceBody, colBeaconBlue, colBeaconRed,
 	}
-	for _, c := range buildingShades {
-		out = append(out, toRGBAColor(c))
+	out := make([]color.RGBA, 0, len(key)+len(buildingShades)+len(carPaints)+len(leafShades))
+	for _, set := range [][]rl.Color{key[:], buildingShades[:], carPaints[:], leafShades[:]} {
+		for _, c := range set {
+			out = append(out, toRGBAColor(c))
+		}
 	}
-	for _, c := range carPaints {
-		out = append(out, toRGBAColor(c))
-	}
-	for _, c := range leafShades {
-		out = append(out, toRGBAColor(c))
-	}
+	return out
+}
+
+// BoxColours returns the vision system's annotation colours, which a GIF
+// palette needs exactly: the boxes are drawn flat, and a shade of one is
+// never seen.
+func BoxColours() []color.RGBA {
+	out := make([]color.RGBA, 0, int(vision.ClassLaneOncoming))
 	for cl := vision.ClassVehicle; cl <= vision.ClassLaneOncoming; cl++ {
 		out = append(out, vision.RGBA(cl))
 	}

@@ -43,6 +43,8 @@ func (s *Shell) drawScreen(dt float32) {
 		s.drawJoin()
 	case screenLobby:
 		s.drawLobby()
+	case screenGarage:
+		s.drawGarage(dt)
 	default:
 		s.drawMenu(s.menu)
 	}
@@ -53,12 +55,18 @@ func (s *Shell) drawScreen(dt float32) {
 // rows say and which is selected; this decides only how that looks, which is
 // why the same menus can appear in an Ebiten game drawn a different way.
 func (s *Shell) drawMenu(m *menu.Menu) {
-	w := int32(s.opts.Width)
 	top := int32(s.opts.Height)/2 - int32(len(m.Items))*menuRowHeight/2
+	s.drawMenuAt(m, top-menuTitleGap, top)
+}
 
-	centred(m.Title, w, top-menuTitleGap, menuTitleSize, rl.RayWhite)
+// drawMenuAt draws a menu with its title at one height and its first row at
+// another.
+func (s *Shell) drawMenuAt(m *menu.Menu, titleY, top int32) {
+	w := int32(s.opts.Width)
+
+	centred(m.Title, w, titleY, menuTitleSize, rl.RayWhite)
 	for i, line := range m.Subtitle {
-		centred(line, w, top-menuTitleGap+menuTitleSize+12+int32(i)*18, menuSubSize, hudDim)
+		centred(line, w, titleY+menuTitleSize+12+int32(i)*18, menuSubSize, hudDim)
 	}
 
 	for i, item := range m.Items {
@@ -73,6 +81,23 @@ func (s *Shell) drawMenu(m *menu.Menu) {
 		}
 		centred(label, w, y, menuItemSize, col)
 	}
+}
+
+// drawGarage shows the car on its turntable between the title and the rows
+// that change it.
+func (s *Shell) drawGarage(dt float32) {
+	w, h := int32(s.opts.Width), int32(s.opts.Height)
+	tex := s.showroom.render(s.settings.Car, paintOf(s.settings.Paint), dt)
+	// The title at the top, the car below it, and the rows under the car,
+	// the whole stack centred in the window.
+	stack := menuTitleSize + 40 + previewH + 44 + int32(len(s.menu.Items))*menuRowHeight
+	titleY := max((h-stack)/2-20, 16)
+	x, y := w/2-previewW/2, titleY+menuTitleSize+40
+	src := rl.NewRectangle(0, 0, previewW, -previewH) // render targets are upside down
+	rl.DrawTexturePro(tex, src, rl.NewRectangle(float32(x), float32(y), previewW, previewH), rl.NewVector2(0, 0), 0, rl.White)
+	rl.DrawRectangleLines(x, y, previewW, previewH, menuRule)
+	centred(carBlurb(s.settings.Car), w, y+previewH+10, menuSubSize, hudDim)
+	s.drawMenuAt(s.menu, titleY, y+previewH+44)
 }
 
 func (s *Shell) drawJoin() {
@@ -126,7 +151,7 @@ func (s *Shell) drawMenuHints() {
 		}
 	case screenLobby:
 		hints = []keymap.Binding{{Key: "esc", Action: "cancel"}}
-	case screenSettings:
+	case screenSettings, screenGarage:
 		hints = []keymap.Binding{
 			{Key: "up/down", Action: "choose"},
 			{Key: "left/right", Action: "adjust"},
