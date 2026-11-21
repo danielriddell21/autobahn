@@ -363,7 +363,10 @@ type City struct {
 
 // Params tunes city generation.
 type Params struct {
-	Seed             uint64
+	Seed uint64
+	// Map is which place this is. It is part of what a place is a function
+	// of, alongside the seed and where it stands.
+	Map              Map
 	Cols, Rows       int
 	MinSpan, MaxSpan float32 // block span range in metres
 	// Roundabouts is the share of eligible junctions built as roundabouts.

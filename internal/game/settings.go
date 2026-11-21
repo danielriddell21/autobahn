@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"github.com/danielriddell21/autobahn/internal/autopilot"
+	"github.com/danielriddell21/autobahn/internal/city"
+	"github.com/danielriddell21/autobahn/internal/pack"
 	"github.com/danielriddell21/autobahn/internal/sim"
 
 	"github.com/danielriddell21/crucible/geom"
@@ -45,6 +47,11 @@ type Settings struct {
 	// in the garage.
 	Car   sim.BodyKind `json:"car"`
 	Paint int          `json:"paint"`
+	// Map is the place a new session is driven in.
+	Map city.Map `json:"map"`
+	// UnlockAll offers every pack without it being earned. There is no row
+	// for it on the settings screen: it is for whoever opens the file.
+	UnlockAll bool `json:"unlockAll"`
 }
 
 // DefaultSettings returns the settings a first run starts with.
@@ -87,6 +94,21 @@ func (s *Settings) clamp() {
 	}
 	if s.Paint < 0 || s.Paint >= len(playerPaints) {
 		s.Paint = 0
+	}
+	if !s.Map.Valid() {
+		s.Map = city.MapCity
+	}
+}
+
+// keepTo brings the stored choices back to what the player holds. A career
+// file that has gone, or a pack that was only ever bypassed, would otherwise
+// leave the settings naming a map or a car that is no longer offered.
+func (s *Settings) keepTo(a pack.Access) {
+	if !a.HasMap(s.Map) {
+		s.Map = city.MapCity
+	}
+	if !a.HasBody(s.Car) {
+		s.Car = sim.HotHatch
 	}
 }
 
@@ -140,6 +162,11 @@ func (s Settings) applyTo(o Options) Options {
 	// has to agree on, so it is only ever taken here.
 	if !o.Given["car"] {
 		o.Car = s.Car
+	}
+	// The map is what the world is made of, so like its size it is never
+	// taken from a preference in a chase against another person.
+	if !o.Given["map"] {
+		o.Map = s.Map
 	}
 	return s.applyViewTo(o)
 }

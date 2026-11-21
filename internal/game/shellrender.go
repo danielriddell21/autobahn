@@ -45,6 +45,8 @@ func (s *Shell) drawScreen(dt float32) {
 		s.drawLobby()
 	case screenGarage:
 		s.drawGarage(dt)
+	case screenPacks:
+		s.drawPacks()
 	default:
 		s.drawMenu(s.menu)
 	}
@@ -156,6 +158,14 @@ func (s *Shell) drawMenuHints() {
 			{Key: "up/down", Action: "choose"},
 			{Key: "left/right", Action: "adjust"},
 			{Key: "enter", Action: "back"},
+		}
+	case screenPacks:
+		hints = []keymap.Binding{{Key: "enter", Action: "back"}}
+	case screenTitle:
+		hints = []keymap.Binding{
+			{Key: "up/down", Action: "choose"},
+			{Key: "left/right", Action: "change the map"},
+			{Key: "enter", Action: "select"},
 		}
 	default:
 		hints = []keymap.Binding{

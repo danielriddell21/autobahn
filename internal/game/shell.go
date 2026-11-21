@@ -11,6 +11,7 @@ import (
 	"github.com/danielriddell21/crucible/netplay"
 
 	"github.com/danielriddell21/autobahn/internal/autopilot"
+	"github.com/danielriddell21/autobahn/internal/pack"
 )
 
 // screen is what the window is currently showing.
@@ -33,6 +34,8 @@ const (
 	// screenGarage chooses the player's car, from the title screen or the
 	// pause menu.
 	screenGarage
+	// screenPacks lists the packs and how far the player is toward each.
+	screenPacks
 )
 
 // Shell is the menu layer around a session: the title screen a run opens on,
@@ -45,6 +48,9 @@ const (
 type Shell struct {
 	opts     Options
 	settings Settings
+	// career is what the player has banked across every session, which is
+	// what the packs are unlocked with.
+	career Career
 
 	net    *netplay.Session[Snapshot, Input]
 	screen screen
@@ -65,9 +71,11 @@ func NewShell(opts Options) *Shell {
 	s := &Shell{
 		opts:     opts,
 		settings: LoadSettings(),
+		career:   LoadCareer(),
 		net:      &netplay.Session[Snapshot, Input]{},
 		joinAddr: "127.0.0.1",
 	}
+	s.settings.keepTo(s.access())
 	s.showTitle()
 	return s
 }
@@ -95,6 +103,32 @@ func (s *Shell) Step(dt float32) bool {
 	return !s.quit
 }
 
+// access is what the player holds: what they have banked, and whether the
+// command line or the settings file waved the prices away.
+func (s *Shell) access() pack.Access {
+	return pack.Access{Banked: s.career.Banked, Bypass: s.opts.UnlockAll || s.settings.UnlockAll}
+}
+
+// collect moves the bounty the player has just banked into their career,
+// and announces any pack it unlocked.
+func (s *Shell) collect() {
+	earned := s.game.TakeEarned()
+	if earned == 0 {
+		return
+	}
+	before := s.access()
+	unlocked := s.career.Bank(earned)
+	if err := s.career.Save(); err != nil {
+		s.notice = err.Error()
+	}
+	for _, p := range unlocked {
+		// A pack the player already had by bypass is not news.
+		if !before.Has(p.ID) {
+			s.game.Announce(strings.ToUpper(p.Name)+" PACK UNLOCKED", p.Blurb)
+		}
+	}
+}
+
 func (s *Shell) stepPlaying(dt float32) {
 	if rl.IsKeyPressed(rl.KeyEscape) {
 		// There is no pausing a game somebody else is in. A host that stops
@@ -109,6 +143,7 @@ func (s *Shell) stepPlaying(dt float32) {
 		return
 	}
 	s.game.Step(dt)
+	s.collect()
 }
 
 func (s *Shell) stepMenu(dt float32) {
@@ -155,12 +190,34 @@ func (s *Shell) showTitle() {
 		Items: []menu.Item{
 			{Label: text("Drive"), Action: func() { s.startGame(false) }},
 			{Label: text("Autopilot"), Action: func() { s.startGame(true) }},
+			{
+				Label:  func() string { return "Map: " + s.settings.Map.Name() },
+				Adjust: s.chooseMap,
+				Action: func() { s.chooseMap(1) },
+			},
 			{Label: text("Host a chase"), Action: s.hostChase},
 			{Label: text("Join a chase"), Action: s.showJoin},
 			{Label: text("Garage"), Action: func() { s.showGarage(screenTitle) }},
+			{Label: text("Packs"), Action: s.showPacks},
 			{Label: text("Settings"), Action: func() { s.showSettings(screenTitle) }},
 			{Label: text("Quit"), Action: func() { s.quit = true }},
 		},
+	}
+}
+
+// chooseMap steps the title screen's map through the ones the player holds.
+func (s *Shell) chooseMap(dir int) {
+	s.settings.Map = cycleMap(s.access().Maps(), s.settings.Map, dir)
+}
+
+// showPacks lists the packs: what each adds, and either that it is held or
+// how much more has to be banked. The screen is drawn as cards; the menu
+// behind it holds only the way back.
+func (s *Shell) showPacks() {
+	s.screen = screenPacks
+	s.menu = &menu.Menu{
+		Title: "PACKS",
+		Items: []menu.Item{{Label: text("Back"), Action: s.showTitle}},
 	}
 }
 
@@ -262,7 +319,7 @@ func (s *Shell) showGarage(from screen) {
 		Items: []menu.Item{
 			{
 				Label:  func() string { return "Car     " + set.Car.Name() },
-				Adjust: func(d int) { set.Car = cycleBody(set.Car, d); s.applyCar() },
+				Adjust: func(d int) { set.Car = cycleBody(s.access().Bodies(), set.Car, d); s.applyCar() },
 			},
 			{
 				Label:  func() string { return "Paint   " + paintOf(set.Paint).name },
@@ -428,6 +485,20 @@ func (s *Shell) startGame(autopilot bool) {
 		o = s.settings.applyTo(o)
 	}
 	o.Autopilot = autopilot
+	if err := o.locked(s.access()); err != nil {
+		// Only a command line can ask for what the player does not hold; the
+		// menus never offer it.
+		s.net.Leave()
+		s.game = nil
+		s.notice = err.Error()
+		s.showTitle()
+		return
+	}
+	// The map is chosen on the title screen, and starting a drive is the only
+	// way off it that should remember the choice.
+	if err := s.settings.Save(); err != nil {
+		s.notice = err.Error()
+	}
 
 	s.game = New(o)
 	s.game.net = s.net

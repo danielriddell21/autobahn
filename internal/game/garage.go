@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"image"
 	"math"
+	"slices"
 	"strings"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 
+	"github.com/danielriddell21/autobahn/internal/city"
 	"github.com/danielriddell21/autobahn/internal/mathx"
 	"github.com/danielriddell21/autobahn/internal/sim"
 )
@@ -53,17 +55,30 @@ func cyclePaint(i, dir int) int {
 	return ((i+dir)%n + n) % n
 }
 
-// cycleBody steps through the shapes the player may drive, wrapping at both
-// ends.
-func cycleBody(k sim.BodyKind, dir int) sim.BodyKind {
-	all := sim.PlayerBodies()
-	at := 0
-	for i, b := range all {
-		if b == k {
-			at = i
-		}
-	}
+// cycleBody steps through the shapes on offer, wrapping at both ends. A car
+// that is not among them steps onto the first.
+func cycleBody(all []sim.BodyKind, k sim.BodyKind, dir int) sim.BodyKind {
 	n := len(all)
+	if n == 0 {
+		return k
+	}
+	at := slices.Index(all, k)
+	if at < 0 {
+		return all[0]
+	}
+	return all[((at+dir)%n+n)%n]
+}
+
+// cycleMap steps through the maps on offer the same way.
+func cycleMap(all []city.Map, m city.Map, dir int) city.Map {
+	n := len(all)
+	if n == 0 {
+		return m
+	}
+	at := slices.Index(all, m)
+	if at < 0 {
+		return all[0]
+	}
 	return all[((at+dir)%n+n)%n]
 }
 
@@ -201,6 +216,16 @@ func CarNames() []string {
 	out := make([]string, 0, len(all))
 	for _, k := range all {
 		out = append(out, squash(k.Name()))
+	}
+	return out
+}
+
+// MapNames returns the maps, as -map names them.
+func MapNames() []string {
+	all := city.Maps()
+	out := make([]string, 0, len(all))
+	for _, m := range all {
+		out = append(out, squash(m.Name()))
 	}
 	return out
 }

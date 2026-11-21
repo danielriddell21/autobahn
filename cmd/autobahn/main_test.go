@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/autobahn/internal/autopilot"
+	"github.com/danielriddell21/autobahn/internal/city"
 	"github.com/danielriddell21/autobahn/internal/game"
 	"github.com/danielriddell21/autobahn/internal/sim"
 )
@@ -151,5 +152,18 @@ func TestParseReadsTheDayLength(t *testing.T) {
 	opts, _, err := parse("autobahn", []string{"-daylength", "6"}, &strings.Builder{})
 	if err != nil || opts.DayLength != 6 || !opts.Given["daylength"] {
 		t.Errorf("-daylength 6 gave %v (given %v), err %v", opts.DayLength, opts.Given["daylength"], err)
+	}
+}
+
+func TestParseReadsTheMapAndTheBypass(t *testing.T) {
+	opts, _, err := parse("autobahn", []string{"-map", "City", "-unlock-all"}, &strings.Builder{})
+	if err != nil {
+		t.Fatalf("parse() error = %v", err)
+	}
+	if opts.Map != city.MapCity || !opts.UnlockAll || !opts.Given["map"] {
+		t.Errorf("Map = %v, UnlockAll = %v, given = %v", opts.Map, opts.UnlockAll, opts.Given["map"])
+	}
+	if _, _, err := parse("autobahn", []string{"-map", "atlantis"}, &strings.Builder{}); err == nil {
+		t.Error("a map that does not exist should be refused")
 	}
 }

@@ -24,7 +24,9 @@ import (
 	"github.com/danielriddell21/autobahn/internal/annotate"
 	"github.com/danielriddell21/autobahn/internal/audio"
 	"github.com/danielriddell21/autobahn/internal/autopilot"
+	"github.com/danielriddell21/autobahn/internal/city"
 	"github.com/danielriddell21/autobahn/internal/mathx"
+	"github.com/danielriddell21/autobahn/internal/pack"
 	"github.com/danielriddell21/autobahn/internal/sim"
 	"github.com/danielriddell21/autobahn/internal/vision"
 )
@@ -54,7 +56,11 @@ func (m CameraMode) String() string {
 
 // Options configures a game session.
 type Options struct {
-	Seed      uint64
+	Seed uint64
+	// Map is which place to drive. The zero value is the city.
+	Map city.Map
+	// UnlockAll offers every pack whatever the player has banked.
+	UnlockAll bool
 	Traffic   int
 	Police    int // marked units patrolling; zero disables the police
 	Width     int
@@ -150,6 +156,8 @@ type Game struct {
 	seenStops          int
 	seenEscapes        int
 	seenBanked         int
+	// career counts the bounty banked here that goes toward the packs.
+	career bountyMeter
 
 	camMode CameraMode
 	// overheadHeight is how much ground the overhead camera shows either side
@@ -261,7 +269,7 @@ func New(opts Options) *Game {
 	g := &Game{
 		opts: opts,
 		world: sim.NewWorld(sim.Config{
-			Seed: opts.Seed, Traffic: opts.Traffic, Police: opts.Police,
+			Seed: opts.Seed, Map: opts.Map, Traffic: opts.Traffic, Police: opts.Police,
 			PlayerBody: sim.PlayerBodyOf(opts.Car),
 		}),
 		// In a chase against the machine the runner is always the autopilot;
@@ -869,6 +877,13 @@ func WithWindow(opts Options, fn func(*Game) error) error {
 // for a keypress is no use to a script or a media build.
 func Run(opts Options) error {
 	if opts.headless() {
+		// There is no menu to keep a run like this to what the player holds,
+		// so it is checked here.
+		set := LoadSettings()
+		held := pack.Access{Banked: LoadCareer().Banked, Bypass: opts.UnlockAll || set.UnlockAll}
+		if err := opts.locked(held); err != nil {
+			return err
+		}
 		return WithWindow(opts, run)
 	}
 	return WithWindow(opts, shell)

@@ -44,6 +44,7 @@ func TestShellScreensDraw(t *testing.T) {
 	}{
 		{"title", sh.showTitle},
 		{"settings", func() { sh.showSettings(screenTitle) }},
+		{"packs", sh.showPacks},
 		{"join", sh.showJoin},
 		{"lobby", sh.enterLobby},
 	}

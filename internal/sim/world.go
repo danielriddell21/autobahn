@@ -33,7 +33,9 @@ const (
 
 // Config describes a world to build.
 type Config struct {
-	Seed    uint64
+	Seed uint64
+	// Map is which place to build. The zero value is the city.
+	Map     city.Map
 	Traffic int
 	// Police is how many marked units patrol the city. Zero disables the
 	// police entirely, which leaves the judge still scoring but nobody
@@ -99,7 +101,7 @@ type World struct {
 // NewWorld generates a city and populates it with traffic.
 func NewWorld(cfg Config) *World {
 	traffic := rng.Stream(cfg.Seed, streamTraffic)
-	c := city.Generate(city.DefaultParams(cfg.Seed))
+	c := city.Generate(city.ParamsFor(cfg.Map, cfg.Seed))
 
 	w := &World{
 		City: c, Signals: NewSignals(c, cfg.Seed),

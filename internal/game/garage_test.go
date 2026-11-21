@@ -3,6 +3,7 @@ package game
 import (
 	"testing"
 
+	"github.com/danielriddell21/autobahn/internal/city"
 	"github.com/danielriddell21/autobahn/internal/sim"
 )
 
@@ -12,13 +13,48 @@ func TestCycleBodyVisitsEveryCarAndWraps(t *testing.T) {
 	seen := map[sim.BodyKind]bool{}
 	for range all {
 		seen[k] = true
-		k = cycleBody(k, 1)
+		k = cycleBody(all, k, 1)
 	}
 	if len(seen) != len(all) || k != all[0] {
 		t.Errorf("stepping forward through %d cars saw %d and ended on %v", len(all), len(seen), k)
 	}
-	if got := cycleBody(all[0], -1); got != all[len(all)-1] {
+	if got := cycleBody(all, all[0], -1); got != all[len(all)-1] {
 		t.Errorf("stepping back from the first car gave %v, want the last", got)
+	}
+}
+
+func TestCycleBodyStepsOffACarThatIsNotOffered(t *testing.T) {
+	offered := []sim.BodyKind{sim.HotHatch, sim.Saloon}
+	if got := cycleBody(offered, sim.Van, 1); got != sim.HotHatch {
+		t.Errorf("stepping from a car not on offer gave %v, want the first that is", got)
+	}
+	if got := cycleBody(nil, sim.Van, 1); got != sim.Van {
+		t.Errorf("stepping with nothing on offer moved to %v", got)
+	}
+}
+
+func TestCycleMapVisitsEveryMapAndWraps(t *testing.T) {
+	// The values stand for maps; cycling does not care whether they exist.
+	offered := []city.Map{4, 7, 9}
+	if got := cycleMap(offered, 9, 1); got != 4 {
+		t.Errorf("past the last map gave %v, want the first", got)
+	}
+	if got := cycleMap(offered, 4, -1); got != 9 {
+		t.Errorf("before the first map gave %v, want the last", got)
+	}
+	if got := cycleMap(offered, 5, 1); got != 4 {
+		t.Errorf("stepping from a map not on offer gave %v, want the first that is", got)
+	}
+	if got := cycleMap(nil, 5, 1); got != 5 {
+		t.Errorf("stepping with nothing on offer moved to %v", got)
+	}
+}
+
+func TestMapNamesParseBack(t *testing.T) {
+	for _, name := range MapNames() {
+		if _, ok := city.ParseMap(name); !ok {
+			t.Errorf("-map would not read its own name %q", name)
+		}
 	}
 }
 

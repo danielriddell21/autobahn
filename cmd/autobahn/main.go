@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/danielriddell21/autobahn/internal/autopilot"
+	"github.com/danielriddell21/autobahn/internal/city"
 	"github.com/danielriddell21/autobahn/internal/game"
 )
 
@@ -46,6 +47,8 @@ func parse(name string, args []string, out io.Writer) (opts game.Options, done b
 
 	fs := flag.NewFlagSet(name, flag.ExitOnError)
 	seed := fs.Uint64("seed", opts.Seed, "city generation seed")
+	mapName := fs.String("map", "city", "the place to drive: "+strings.Join(game.MapNames(), ", "))
+	unlockAll := fs.Bool("unlock-all", false, "offer every pack without it being earned")
 	traffic := fs.Int("traffic", opts.Traffic, "number of ambient traffic cars")
 	police := fs.Int("police", opts.Police, "number of patrolling police units; 0 disables them")
 	width := fs.Int("width", opts.Width, "window width in pixels")
@@ -89,6 +92,12 @@ func parse(name string, args []string, out io.Writer) (opts game.Options, done b
 	fs.Visit(func(f *flag.Flag) { opts.Given[f.Name] = true })
 
 	opts.Seed = *seed
+	opts.UnlockAll = *unlockAll
+	m, ok := city.ParseMap(*mapName)
+	if !ok {
+		return opts, false, fmt.Errorf("unknown map %q; try %s", *mapName, strings.Join(game.MapNames(), ", "))
+	}
+	opts.Map = m
 	opts.Traffic = *traffic
 	opts.Police = *police
 	opts.Width, opts.Height = *width, *height

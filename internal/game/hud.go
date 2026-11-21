@@ -277,7 +277,24 @@ func (g *Game) watchPursuit(dt float32) {
 		g.bannerFor = 3.2
 	}
 	g.seenStops, g.seenEscapes, g.seenBanked = wa.Stops, wa.Escapes, wa.Banked
+	g.career.watch(&g.world.Wanted, g.helped())
 	g.bannerFor = max(g.bannerFor-dt, 0)
+}
+
+// helped reports whether anything but the player is driving, or the session
+// is a chase: bounty banked then does not go toward the packs.
+func (g *Game) helped() bool {
+	return g.auto || g.opts.Reckless || g.opts.Chase || g.Networked()
+}
+
+// TakeEarned returns the bounty the player has banked at the wheel since it
+// was last asked.
+func (g *Game) TakeEarned() int { return g.career.take() }
+
+// Announce raises a banner across the screen, as the end of a pursuit does.
+func (g *Game) Announce(title, note string) {
+	g.banner, g.bannerCol, g.bannerNote = title, hudGood, note
+	g.bannerFor = 4.5
 }
 
 func (g *Game) drawAIPanel() {

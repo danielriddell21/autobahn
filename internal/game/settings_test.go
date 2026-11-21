@@ -4,6 +4,9 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/autobahn/internal/autopilot"
+	"github.com/danielriddell21/autobahn/internal/city"
+	"github.com/danielriddell21/autobahn/internal/pack"
+	"github.com/danielriddell21/autobahn/internal/sim"
 )
 
 func TestDefaultSettingsAreInRange(t *testing.T) {
@@ -216,5 +219,59 @@ func TestTheStoredAutopilotModeYieldsToTheCommandLine(t *testing.T) {
 	s.clamp()
 	if s.Mode != autopilot.ModeNormal {
 		t.Errorf("Mode = %v after clamping a bad value, want normal", s.Mode)
+	}
+}
+
+func TestClampRepairsAMapThatDoesNotExist(t *testing.T) {
+	s := DefaultSettings()
+	s.Map = city.Map(99)
+	s.clamp()
+	if s.Map != city.MapCity {
+		t.Errorf("Map = %v, want the city", s.Map)
+	}
+}
+
+func TestKeepToDropsWhatThePlayerDoesNotHold(t *testing.T) {
+	none := pack.Access{}
+	for _, m := range city.Maps() {
+		for _, k := range sim.PlayerBodies() {
+			s := DefaultSettings()
+			s.Map, s.Car = m, k
+			s.keepTo(none)
+			if !none.HasMap(s.Map) || !none.HasBody(s.Car) {
+				t.Errorf("kept %s and the %s for a player who holds neither", s.Map.Name(), s.Car.Name())
+			}
+			if none.HasMap(m) && s.Map != m {
+				t.Errorf("dropped %s, which the player holds", m.Name())
+			}
+			if none.HasBody(k) && s.Car != k {
+				t.Errorf("dropped the %s, which the player holds", k.Name())
+			}
+
+			all := DefaultSettings()
+			all.Map, all.Car = m, k
+			all.keepTo(pack.Access{Bypass: true})
+			if all.Map != m || all.Car != k {
+				t.Errorf("bypass dropped %s or the %s", m.Name(), k.Name())
+			}
+		}
+	}
+}
+
+func TestTheMapFollowsTheSettingUnlessAskedFor(t *testing.T) {
+	last := city.Maps()[len(city.Maps())-1]
+	s := DefaultSettings()
+	s.Map = last
+	if got := s.applyTo(DefaultOptions()); got.Map != last {
+		t.Errorf("Map = %v, want the stored %v", got.Map, last)
+	}
+	o := DefaultOptions()
+	o.Map, o.Given = city.MapCity, Given{"map": true}
+	if got := s.applyTo(o); got.Map != city.MapCity {
+		t.Errorf("Map = %v, want the city asked for", got.Map)
+	}
+	// A chase against another person never takes the map from a preference.
+	if got := s.applyViewTo(DefaultOptions()); got.Map != DefaultOptions().Map {
+		t.Errorf("a chase took the map %v from the settings", got.Map)
 	}
 }
