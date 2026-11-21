@@ -41,11 +41,13 @@ const growMargin = 2
 // NewGrowing returns a city with nothing in it yet. Call [City.EnsureAround]
 // to bring an area into existence.
 func NewGrowing(p Params) *City {
-	drawn := newDrawn(p)
-	if p.Wind <= 0 {
-		return drawn
+	c := newDrawn(p)
+	if p.Wind > 0 {
+		c = newLaid(c)
 	}
-	return newLaid(drawn)
+	_, sea, coast := c.Shoreline()
+	c.relief = reliefFor(p, float64(sea), coast)
+	return c
 }
 
 // newDrawn returns the plan of a city: straight streets on a grid.

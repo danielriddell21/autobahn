@@ -168,7 +168,7 @@ func (g *Game) drawSkids(eye mathx.Vec) {
 			continue
 		}
 		side := s.b.Sub(s.a).Norm().Right().Mul(skidWidth / 2)
-		groundQuad(s.a.Sub(side), s.a.Add(side), s.b.Add(side), s.b.Sub(side), 0.012, colSkid)
+		groundQuad(g.land, s.a.Sub(side), s.a.Add(side), s.b.Add(side), s.b.Sub(side), 0.012, colSkid)
 	}
 }
 
@@ -183,7 +183,7 @@ func (g *Game) drawSmoke() {
 	for _, q := range g.fx.puffs {
 		f := q.age / puffLife
 		alpha := uint8(58 * (1 - f))
-		rl.DrawSphereEx(vec3(q.at.X, q.height, q.at.Z), 0.22+0.75*f, 6, 8,
+		rl.DrawSphereEx(vec3(q.at.X, q.height+g.land.at(q.at), q.at.Z), 0.22+0.75*f, 6, 8,
 			rl.NewColor(204, 204, 208, alpha))
 	}
 	rl.DrawRenderBatchActive()
@@ -208,7 +208,7 @@ func (g *Game) drawLightPools(eye mathx.Vec, drawPlayer bool) {
 				continue
 			}
 			under := p.Pos.Sub(mathx.FromAngle(p.Heading).Right().Mul(lampReach))
-			groundDisc(under, 10.5, 0.03, lamp, 14)
+			groundDisc(g.land, under, 10.5, 0.03, lamp, 14)
 		}
 	}
 
@@ -224,7 +224,7 @@ func (g *Game) drawLightPools(eye mathx.Vec, drawPlayer bool) {
 				col = colBeaconRed
 			}
 			strength := 44 + 66*night
-			groundDisc(a.V.Pos, 11, 0.035, rl.NewColor(col.R, col.G, col.B, uint8(strength)), 16)
+			groundDisc(g.land, a.V.Pos, 11, 0.035, rl.NewColor(col.R, col.G, col.B, uint8(strength)), 16)
 		}
 	}
 	if drawPlayer {
@@ -232,7 +232,7 @@ func (g *Game) drawLightPools(eye mathx.Vec, drawPlayer bool) {
 		g.carLight(p, night)
 		if p.Boosting {
 			back := p.Pos.Sub(p.Forward().Mul(p.Spec.HalfLength + 0.8))
-			groundDisc(back, 3.4, 0.035, rl.NewColor(96, 160, 250, 120), 12)
+			groundDisc(g.land, back, 3.4, 0.035, rl.NewColor(96, 160, 250, 120), 12)
 		}
 	}
 
@@ -247,7 +247,7 @@ func (g *Game) carLight(v *sim.Vehicle, night float32) {
 	fwd := v.Forward()
 	if night > 0.2 {
 		nose := v.Pos.Add(fwd.Mul(v.Spec.HalfLength))
-		groundBeam(nose, fwd, 21, 5.2, 0.03, rl.NewColor(246, 238, 208, uint8(120*night)))
+		groundBeam(g.land, nose, fwd, 21, 5.2, 0.03, rl.NewColor(246, 238, 208, uint8(120*night)))
 	}
 	glow := 46 * night
 	if v.Brake > 0.05 {
@@ -255,7 +255,7 @@ func (g *Game) carLight(v *sim.Vehicle, night float32) {
 	}
 	if glow > 4 {
 		tail := v.Pos.Sub(fwd.Mul(v.Spec.HalfLength + 0.5))
-		groundDisc(tail, 2.6, 0.03, rl.NewColor(236, 52, 44, uint8(glow)), 10)
+		groundDisc(g.land, tail, 2.6, 0.03, rl.NewColor(236, 52, 44, uint8(glow)), 10)
 	}
 }
 

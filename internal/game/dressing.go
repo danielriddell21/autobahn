@@ -438,7 +438,7 @@ func (g *Game) drawFurniture(eye mathx.Vec) {
 		if f.on.DistTo(eye) > cullProps {
 			continue
 		}
-		pushStand(f.at, f.on, f.turn)
+		g.standOn(f.at, f.on, f.turn)
 		drawFurnishing(f)
 		rl.PopMatrix()
 	}
@@ -534,9 +534,9 @@ func onParkPath(b city.Block, p mathx.Vec) bool {
 	return mathx.Abs(p.X-c.X) < clear || mathx.Abs(p.Z-c.Z) < clear || p.DistTo(c) < parkCircle+2
 }
 
-// drawPark lays a park's paths and stands its centrepiece.
-func (g *Game) drawPark(b city.Block) {
-	kind, c, ok := parkFeature(b)
+// layPaths lays the two paths across a park.
+func (g *Game) layPaths(b city.Block) {
+	_, c, ok := parkFeature(b)
 	if !ok {
 		return
 	}
@@ -545,6 +545,19 @@ func (g *Game) drawPark(b city.Block) {
 	const inset = 7
 	g.strip(mathx.V(b.Min.X+inset, c.Z), mathx.V(b.Max.X-inset, c.Z), pathWidth, y, colPath)
 	g.strip(mathx.V(c.X, b.Min.Z+inset), mathx.V(c.X, b.Max.Z-inset), pathWidth, y, colPath)
+}
+
+// drawPark lays a park's paths and stands its centrepiece.
+func (g *Game) drawPark(b city.Block) {
+	kind, c, ok := parkFeature(b)
+	if !ok {
+		return
+	}
+	y := city.KerbHeight + 0.012
+	if g.rise == nil {
+		// On ground with a shape the paths went in with the ground.
+		g.layPaths(b)
+	}
 
 	g.stand(c)
 	defer rl.PopMatrix()
@@ -631,7 +644,8 @@ func (g *Game) drawParking(eye mathx.Vec) {
 		if d > cullTrees {
 			continue
 		}
-		drawCar(p.v, p.body, carLook{paint: p.paint, wheels: d < cullWheels, night: g.light.night, parked: true})
+		drawCar(p.v, p.body, carLook{paint: p.paint, wheels: d < cullWheels, night: g.light.night, parked: true},
+			g.footingOf(p.v.Pos, p.v.Yaw))
 	}
 	rl.PopMatrix()
 }

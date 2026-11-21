@@ -101,7 +101,7 @@ func drawBeach(b city.Block) {
 	mid := (b.Min.X + b.Max.X) / 2
 
 	// The promenade, and the rail between it and the sand.
-	groundQuad(mathx.V(b.Min.X, b.Min.Z), mathx.V(b.Max.X, b.Min.Z),
+	groundQuad(nil, mathx.V(b.Min.X, b.Min.Z), mathx.V(b.Max.X, b.Min.Z),
 		mathx.V(b.Max.X, edge), mathx.V(b.Min.X, edge), y, colSidewalk)
 	for _, up := range [2]float32{0.55, 1.05} {
 		rl.DrawCube(vec3(mid, ground+up, edge), width, 0.07, 0.07, colPole)

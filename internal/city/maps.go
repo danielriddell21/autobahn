@@ -137,6 +137,8 @@ func ParamsFor(m Map, seed uint64) Params {
 		p.Roundabouts, p.Parks, p.Rise = 0.2, 0.14, 0.22
 		p.Coast, p.CoastRow = true, 3
 		p.Wind = 26
+		// The town comes down a hill to the front.
+		p.Hills, p.HillSpan, p.Bluff = 3.5, 700, 20
 	}
 	if m == MapVillage {
 		// Long lanes with a main road only every fifth line, so nearly every
@@ -149,6 +151,8 @@ func ParamsFor(m Map, seed uint64) Params {
 		p.Floor, p.Storeys, p.MainEvery, p.Balanced = 5.5, 4.5, 5, true
 		// Nothing in a village runs straight for long.
 		p.Wind = 40
+		// And nothing is level either: rolling country.
+		p.Hills, p.HillSpan = 8, 850
 	}
 	if m == MapMotorway {
 		// Every other grid line is a dual carriageway and the ones between
@@ -164,6 +168,8 @@ func ParamsFor(m Map, seed uint64) Params {
 		p.Limits = [3]float32{mathx.MPH(30), mathx.MPH(40), mathx.MPH(50)}
 		// Fast roads sweep rather than wind.
 		p.Wind = 18
+		// Long grades, as a fast road takes a hill.
+		p.Hills, p.HillSpan = 11, 2600
 	}
 	return p
 }

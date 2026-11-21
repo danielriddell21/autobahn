@@ -132,26 +132,8 @@ func (g *Game) drawField(b city.Block, k fieldKind) {
 		}
 	}
 
-	in := hedgeInset + 3
-	lo, hi := mathx.V(b.Min.X+in, b.Min.Z+in), mathx.V(b.Max.X-in, b.Max.Z-in)
-	if hi.X-lo.X < 10 || hi.Z-lo.Z < 10 {
-		return
-	}
-	switch k {
-	case fieldCrop, fieldPlough:
-		// Rows, running the long way of the field.
-		row := scaleColor(fieldShade(k, seasonLook{}), 0.82)
-		y := ground + 0.012
-		if hi.X-lo.X >= hi.Z-lo.Z {
-			for z := lo.Z; z < hi.Z; z += rowPitch {
-				g.strip(mathx.V(lo.X, z+0.4), mathx.V(hi.X, z+0.4), 0.8, y, row)
-			}
-		} else {
-			for x := lo.X; x < hi.X; x += rowPitch {
-				g.strip(mathx.V(x+0.4, lo.Z), mathx.V(x+0.4, hi.Z), 0.8, y, row)
-			}
-		}
-	case fieldPasture:
+	switch {
+	case k == fieldPasture:
 		for _, at := range flock(b) {
 			g.stand(at)
 			rl.DrawCube(vec3(at.X, ground+0.62, at.Z), 1.05, 0.55, 0.62, colSheep)
@@ -159,6 +141,33 @@ func (g *Game) drawField(b city.Block, k fieldKind) {
 			rl.DrawCube(vec3(at.X, ground+0.18, at.Z), 0.8, 0.36, 0.4, colTrim)
 			rl.PopMatrix()
 		}
+	case g.rise == nil:
+		// On ground with a shape the rows went in with the ground.
+		g.layRows(b, k)
+	}
+}
+
+// layRows lays the rows of a crop or the furrows of a ploughed field,
+// running the long way of it.
+func (g *Game) layRows(b city.Block, k fieldKind) {
+	if k != fieldCrop && k != fieldPlough {
+		return
+	}
+	in := hedgeInset + 3
+	lo, hi := mathx.V(b.Min.X+in, b.Min.Z+in), mathx.V(b.Max.X-in, b.Max.Z-in)
+	if hi.X-lo.X < 10 || hi.Z-lo.Z < 10 {
+		return
+	}
+	row := scaleColor(fieldShade(k, seasonLook{}), 0.82)
+	y := city.KerbHeight + 0.012
+	if hi.X-lo.X >= hi.Z-lo.Z {
+		for z := lo.Z; z < hi.Z; z += rowPitch {
+			g.strip(mathx.V(lo.X, z+0.4), mathx.V(hi.X, z+0.4), 0.8, y, row)
+		}
+		return
+	}
+	for x := lo.X; x < hi.X; x += rowPitch {
+		g.strip(mathx.V(x+0.4, lo.Z), mathx.V(x+0.4, hi.Z), 0.8, y, row)
 	}
 }
 

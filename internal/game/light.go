@@ -232,6 +232,8 @@ void main() {
 type sceneShader struct {
 	shader rl.Shader
 	ok     bool
+	// material is what a patch of ground is drawn with: the same shader.
+	material rl.Material
 
 	viewPos, sunDir, sunCol, skyCol, groundCol, fogCol, fogRange, night int32
 }
@@ -239,9 +241,11 @@ type sceneShader struct {
 func loadSceneShader() sceneShader {
 	s := sceneShader{shader: rl.LoadShaderFromMemory(lightingVS, lightingFS)}
 	s.ok = s.shader.ID != 0
+	s.material = rl.LoadMaterialDefault()
 	if !s.ok {
 		return s
 	}
+	s.material.Shader = s.shader
 	loc := func(name string) int32 { return rl.GetShaderLocation(s.shader, name) }
 	s.viewPos, s.sunDir, s.sunCol = loc("viewPos"), loc("sunDir"), loc("sunCol")
 	s.skyCol, s.groundCol, s.fogCol = loc("skyCol"), loc("groundCol"), loc("fogCol")

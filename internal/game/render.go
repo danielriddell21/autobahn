@@ -120,6 +120,9 @@ func (g *Game) drawWorld(cam rl.Camera3D, drawPlayer bool) {
 	}
 
 	g.drawGround(eye)
+	if g.land != nil {
+		g.drawTerrain(eye)
+	}
 	g.drawBlocks(eye)
 	g.drawRoundabouts(eye)
 	g.drawMarkings(eye)
@@ -190,9 +193,16 @@ func (g *Game) drawGround(eye mathx.Vec) {
 	// also not the shape of what exists: drive east and then north, and the box
 	// covers a whole quadrant nobody has been to. Paving that box would turn
 	// the quadrant into a featureless grey plain.
+	c := g.world.City
+	if g.land != nil {
+		// On hills the two sheets are cut to the land. The sea is level.
+		if _, sea, ok := c.Shoreline(); ok {
+			rl.DrawPlane(vec3(eye.X, -0.035, sea+seaReach/2), rl.NewVector2(seaReach, seaReach), colSea)
+		}
+		return
+	}
 	rl.DrawPlane(vec3(eye.X, -0.06, eye.Z), rl.NewVector2(6000, 6000), g.look.ground)
 
-	c := g.world.City
 	// Never reach beyond the radius the city is kept built to, or the slab
 	// would run out over ground that has not been generated yet.
 	r := min(g.cullRange()+groundEdge, sim.GrowRadius)
@@ -218,11 +228,10 @@ func (g *Game) drawGround(eye mathx.Vec) {
 func (g *Game) outline(i int) []mathx.Vec {
 	for len(g.outlines) <= i {
 		b := g.world.City.Blocks[len(g.outlines)]
-		kerb := g.layOutline(b.Outline())
-		g.outlines = append(g.outlines, kerb)
+		g.outlines = append(g.outlines, g.layOutline(b.Outline()))
 		mid, _ := g.world.City.Lay(b.Min.Lerp(b.Max, 0.5))
 		g.blockMids = append(g.blockMids, mid)
-		g.risen = append(g.risen, g.raise(b, kerb))
+		g.risen = append(g.risen, g.raise(b))
 	}
 	return g.outlines[i]
 }
@@ -234,44 +243,63 @@ func (g *Game) drawBlocks(eye mathx.Vec) {
 		// laid as its streets lie, so it is its laid outline that is drawn.
 		kerb := g.outline(i)
 		centre := g.blockMids[i]
-		if centre.DistTo(eye) > g.cullRange()+b.Max.Sub(b.Min).Len()/2 {
+		g.rise = g.risen[i]
+		away := centre.DistTo(eye) - b.Max.Sub(b.Min).Len()/2
+		if away > g.cullRange() {
+			if g.rise != nil && away > g.cullRange()*blockFar {
+				// Far enough off to give its ground back.
+				g.rise.ground.free()
+				g.rise.ground = nil
+			}
 			continue
 		}
-		surface := g.look.pave
-		if g.town.verges {
-			// Grass to the kerb, and round the houses.
-			surface = g.look.park
-		}
 		field := fieldOf(b, g.opts.Map)
-		switch {
-		case b.Park:
-			surface = fieldShade(field, g.look)
-		case b.Beach:
-			surface = colSand
-		}
-		groundWall(centre, kerb, -0.02, city.KerbHeight, colKerb)
-		// Open ground that rises is grass, whatever the rim round it is.
-		g.rise = g.risen[i]
-		switch {
-		case g.rise == nil:
-			groundFan(centre, kerb, city.KerbHeight, surface)
-		case b.Park:
-			g.rise.draw(surface, surface)
-		default:
-			g.rise.draw(surface, g.look.park)
-		}
+		g.drawBlockGround(b, kerb, centre, g.surfaceOf(b, field))
 		switch {
 		case field != fieldNone:
 			g.drawField(b, field)
 		case b.Beach:
-			// The land does not wander by the sea, so a beach is where it
-			// was planned.
+			// The land does not wander by the sea, nor climb, so a beach
+			// is where it was planned.
 			drawBeach(b)
 		default:
 			g.drawPark(b)
 		}
-		g.rise = nil
 	}
+	g.rise = nil
+}
+
+// surfaceOf is the colour of a block's ground out by the kerb.
+func (g *Game) surfaceOf(b city.Block, field fieldKind) rl.Color {
+	switch {
+	case b.Park:
+		return fieldShade(field, g.look)
+	case b.Beach:
+		return colSand
+	case g.town.verges:
+		// Grass to the kerb, and round the houses.
+		return g.look.park
+	}
+	return g.look.pave
+}
+
+// drawBlockGround draws the ground of the block being dressed: a slab, or
+// where its ground has a shape the net of it, made if it is not there.
+func (g *Game) drawBlockGround(b city.Block, kerb []mathx.Vec, centre mathx.Vec, surface rl.Color) {
+	if g.rise == nil {
+		groundWall(g.land, centre, kerb, -0.02, city.KerbHeight, colKerb)
+		groundFan(g.land, centre, kerb, city.KerbHeight, surface)
+		return
+	}
+	if g.rise.ground == nil {
+		// Open ground that rises is grass, whatever is round it.
+		open := surface
+		if !b.Park {
+			open = g.look.park
+		}
+		g.build(g.rise, b, kerb, surface, open)
+	}
+	g.rise.ground.draw(g.scene.material)
 }
 
 func (g *Game) drawRoundabouts(eye mathx.Vec) {
@@ -287,11 +315,13 @@ func (g *Game) drawRoundabouts(eye mathx.Vec) {
 			continue
 		}
 		top := city.KerbHeight
+		g.pushUp(n.Pos)
 		pillar(n.Pos, -0.02, top, island, island, 32, colKerb)
 		pillar(n.Pos, top, top+0.02, island-0.5, island-0.5, 32, g.look.park)
 		// A low mound so it reads as an island from the driver's seat.
 		pillar(n.Pos, top, top+1.0, island*0.6, island*0.25, 20, g.look.park)
 		g.look.drawTree(tree{at: n.Pos, height: 5.2, spread: 2.1, shade: n.ID}, top+0.9)
+		rl.PopMatrix()
 	}
 }
 
@@ -402,7 +432,7 @@ func (g *Game) drawJunctionPaint(l *city.Lane, axis int, eyeDist float32) {
 func (g *Game) stripe(p mathx.Vec, axis int, length, width float32, col rl.Color) {
 	// Road paint sits just above the carriageway so it does not z-fight with it.
 	const y = 0.015
-	if !g.world.City.Laid() {
+	if !g.world.City.Laid() && g.land == nil {
 		if axis == 0 {
 			rl.DrawCube(vec3(p.X, y, p.Z), length, 0.02, width, col)
 			return
@@ -430,6 +460,12 @@ func (g *Game) drawBuildings(eye mathx.Vec) {
 		as := planned[i]
 		as.W, as.D = b.W, b.D
 		pushStand(as.Center, b.Center, b.Heading)
+		if g.land != nil {
+			// Level with the street at its door, and carried down to the
+			// ground wherever the hill falls away under it.
+			rl.Translatef(0, g.land.at(doorstep(as, b)), 0)
+			rl.DrawCube(vec3(as.Center.X, city.KerbHeight-plinth/2, as.Center.Z), as.W, plinth, as.D, colStone)
+		}
 		drawBuilding(as, g.town, g.light.night, g.look.snow)
 		rl.PopMatrix()
 	}
@@ -447,6 +483,7 @@ func (g *Game) drawProps(eye mathx.Vec) {
 		if p.Pos.DistTo(eye) > cullProps {
 			continue
 		}
+		g.pushUp(p.Pos)
 		switch p.Kind {
 		case city.PropTrafficLight:
 			g.drawTrafficLight(p)
@@ -459,6 +496,7 @@ func (g *Game) drawProps(eye mathx.Vec) {
 		case city.PropStreetLamp:
 			g.drawLamp(p)
 		}
+		rl.PopMatrix()
 	}
 }
 
@@ -607,7 +645,7 @@ func (g *Game) plantPark(b city.Block) {
 		return
 	}
 	size := b.Max.Sub(b.Min)
-	rise, _ := swellOf(b, g.opts.Map)
+	rise := g.raise(b)
 	n := int(size.X * size.Z / parkPerTree)
 	for i := range n {
 		h := scatter(b.Min.X, b.Min.Z, i)
@@ -617,7 +655,7 @@ func (g *Game) plantPark(b city.Block) {
 		}
 		g.trees = append(g.trees, tree{
 			at: at, height: 4.5 + h[2]*4, spread: 1.6 + h[2]*1.5, shade: i,
-			lift: rise.at(at),
+			lift: rise.lift(at),
 		})
 	}
 }
@@ -669,9 +707,10 @@ func (g *Game) drawTrees(eye mathx.Vec) {
 		if d > cullTrees {
 			continue
 		}
-		g.look.drawTree(t, city.KerbHeight+t.lift)
+		ground := city.KerbHeight + t.lift + g.land.at(t.at)
+		g.look.drawTree(t, ground)
 		if g.look.litter && d < litterRange {
-			g.look.drawLitter(t, city.KerbHeight+t.lift)
+			g.look.drawLitter(t, ground)
 		}
 	}
 }

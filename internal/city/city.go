@@ -390,6 +390,9 @@ type City struct {
 	// and ground.go.
 	drawn *City
 	land  *lie
+	// relief is the hills the place stands on, nil where it is level. Only
+	// the ground has any: a plan is drawn flat.
+	relief *relief
 	// epoch counts the times growth has changed anything, and work is the
 	// ground the last of them covered; taken is the epoch of the plan this
 	// city last caught up with.
@@ -438,6 +441,10 @@ type Params struct {
 	// place is laid exactly as drawn, every street straight; above it the
 	// junctions are moved and turned and the streets bend to join them.
 	Wind float32
+	// Hills is how far the ground swells above and below its middle height,
+	// in metres, and HillSpan how long the longest swell is. Bluff is how
+	// high the land climbs inland of a coast. At nothing a place is level.
+	Hills, HillSpan, Bluff float32
 	// Coast puts the sea along one side. Nothing is built beyond the grid
 	// line CoastRow, which becomes the seafront, with a beach below it.
 	Coast    bool

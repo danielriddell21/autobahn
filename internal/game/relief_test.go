@@ -173,8 +173,12 @@ func TestTreesOnAHillStandOnIt(t *testing.T) {
 			if tr.at.X < s.lo.X || tr.at.X > s.hi.X || tr.at.Z < s.lo.Z || tr.at.Z > s.hi.Z {
 				t.Errorf("a tree at %v is off its hill", tr.at)
 			}
-			if tr.lift != s.at(tr.at) {
-				t.Errorf("a tree at %v stands at %.2fm on ground %.2fm up", tr.at, tr.lift, s.at(tr.at))
+			// On the net, which is never far from the hill it is hung on.
+			if on := shapeOf(b, s, true).at(tr.at); tr.lift != on {
+				t.Errorf("a tree at %v stands at %.2fm on a net %.2fm up", tr.at, tr.lift, on)
+			}
+			if d := mathx.Abs(tr.lift - s.at(tr.at)); d > 0.4 {
+				t.Errorf("a tree at %v stands %.2fm off the hill", tr.at, d)
 			}
 		}
 	}
@@ -193,5 +197,70 @@ func TestACameraHighUpLooksFromFurtherOff(t *testing.T) {
 	}
 	if far < 1200 {
 		t.Errorf("from 400m up the camera sees only %.0fm", far)
+	}
+}
+
+// Whatever is put on a block is put on its net, so the net's height has to
+// be the height of the triangles that are drawn: exact at every knot, and
+// along every line and diagonal between two of them.
+func TestTheNetIsAsHighAsItIsDrawn(t *testing.T) {
+	for _, m := range []city.Map{city.MapSeaside, city.MapVillage} {
+		checked := 0
+		for _, b := range planOf(t, m).Blocks {
+			s, ok := swellOf(b, m)
+			if !ok {
+				continue
+			}
+			r := shapeOf(b, s, true)
+			if r == nil {
+				continue
+			}
+			checked++
+			for j := range len(r.zs) - 1 {
+				for i := range len(r.xs) - 1 {
+					a, c := mathx.V(r.xs[i], r.zs[j]), mathx.V(r.xs[i+1], r.zs[j+1])
+					if got, want := r.at(a), s.at(a); mathx.Abs(got-want) > 1e-3 {
+						t.Fatalf("%s: at the knot %v the net is %.3fm up and the hill %.3fm", m.Name(), a, got, want)
+					}
+					// Half way along the diagonal the two triangles share.
+					mid := a.Lerp(c, 0.5)
+					if got, want := r.at(mid), (s.at(a)+s.at(c))/2; mathx.Abs(got-want) > 2e-3 {
+						t.Fatalf("%s: half way from %v to %v the net is %.3fm up, want %.3f", m.Name(), a, c, got, want)
+					}
+				}
+			}
+			// Out on the rim there is no net and nothing rises.
+			if h := r.at(b.Min.Add(mathx.V(1, 1))); h != 0 {
+				t.Errorf("%s: the rim at %v stands %.2fm up", m.Name(), b.Min, h)
+			}
+			if h := r.at(b.Min.Sub(mathx.V(30, 30))); h != 0 {
+				t.Errorf("%s: off the block altogether the ground stands %.2fm up", m.Name(), h)
+			}
+		}
+		if checked == 0 {
+			t.Errorf("%s: no net to check", m.Name())
+		}
+	}
+	var none *risen
+	if none.lift(mathx.V(3, 4)) != 0 {
+		t.Error("a block with no net lifts what stands on it")
+	}
+}
+
+func TestBetween(t *testing.T) {
+	ls := []float32{10, 14, 20, 21}
+	for _, c := range []struct {
+		at float32
+		i  int
+		f  float32
+		ok bool
+	}{{9, 0, 0, false}, {22, 0, 0, false}, {10, 0, 0, true}, {12, 0, 0.5, true}, {14, 0, 1, true}, {17, 1, 0.5, true}, {21, 2, 1, true}} {
+		i, f, ok := between(ls, c.at)
+		if ok != c.ok || (ok && (i != c.i || mathx.Abs(f-c.f) > 1e-5)) {
+			t.Errorf("between(%v) = %d, %.2f, %v; want %d, %.2f, %v", c.at, i, f, ok, c.i, c.f, c.ok)
+		}
+	}
+	if _, _, ok := between([]float32{5}, 5); ok {
+		t.Error("one line has nothing between it")
 	}
 }

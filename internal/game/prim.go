@@ -17,31 +17,33 @@ func sqrt32(v float32) float32 { return float32(math.Sqrt(float64(v))) }
 // tint sets the colour for the vertices that follow.
 func tint(c rl.Color) { rl.Color4ub(c.R, c.G, c.B, c.A) }
 
-// groundFan fills a polygon lying flat at height y, as a fan about a point
-// inside it. The polygon has to be star-shaped about that point.
-func groundFan(centre mathx.Vec, outline []mathx.Vec, y float32, col rl.Color) {
+// groundFan fills a polygon lying on the ground at height y above it, as a
+// fan about a point inside it. The polygon has to be star-shaped about that
+// point.
+func groundFan(l land, centre mathx.Vec, outline []mathx.Vec, y float32, col rl.Color) {
 	if len(outline) < 3 {
 		return
 	}
 	rl.Begin(rl.Triangles)
 	tint(col)
 	rl.Normal3f(0, 1, 0)
+	yc := y + l.at(centre)
 	for i, p := range outline {
 		q := outline[(i+1)%len(outline)]
 		// Wound so the face points up whichever way round the outline runs.
 		if p.Sub(centre).Cross(q.Sub(centre)) > 0 {
 			p, q = q, p
 		}
-		rl.Vertex3f(centre.X, y, centre.Z)
-		rl.Vertex3f(p.X, y, p.Z)
-		rl.Vertex3f(q.X, y, q.Z)
+		rl.Vertex3f(centre.X, yc, centre.Z)
+		rl.Vertex3f(p.X, y+l.at(p), p.Z)
+		rl.Vertex3f(q.X, y+l.at(q), q.Z)
 	}
 	rl.End()
 }
 
-// groundWall stands a wall round a polygon, from height y0 up to y1, facing
-// outward from the given centre.
-func groundWall(centre mathx.Vec, outline []mathx.Vec, y0, y1 float32, col rl.Color) {
+// groundWall stands a wall round a polygon, from height y0 above the ground
+// up to y1, facing outward from the given centre.
+func groundWall(l land, centre mathx.Vec, outline []mathx.Vec, y0, y1 float32, col rl.Color) {
 	if len(outline) < 3 {
 		return
 	}
@@ -58,33 +60,22 @@ func groundWall(centre mathx.Vec, outline []mathx.Vec, y0, y1 float32, col rl.Co
 			out = out.Mul(-1)
 			p, q = q, p
 		}
+		hp, hq := l.at(p), l.at(q)
 		rl.Normal3f(out.X, 0, out.Z)
-		rl.Vertex3f(p.X, y0, p.Z)
-		rl.Vertex3f(p.X, y1, p.Z)
-		rl.Vertex3f(q.X, y1, q.Z)
-		rl.Vertex3f(p.X, y0, p.Z)
-		rl.Vertex3f(q.X, y1, q.Z)
-		rl.Vertex3f(q.X, y0, q.Z)
+		rl.Vertex3f(p.X, hp+y0, p.Z)
+		rl.Vertex3f(p.X, hp+y1, p.Z)
+		rl.Vertex3f(q.X, hq+y1, q.Z)
+		rl.Vertex3f(p.X, hp+y0, p.Z)
+		rl.Vertex3f(q.X, hq+y1, q.Z)
+		rl.Vertex3f(q.X, hq+y0, q.Z)
 	}
 	rl.End()
 }
 
-// groundQuad lays a flat four-sided patch at height y. The corners are given
-// in order round the patch.
-func groundQuad(a, b, c, d mathx.Vec, y float32, col rl.Color) {
-	rl.Begin(rl.Triangles)
-	tint(col)
-	rl.Normal3f(0, 1, 0)
-	if b.Sub(a).Cross(c.Sub(a)) > 0 {
-		b, d = d, b
-	}
-	rl.Vertex3f(a.X, y, a.Z)
-	rl.Vertex3f(b.X, y, b.Z)
-	rl.Vertex3f(c.X, y, c.Z)
-	rl.Vertex3f(a.X, y, a.Z)
-	rl.Vertex3f(c.X, y, c.Z)
-	rl.Vertex3f(d.X, y, d.Z)
-	rl.End()
+// groundQuad lays a four-sided patch at height y above the ground. The
+// corners are given in order round the patch.
+func groundQuad(l land, a, b, c, d mathx.Vec, y float32, col rl.Color) {
+	groundPatch(a, b, c, d, [4]float32{y + l.at(a), y + l.at(b), y + l.at(c), y + l.at(d)}, col)
 }
 
 // groundPatch lays a four-sided patch whose corners, given in order round
@@ -106,40 +97,42 @@ func groundPatch(a, b, c, d mathx.Vec, y [4]float32, col rl.Color) {
 	rl.End()
 }
 
-// groundDisc lays a flat disc at height y, bright in the middle and fading to
-// nothing at the rim, which is how a pool of light on the road is drawn.
-func groundDisc(centre mathx.Vec, radius, y float32, col rl.Color, sides int) {
+// groundDisc lays a disc at height y above the ground, bright in the middle
+// and fading to nothing at the rim, which is how a pool of light on the road
+// is drawn.
+func groundDisc(l land, centre mathx.Vec, radius, y float32, col rl.Color, sides int) {
 	rl.Begin(rl.Triangles)
 	// No normal at all, which is how the shader knows this is light rather
 	// than something light falls on.
 	rl.Normal3f(0, 0, 0)
+	yc := y + l.at(centre)
 	for i := range sides {
 		a0 := float32(i) / float32(sides) * 2 * math.Pi
 		a1 := float32(i+1) / float32(sides) * 2 * math.Pi
 		p := centre.Add(mathx.FromAngle(a1).Mul(radius))
 		q := centre.Add(mathx.FromAngle(a0).Mul(radius))
 		tint(col)
-		rl.Vertex3f(centre.X, y, centre.Z)
+		rl.Vertex3f(centre.X, yc, centre.Z)
 		rl.Color4ub(col.R, col.G, col.B, 0)
-		rl.Vertex3f(p.X, y, p.Z)
-		rl.Vertex3f(q.X, y, q.Z)
+		rl.Vertex3f(p.X, y+l.at(p), p.Z)
+		rl.Vertex3f(q.X, y+l.at(q), q.Z)
 	}
 	rl.End()
 }
 
 // groundBeam lays a fan of light on the road ahead of a lamp: bright at the
 // lamp and fading out along its throw.
-func groundBeam(from, dir mathx.Vec, length, spread, y float32, col rl.Color) {
+func groundBeam(l land, from, dir mathx.Vec, length, spread, y float32, col rl.Color) {
 	side := dir.Right()
-	l := from.Add(dir.Mul(length)).Sub(side.Mul(spread))
-	r := from.Add(dir.Mul(length)).Add(side.Mul(spread))
+	a := from.Add(dir.Mul(length)).Sub(side.Mul(spread))
+	b := from.Add(dir.Mul(length)).Add(side.Mul(spread))
 	rl.Begin(rl.Triangles)
 	rl.Normal3f(0, 0, 0)
 	tint(col)
-	rl.Vertex3f(from.X, y, from.Z)
+	rl.Vertex3f(from.X, y+l.at(from), from.Z)
 	rl.Color4ub(col.R, col.G, col.B, 0)
-	rl.Vertex3f(r.X, y, r.Z)
-	rl.Vertex3f(l.X, y, l.Z)
+	rl.Vertex3f(b.X, y+l.at(b), b.Z)
+	rl.Vertex3f(a.X, y+l.at(a), a.Z)
 	rl.End()
 }
 

@@ -150,6 +150,13 @@ type Game struct {
 	// that of the block being dressed, nil on the level.
 	risen []*risen
 	rise  *risen
+	// baking is the patch a block's ground is being made in, while it is:
+	// what is laid flat then goes into it rather than being drawn.
+	baking *patchwork
+	// land is how high the ground stands, nil in a level place; tiles are
+	// the sheets of ground laid over it.
+	land  land
+	tiles map[tile]*patch
 	// viewW and viewH are the size of whatever is being drawn to, as the sky
 	// was last painted for it.
 	viewW, viewH int
@@ -318,6 +325,9 @@ func New(opts Options) *Game {
 	g.aiTarget = rl.LoadRenderTexture(int32(opts.CamWidth), int32(opts.CamHeight))
 
 	g.scene = loadSceneShader()
+	if g.world.City.Hilly() {
+		g.land = g.world.City.Height
+	}
 	g.look = lookFor(opts.Map.Season())
 	g.town = townFor(opts.Map)
 	g.clock.minutes = opts.DayLength
@@ -374,6 +384,7 @@ func (g *Game) watchInfractions() {
 func (g *Game) Close() {
 	g.audio.Close()
 	rl.UnloadRenderTexture(g.aiTarget)
+	g.freeGround()
 	if g.scene.ok {
 		rl.UnloadShader(g.scene.shader)
 	}
@@ -738,19 +749,24 @@ func (g *Game) updateCameras(dt float32) {
 	// was built with. It never smooths, because a real sensor does not. The pose
 	// comes from the annotator so the rendered view and the projected boxes
 	// cannot disagree.
-	g.aiView = annotate.BonnetView(g.visionCam, p.Pos, p.Yaw)
+	g.aiView = annotate.BonnetView(g.visionCam, g.world.City.StandAt(p.Pos, p.Yaw))
 	g.aiCam.Position = vec3(g.aiView.Position.X, g.aiView.Position.Y, g.aiView.Position.Z)
 	g.aiCam.Target = vec3(g.aiView.Target.X, g.aiView.Target.Y, g.aiView.Target.Z)
-	mount := p.Pos.Add(fwd.Mul(1.7))
-	look := mount.Add(fwd.Mul(24))
+	g.aiCam.Up = vec3(g.aiView.Up.X, g.aiView.Up.Y, g.aiView.Up.Z)
+	// Every other camera stands on the same ground, and looks at it.
+	car := g.world.City.StandAt(p.Pos, p.Yaw)
+	v3 := func(v mathx.Vec3) rl.Vector3 { return vec3(v.X, v.Y, v.Z) }
+	g.cam.Up = vec3(0, 1, 0)
 
 	if g.camMode != CameraHigh {
 		g.cam.Fovy = g.speedLens(p, dt)
 	}
 	switch g.camMode {
 	case CameraBonnet:
-		g.cam.Position = vec3(mount.X, 1.45, mount.Z)
-		g.cam.Target = vec3(look.X, 1.25, look.Z)
+		// On the bonnet, and so tipped as the car is.
+		g.cam.Position = v3(car.Point(1.7, 0, 1.45))
+		g.cam.Target = v3(car.Point(25.7, 0, 1.25))
+		g.cam.Up = v3(car.Up)
 	case CameraHigh:
 		// A plan view: a narrow lens a long way up, rather than a wide one
 		// just overhead. With a 62 degree lens at rooftop height the towers
@@ -760,8 +776,8 @@ func (g *Game) updateCameras(dt float32) {
 		// footprint.
 		g.cam.Fovy = planFov
 		alt := g.overheadHeight / float32(math.Tan(float64(planFov)*0.5*math.Pi/180))
-		g.cam.Position = vec3(p.Pos.X, alt, p.Pos.Z+0.1)
-		g.cam.Target = vec3(p.Pos.X, 0, p.Pos.Z)
+		g.cam.Position = vec3(p.Pos.X, car.At.Y+alt, p.Pos.Z+0.1)
+		g.cam.Target = vec3(p.Pos.X, car.At.Y, p.Pos.Z)
 	default:
 		// Chase camera: trails the car, and swings wider as speed rises.
 		back := 9.2 + min(p.Speed()*0.14, 3.6)
@@ -777,9 +793,12 @@ func (g *Game) updateCameras(dt float32) {
 		}
 		sx, sy := g.rattle()
 		side := fwd.Right().Mul(sx)
-		g.cam.Position = vec3(g.camPos.X+side.X, 4.3+sy, g.camPos.Z+side.Z)
+		// Never lower over the ground it is over than it would be on the
+		// level, so a hill behind the car cannot come between the two.
+		at := mathx.V(g.camPos.X+side.X, g.camPos.Z+side.Z)
+		g.cam.Position = vec3(at.X, max(g.land.at(at), car.At.Y)+4.3+sy, at.Z)
 		ahead := p.Pos.Add(fwd.Mul(9))
-		g.cam.Target = vec3(ahead.X, 1.0, ahead.Z)
+		g.cam.Target = vec3(ahead.X, g.land.at(ahead)+1.0, ahead.Z)
 	}
 }
 
@@ -826,7 +845,7 @@ func (g *Game) watchMirrors() {
 		if g.eyes[m] == nil {
 			g.eyes[m] = annotate.NewMirrorEye(cams[m].Width, cams[m].Height)
 		}
-		g.driver.Watch(vision.Mirror(m), g.eyes[m].Look(g.world, cams[m], p.Pos, p.Yaw))
+		g.driver.Watch(vision.Mirror(m), g.eyes[m].Look(g.world, cams[m], g.world.City.StandAt(p.Pos, p.Yaw)))
 		g.mirrorBoxes[m] = g.eyes[m].Boxes
 	}
 }

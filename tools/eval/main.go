@@ -193,10 +193,11 @@ func (s *session) step() {
 	// Perception on its own clock, as in the game.
 	if s.perceived += fixedStep; s.perceived >= s.interval || s.dets == nil {
 		s.perceived = 0
-		annotate.RasteriseInto(s.frame, annotate.Layout(w, annotate.BonnetView(s.cam, w.Player.Pos, w.Player.Yaw)))
+		car := w.City.StandAt(w.Player.Pos, w.Player.Yaw)
+		annotate.RasteriseInto(s.frame, annotate.Layout(w, annotate.BonnetView(s.cam, car)))
 		s.dets = s.scanner.Scan(annotate.Pixels(s.frame, s.px), s.cam.Width, s.cam.Height)
 		for m, eye := range s.eyes {
-			s.driver.Watch(vision.Mirror(m), eye.Look(w, s.mirrors[m], w.Player.Pos, w.Player.Yaw))
+			s.driver.Watch(vision.Mirror(m), eye.Look(w, s.mirrors[m], car))
 		}
 		s.looks++
 		s.seen += len(s.dets)

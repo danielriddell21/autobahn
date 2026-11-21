@@ -291,6 +291,7 @@ func (g *Game) drawFall(eye mathx.Vec) {
 	for i := range lk.fall {
 		x, y, z := fallAt(i, g.world.Time, eye, lk.fallSpeed)
 		s := lk.fallSize
+		y += g.land.at(mathx.V(x, z))
 		rl.DrawCube(vec3(x, y, z), s, s*0.4, s*0.8, lk.fallShade[i%3])
 	}
 }

@@ -20,7 +20,7 @@ func world(t *testing.T) *sim.World {
 func bonnet() (vision.Camera, func(*sim.World) annotate.View) {
 	cam := vision.DefaultCamera(420, 236)
 	return cam, func(w *sim.World) annotate.View {
-		return annotate.BonnetView(cam, w.Player.Pos, w.Player.Yaw)
+		return annotate.BonnetView(cam, w.City.StandAt(w.Player.Pos, w.Player.Yaw))
 	}
 }
 
@@ -129,7 +129,8 @@ func TestLayoutOrdersLaneMarkersBeforeVehicles(t *testing.T) {
 func TestBonnetViewSitsAheadOfTheCarAndLooksDown(t *testing.T) {
 	cam := vision.DefaultCamera(420, 236)
 	pos := mathx.V(10, 20)
-	v := annotate.BonnetView(cam, pos, 0) // facing +X
+	level := city.NewGrowing(city.ParamsFor(city.MapCity, 7))
+	v := annotate.BonnetView(cam, level.StandAt(pos, 0)) // facing +X
 
 	if v.Position.X <= pos.X {
 		t.Errorf("camera at X=%v is not ahead of a car at X=%v", v.Position.X, pos.X)
@@ -262,7 +263,7 @@ func TestMirrorsPlaceTheCarsAroundUs(t *testing.T) {
 		mirrors := d.Mirrors()
 		for m := range mirrors {
 			eye := annotate.NewMirrorEye(mirrors[m].Width, mirrors[m].Height)
-			d.Watch(vision.Mirror(m), eye.Look(w, mirrors[m], w.Player.Pos, w.Player.Yaw))
+			d.Watch(vision.Mirror(m), eye.Look(w, mirrors[m], w.City.StandAt(w.Player.Pos, w.Player.Yaw)))
 		}
 		found := false
 		for _, n := range d.Around() {
@@ -282,12 +283,12 @@ func TestMirrorsShowOnlyWhatIsBehindAndBeside(t *testing.T) {
 	a := w.Agents[0]
 	put(w, a, 20, 0)
 	cams := vision.MirrorCameras(256, 144)
-	rear := annotate.LayoutMirror(w, annotate.MirrorView(cams[vision.MirrorRear], w.Player.Pos, w.Player.Yaw))
+	rear := annotate.LayoutMirror(w, annotate.MirrorView(cams[vision.MirrorRear], w.City.StandAt(w.Player.Pos, w.Player.Yaw)))
 	if len(rear) != 0 {
 		t.Errorf("a car 20m ahead showed in the rear mirror: %+v", rear)
 	}
 	put(w, a, -20, 0)
-	rear = annotate.LayoutMirror(w, annotate.MirrorView(cams[vision.MirrorRear], w.Player.Pos, w.Player.Yaw))
+	rear = annotate.LayoutMirror(w, annotate.MirrorView(cams[vision.MirrorRear], w.City.StandAt(w.Player.Pos, w.Player.Yaw)))
 	if len(rear) != 1 || rear[0].Class != vision.ClassVehicle {
 		t.Errorf("a car 20m behind should show once in the rear mirror, got %+v", rear)
 	}
@@ -308,5 +309,99 @@ func TestSideLanesAreMarkedOnADualCarriageway(t *testing.T) {
 	}
 	if side == 0 {
 		t.Error("no markers for the lane alongside on a dual carriageway")
+	}
+}
+
+// hillStart puts the player on a lane where the road climbs or falls, with
+// one other car a way ahead of it on the same lane and the rest sent away.
+func hillStart(t *testing.T, ahead float32) (w *sim.World, grade float32) {
+	t.Helper()
+	w = sim.NewWorld(sim.Config{Seed: 7, Traffic: 12, Police: 0, Map: city.MapVillage})
+	for _, l := range w.City.Lanes {
+		if l.Length < ahead+30 || w.City.Roads[l.Road].Ring {
+			continue
+		}
+		at := l.Point(10)
+		g := w.City.Grade(at, l.DirAt(10))
+		if mathx.Abs(g) < 0.035 {
+			continue
+		}
+		w.Player.Place(at, l.HeadingAt(10))
+		for i, a := range w.Agents {
+			a.V.Place(mathx.V(5000+float32(i)*20, 5000), 0)
+		}
+		lead := w.Agents[0]
+		lead.V.Place(l.Point(10+ahead), l.HeadingAt(10+ahead))
+		return w, g
+	}
+	t.Fatal("setup failed: no lane on a hill")
+	return nil, 0
+}
+
+// The camera is fixed to the car and tips with it, so a car ahead on the same
+// slope is ranged as it would be on the level. Were the camera held level
+// instead, a car up a one-in-twenty hill thirty metres off would sit a metre
+// and a half higher in the picture than the autopilot allows for, and look
+// most of a hundred metres away.
+func TestACarAheadOnAHillIsRangedAsOnTheLevel(t *testing.T) {
+	const ahead = 30
+	w, grade := hillStart(t, ahead)
+	cam, view := bonnet()
+	lead := w.Agents[0]
+	// The lens is ahead of the middle of the car, and the box's foot is the
+	// lead car's tail.
+	want := w.Player.Pos.DistTo(lead.V.Pos) - 1.7 - lead.V.Spec.HalfLength
+
+	var found bool
+	for _, b := range annotate.Layout(w, view(w)) {
+		if b.Class != vision.ClassVehicle {
+			continue
+		}
+		found = true
+		got := cam.GroundDistance(b.MaxY)
+		if got < want*0.85 || got > want*1.15 {
+			t.Errorf("on a grade of %.3f a car %.1fm off is ranged at %.1fm", grade, want, got)
+		}
+	}
+	if !found {
+		t.Fatalf("on a grade of %.3f the car ahead is not in the picture", grade)
+	}
+}
+
+func TestTheCameraStandsOnTheHillAndLeansWithIt(t *testing.T) {
+	w, grade := hillStart(t, 30)
+	cam, view := bonnet()
+	v := view(w)
+	ground := w.City.Height(mathx.V(v.Position.X, v.Position.Z))
+	if up := v.Position.Y - ground; mathx.Abs(up-cam.Mount) > 0.05 {
+		t.Errorf("the lens is %.2fm above the road under it, want the calibrated %.2f", up, cam.Mount)
+	}
+	if v.Up.Y <= 0.9 || v.Up.Y >= 1 {
+		t.Errorf("on a grade of %.3f the camera's up is %v", grade, v.Up)
+	}
+	// It looks along the road: further up a climb, further down a fall, than
+	// its own tilt would have it on the level.
+	run := mathx.V(v.Target.X-v.Position.X, v.Target.Z-v.Position.Z).Len()
+	level := -run * mathx.Tan(cam.Pitch)
+	if lift := v.Target.Y - v.Position.Y - level; lift*grade <= 0 {
+		t.Errorf("on a grade of %.3f the camera looks %.2fm off where a level one would", grade, lift)
+	}
+}
+
+func TestMirrorsSeeACarBehindOnAHill(t *testing.T) {
+	w, _ := hillStart(t, 30)
+	// Turn the two round: the other car is now behind.
+	p, lead := w.Player, w.Agents[0]
+	pp, py := p.Pos, p.Yaw
+	p.Place(lead.V.Pos, lead.V.Yaw)
+	lead.V.Place(pp, py)
+	cams := vision.MirrorCameras(160, 90)
+	rear := annotate.LayoutMirror(w, annotate.MirrorView(cams[vision.MirrorRear], w.City.StandAt(p.Pos, p.Yaw)))
+	if len(rear) != 1 {
+		t.Fatalf("the rear mirror shows %d cars, want the one behind", len(rear))
+	}
+	want := p.Pos.DistTo(lead.V.Pos) - 2.1 - lead.V.Spec.HalfLength
+	if got := cams[vision.MirrorRear].GroundDistance(rear[0].MaxY); got < want*0.8 || got > want*1.2 {
+		t.Errorf("a car %.1fm behind on a hill is ranged at %.1fm", want, got)
 	}
 }

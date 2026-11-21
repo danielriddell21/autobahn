@@ -25,6 +25,14 @@ import (
 // layPiece is the longest piece a line on the ground is laid in, in metres.
 const layPiece float32 = 4
 
+// drapePiece is the longest piece a line is laid in over ground that has a
+// shape of its own.
+const drapePiece float32 = 2
+
+// hillLift is how much further above the ground something flat is laid on a
+// hill than on the level, in metres.
+const hillLift float32 = 0.012
+
 // pushStand begins drawing something planned to stand at one place, where it
 // stands on the ground. Whatever is drawn before the matching [rl.PopMatrix]
 // is drawn in the plan's own coordinates.
@@ -40,8 +48,27 @@ func pushStand(planned, on mathx.Vec, turn float32) {
 func (g *Game) stand(planned mathx.Vec) {
 	on, turn := g.world.City.Lay(planned)
 	pushStand(planned, on, turn)
-	if up := g.lift(planned); up != 0 {
+	if up := g.lift(planned) + g.land.at(on); up != 0 {
 		// Up is up however the ground has turned.
+		rl.Translatef(0, up, 0)
+	}
+}
+
+// standOn begins drawing something planned to stand at one place where it
+// stands on the ground, as pushStand does, and as high as the land is there.
+func (g *Game) standOn(planned, on mathx.Vec, turn float32) {
+	pushStand(planned, on, turn)
+	if up := g.land.at(on); up != 0 {
+		rl.Translatef(0, up, 0)
+	}
+}
+
+// pushUp begins drawing something that stands at a point on the ground, as
+// high as the land is there. Whatever is drawn before the matching
+// [rl.PopMatrix] is drawn where it would be on the level, and lifted.
+func (g *Game) pushUp(on mathx.Vec) {
+	rl.PushMatrix()
+	if up := g.land.at(on); up != 0 {
 		rl.Translatef(0, up, 0)
 	}
 }
@@ -49,17 +76,12 @@ func (g *Game) stand(planned mathx.Vec) {
 // flat lays a four-cornered patch of ground.
 func (g *Game) flat(a, b, c, d mathx.Vec, y float32, col rl.Color) {
 	city := g.world.City
+	var up [4]float32
 	if g.rise != nil {
-		// On ground that rises a patch is draped: each corner as high as
-		// the ground is there, and a little over.
-		ya, yb, yc, yd := g.lift(a), g.lift(b), g.lift(c), g.lift(d)
-		a, _ = city.Lay(a)
-		b, _ = city.Lay(b)
-		c, _ = city.Lay(c)
-		d, _ = city.Lay(d)
+		// On a block whose ground has a shape a patch is draped: each
+		// corner as high as the ground is there, and a little over.
+		up = [4]float32{g.lift(a), g.lift(b), g.lift(c), g.lift(d)}
 		y += drape
-		groundPatch(a, b, c, d, [4]float32{y + ya, y + yb, y + yc, y + yd}, col)
-		return
 	}
 	if city.Laid() {
 		a, _ = city.Lay(a)
@@ -67,7 +89,27 @@ func (g *Game) flat(a, b, c, d mathx.Vec, y float32, col rl.Color) {
 		c, _ = city.Lay(c)
 		d, _ = city.Lay(d)
 	}
-	groundQuad(a, b, c, d, y, col)
+	if g.rise == nil && g.land == nil {
+		groundPatch(a, b, c, d, [4]float32{y, y, y, y}, col)
+		return
+	}
+	if g.baking != nil {
+		g.baking.lay(a, b, c, d, [4]float32{
+			y + up[0] + g.land.at(a), y + up[1] + g.land.at(b),
+			y + up[2] + g.land.at(c), y + up[3] + g.land.at(d),
+		}, col)
+		return
+	}
+	if g.rise == nil {
+		// Paint on a road over a hill: the road under it is flat between
+		// its own corners, which are not these, so it is given a hair more
+		// room than on the level.
+		y += hillLift
+	}
+	groundPatch(a, b, c, d, [4]float32{
+		y + up[0] + g.land.at(a), y + up[1] + g.land.at(b),
+		y + up[2] + g.land.at(c), y + up[3] + g.land.at(d),
+	}, col)
 }
 
 // strip lays a band of ground from a to b, so wide, in pieces short enough
@@ -81,7 +123,11 @@ func (g *Game) strip(a, b mathx.Vec, width, y float32, col rl.Color) {
 	dir := run.Mul(1 / length)
 	side := dir.Right().Mul(width / 2)
 	pieces := 1
-	if g.world.City.Laid() {
+	switch {
+	case g.rise != nil:
+		// Short enough to go over a bank without cutting through it.
+		pieces = max(int(length/drapePiece), 1)
+	case g.world.City.Laid() || g.land != nil:
 		pieces = max(int(length/layPiece), 1)
 	}
 	for i := range pieces {

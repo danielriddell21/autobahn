@@ -27,8 +27,11 @@ import (
 // minimum needed to project a world point onto the image.
 type View struct {
 	Position, Target mathx.Vec3
-	FovY             float32 // vertical field of view, degrees
-	Width, Height    int
+	// Up is which way is up for the camera. Left at nothing it is the
+	// world's; a camera on a car on a hill leans with the car.
+	Up            mathx.Vec3
+	FovY          float32 // vertical field of view, degrees
+	Width, Height int
 }
 
 // Box is one detection box in screen space, in pixels.
@@ -98,6 +101,9 @@ func newProjector(v View) projector {
 	fwd := v.Target.Sub(v.Position).Norm()
 	// A camera looking straight down has no usable roll reference, so nudge it.
 	worldUp := mathx.V3(0, 1, 0)
+	if v.Up != (mathx.Vec3{}) {
+		worldUp = v.Up.Norm()
+	}
 	if mathx.Abs(fwd.Dot(worldUp)) > 0.999 {
 		worldUp = mathx.V3(0, 0, 1)
 	}
@@ -130,7 +136,7 @@ func (p projector) project(w mathx.Vec3) (x, y float32, ok bool) {
 // a real detector would have to cope with.
 func Layout(w *sim.World, v View) []Box {
 	pr := newProjector(v)
-	lo := &layout{p: pr, eye: v.Position.Ground(), fwd: pr.fwd.Ground().Norm()}
+	lo := &layout{p: pr, land: w.City, eye: v.Position.Ground(), fwd: pr.fwd.Ground().Norm()}
 
 	// Lane guidance first, so anything solid paints over it: the lanes
 	// alongside, then the car's own over them.
@@ -143,9 +149,16 @@ func Layout(w *sim.World, v View) []Box {
 }
 
 type layout struct {
-	p        projector
+	p projector
+	// land is the ground everything stands on, which says how high.
+	land     *city.City
 	eye, fwd mathx.Vec
 	out      []Box
+}
+
+// box projects a box standing on the ground, as boxOf does, on this land.
+func (lo *layout) box(cl vision.Class, ground mathx.Vec, centreY, halfW, halfH, halfL, yaw float32) (Box, bool) {
+	return boxOf(lo.p, lo.land, cl, ground, centreY, halfW, halfH, halfL, yaw)
 }
 
 func (lo *layout) visible(at mathx.Vec, limit float32) bool {
@@ -168,7 +181,7 @@ func (lo *layout) laneMarkers(w *sim.World) {
 		if i%2 == 1 {
 			cl = vision.ClassLaneMarkerAlt
 		}
-		lo.add(boxOf(lo.p, cl, pt, laneMarkerRise, laneMarkerSize, laneMarkerRise, laneMarkerSize, 0))
+		lo.add(lo.box(cl, pt, laneMarkerRise, laneMarkerSize, laneMarkerRise, laneMarkerSize, 0))
 	}
 }
 
@@ -203,7 +216,7 @@ func (lo *layout) sideLanes(w *sim.World) {
 			if !lo.visible(pt, sideLaneRange+5) {
 				continue
 			}
-			lo.add(boxOf(lo.p, cl, pt, sideMarkerRise, sideMarkerSize, sideMarkerRise, sideMarkerSize, 0))
+			lo.add(lo.box(cl, pt, sideMarkerRise, sideMarkerSize, sideMarkerRise, sideMarkerSize, 0))
 		}
 	}
 }
@@ -218,7 +231,7 @@ func (lo *layout) stopLine(w *sim.World) {
 		return
 	}
 	hw := w.City.RoadHalfWidth(l)
-	lo.add(boxOf(lo.p, vision.ClassStopLine, at, 0.9, hw*0.5, 0.9, 0.3, l.Heading))
+	lo.add(lo.box(vision.ClassStopLine, at, 0.9, hw*0.5, 0.9, 0.3, l.Heading))
 }
 
 func (lo *layout) props(w *sim.World) {
@@ -228,13 +241,13 @@ func (lo *layout) props(w *sim.World) {
 		}
 		switch prop.Kind {
 		case city.PropTrafficLight:
-			lo.add(boxOf(lo.p, signalClass(w, prop), prop.Pos, prop.Height-SignalDrop, 0.55, SignalHalf, 0.3, prop.Heading))
+			lo.add(lo.box(signalClass(w, prop), prop.Pos, prop.Height-SignalDrop, 0.55, SignalHalf, 0.3, prop.Heading))
 		case city.PropStopSign:
-			lo.add(boxOf(lo.p, vision.ClassStopSign, prop.Pos, prop.Height-SignDrop, 0.5, SignHalf, 0.12, prop.Heading))
+			lo.add(lo.box(vision.ClassStopSign, prop.Pos, prop.Height-SignDrop, 0.5, SignHalf, 0.12, prop.Heading))
 		case city.PropGiveWaySign:
-			lo.add(boxOf(lo.p, vision.ClassGiveWay, prop.Pos, prop.Height-SignDrop, 0.5, SignHalf, 0.12, prop.Heading))
+			lo.add(lo.box(vision.ClassGiveWay, prop.Pos, prop.Height-SignDrop, 0.5, SignHalf, 0.12, prop.Heading))
 		case city.PropSpeedSign:
-			lo.add(boxOf(lo.p, speedClass(prop.Limit), prop.Pos, prop.Height-SpeedSignDrop, 0.45, SpeedSignHalf, 0.12, prop.Heading))
+			lo.add(lo.box(speedClass(prop.Limit), prop.Pos, prop.Height-SpeedSignDrop, 0.45, SpeedSignHalf, 0.12, prop.Heading))
 		}
 	}
 }
@@ -261,7 +274,7 @@ func (lo *layout) vehiclesWithin(w *sim.World, limit float32) {
 			cl = vision.ClassPolice
 		}
 		s := a.V.Spec
-		lo.add(boxOf(lo.p, cl, a.V.Pos, s.Height/2, s.HalfWidth, s.Height/2, s.HalfLength, a.V.Yaw))
+		lo.add(lo.box(cl, a.V.Pos, s.Height/2, s.HalfWidth, s.Height/2, s.HalfLength, a.V.Yaw))
 	}
 }
 
@@ -291,9 +304,11 @@ func speedClass(limit float32) vision.Class {
 	}
 }
 
-func boxOf(p projector, cl vision.Class, ground mathx.Vec, centreY, halfW, halfH, halfL, yaw float32) (Box, bool) {
+func boxOf(p projector, land *city.City, cl vision.Class, ground mathx.Vec, centreY, halfW, halfH, halfL, yaw float32) (Box, bool) {
 	// Projects an oriented box standing on the ground to its screen-space
 	// bounding rectangle, and reports false when nothing usable lands on the image.
+	// Each corner stands on the ground under it, so on a hill the foot of
+	// the box follows the road, which is the edge things are ranged by.
 	f := mathx.FromAngle(yaw)
 	r := f.Right()
 
@@ -303,7 +318,8 @@ func boxOf(p projector, cl vision.Class, ground mathx.Vec, centreY, halfW, halfH
 	for i := range 8 {
 		sx, sy, sz := corner(i)
 		off := f.Mul(halfL * sz).Add(r.Mul(halfW * sx))
-		x, y, ok := p.project(mathx.V3(ground.X+off.X, centreY+halfH*sy, ground.Z+off.Z))
+		at := ground.Add(off)
+		x, y, ok := p.project(mathx.V3(at.X, land.Height(at)+centreY+halfH*sy, at.Z))
 		if !ok {
 			continue
 		}
@@ -394,41 +410,45 @@ func set(img *image.RGBA, x, y int, c color.RGBA) {
 // cameras. A mirror is for traffic, so it shows vehicles and nothing else.
 func LayoutMirror(w *sim.World, v View) []Box {
 	pr := newProjector(v)
-	lo := &layout{p: pr, eye: v.Position.Ground(), fwd: pr.fwd.Ground().Norm()}
+	lo := &layout{p: pr, land: w.City, eye: v.Position.Ground(), fwd: pr.fwd.Ground().Norm()}
 	lo.vehiclesWithin(w, mirrorRange)
 	return lo.out
 }
 
-// MirrorView returns the view through a mirror camera on a car at the given
-// pose, placed and pointed by the camera's own calibration.
-func MirrorView(c vision.Camera, pos mathx.Vec, yaw float32) View {
+// MirrorView returns the view through a mirror camera on a car standing as
+// given, placed and pointed by the camera's own calibration.
+func MirrorView(c vision.Camera, car city.Stand) View {
 	const look = 24 // an arbitrary distance along the optical axis
 
-	fwd := mathx.FromAngle(yaw)
-	eye := pos.Add(fwd.Mul(c.Ahead)).Add(fwd.Right().Mul(c.Right))
-	at := eye.Add(mathx.FromAngle(yaw + c.Yaw).Mul(look))
+	// The way the lens points, in the car's own frame.
+	ahead, right := mathx.Cos(c.Yaw), mathx.Sin(c.Yaw)
+	drop := look * mathx.Tan(c.Pitch)
 	return View{
-		Position: mathx.V3(eye.X, c.Mount, eye.Z),
-		Target:   mathx.V3(at.X, c.Mount-look*mathx.Tan(c.Pitch), at.Z),
+		Position: car.Point(c.Ahead, c.Right, c.Mount),
+		Target:   car.Point(c.Ahead+look*ahead, c.Right+look*right, c.Mount-drop),
+		Up:       car.Up,
 		FovY:     c.FovY,
 		Width:    c.Width, Height: c.Height,
 	}
 }
 
-// BonnetView returns the view for a bonnet-mounted camera on a car at the
-// given pose. The game renders the scene through it and the evaluation harness
+// BonnetView returns the view for a bonnet-mounted camera on a car standing
+// as given. The game renders the scene through it and the evaluation harness
 // projects boxes through it, so neither can drift from the calibration the
 // autopilot was built against.
-func BonnetView(c vision.Camera, pos mathx.Vec, yaw float32) View {
+//
+// The camera is fixed to the car, so on a hill it tips with it. That is what
+// keeps the autopilot's ranging right on a slope: the road ahead is where a
+// level road would be in the picture, so long as it goes on at the slope the
+// car is on.
+func BonnetView(c vision.Camera, car city.Stand) View {
 	const mountAhead = 1.7 // how far forward of the car's centre the lens sits
 	const look = 24        // an arbitrary distance along the optical axis
 
-	fwd := mathx.FromAngle(yaw)
-	eye := pos.Add(fwd.Mul(mountAhead))
-	at := eye.Add(fwd.Mul(look))
 	return View{
-		Position: mathx.V3(eye.X, c.Mount, eye.Z),
-		Target:   mathx.V3(at.X, c.Mount-look*mathx.Tan(c.Pitch), at.Z),
+		Position: car.Point(mountAhead, 0, c.Mount),
+		Target:   car.Point(mountAhead+look, 0, c.Mount-look*mathx.Tan(c.Pitch)),
+		Up:       car.Up,
 		FovY:     c.FovY,
 		Width:    c.Width, Height: c.Height,
 	}
@@ -456,10 +476,10 @@ func NewMirrorEye(width, height int) *MirrorEye {
 	}
 }
 
-// Look lays out, rasterises and scans one mirror camera on a car at the given
-// pose. The detections are valid until the next look through the same eye.
-func (e *MirrorEye) Look(w *sim.World, c vision.Camera, pos mathx.Vec, yaw float32) []vision.Detection {
-	e.Boxes = LayoutMirror(w, MirrorView(c, pos, yaw))
+// Look lays out, rasterises and scans one mirror camera on a car standing as
+// given. The detections are valid until the next look through the same eye.
+func (e *MirrorEye) Look(w *sim.World, c vision.Camera, car city.Stand) []vision.Detection {
+	e.Boxes = LayoutMirror(w, MirrorView(c, car))
 	RasteriseInto(e.img, e.Boxes)
 	b := e.img.Bounds()
 	return e.scan.Scan(Pixels(e.img, e.px), b.Dx(), b.Dy())

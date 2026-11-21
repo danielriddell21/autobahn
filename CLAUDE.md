@@ -121,13 +121,43 @@ tell the two apart, in either direction.
 
 ## Height
 
-The streets are level, and so is everything built beside them. What rises is
-the ground nobody drives on, in every map but the city: a field, a green,
-the middle of a block behind its houses. `relief.go` in `internal/game` says
-how far, as a function of where the ground is on the plan, and draws a block
-that rises as a level rim stitched to a net of ground. While such a block is
-being dressed `Game.rise` is set, and `stand` and `flat` put things on the
-hill by it; anything else that goes on open ground has to ask the same way.
+Every map but the city stands on hills. `city.Height` says how high the
+ground is at a point, and it is a function of where the point is on the
+ground and nothing else, so it costs a few sines and the growth rule holds
+without anyone trying.
+
+The hills are long and low on purpose, and `height_test.go` holds them to
+it. The autopilot ranges things from how far down the picture they sit. Its
+camera is fixed to the car and tips with it (`annotate.BonnetView` takes a
+`city.Stand`), so that is right on any slope the car and the thing share;
+what throws it is the road curving up or down between them. On the motorway,
+where it has to judge sixty metres ahead, swells 1500 m long put collisions
+up from five in 120 seeds to thirteen, and 2600 m put them back. The village
+and the seaside, which are slower, scored no worse on hills than on the flat.
+
+A car is still driven on the plane. The hill reaches it as `Vehicle.Grade`,
+a pull along its length, and a brake that holds against it: without `held`
+a stopped car creeps a millimetre a second down the hill and over its stop
+line. Nothing is level, junctions included, and nothing has to be.
+
+Drawing is where it costs. Anything standing is lifted by a matrix
+(`standOn`, `pushUp`, `footingOf` for a car, which also tips it); anything
+lying flat takes the land at each corner (`flat`, and the `ground…` shapes in
+`prim.go`, which take a `land`). A building is stood level with the street at
+its door and carried down on a plinth.
+
+Ground that has a shape is not drawn corner by corner, which cost more than
+the rest of the frame: it is made once and handed to the graphics card as a
+`patch`. `terrain.go` tiles the road surface and the grass beyond;
+`relief.go` makes each block a net of ground stitched to its kerb. A patch
+keeps its list of triangles after it is uploaded. Without one the card draws
+its corners three at a time as they come, and the result is shards.
+
+On top of the land, open ground rises on its own account: a field, a green,
+the middle of a block behind its houses. While a block is being dressed
+`Game.rise` is its net, and `risen.at` is the height of the net as drawn,
+not of the hill it hangs on, because on a bank the two are half a metre
+apart. Paths and crop rows are baked into the block's patch.
 
 The hills on the horizon are painted on the sky, outside the shader, so
 `ridgeShade` keeps them off the vision system's colours by its own

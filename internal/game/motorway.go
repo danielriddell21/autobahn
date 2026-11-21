@@ -107,7 +107,7 @@ func (g *Game) drawBarriers(eye mathx.Vec) {
 		if p.on.DistTo(eye) > cullProps {
 			continue
 		}
-		pushStand(p.at, p.on, p.turn)
+		g.standOn(p.at, p.on, p.turn)
 		rl.DrawCube(vec3(p.at.X, ground+barrierHeight/2, p.at.Z), 0.12, barrierHeight, 0.12, colPole)
 		if !p.last {
 			mid := p.at.Add(p.run.Mul(barrierPitch / 2))

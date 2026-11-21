@@ -34,9 +34,11 @@ same generator asked for something different, so none of them runs out: the
 seaside stops at the sea, and nothing stops anywhere else. The city is a
 grid. The other three are planned on one and then laid on ground that
 wanders, so their streets bend: the village winds, the seaside curves, and
-the motorway's dual carriageways sweep. Their open ground rises too: fields
-climb behind their hedges, there is a hill behind the houses, and downs,
-headlands or moors stand on the horizon.
+the motorway's dual carriageways sweep. And none of the three is flat: the
+village rolls, the seaside town comes down a hill to its front, the motorway
+takes long grades, and a car left on any of them with its brakes off rolls
+away. Fields climb behind their hedges, and downs, headlands or moors stand
+on the horizon.
 
 | Map | Season | | Pack |
 | --- | --- | --- | --- |

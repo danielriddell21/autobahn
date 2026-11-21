@@ -125,6 +125,11 @@ type Vehicle struct {
 	Brake     float32
 	Handbrake bool
 
+	// Grade is how steeply the road climbs under the car the way it faces:
+	// the height gained for each metre forward. The world sets it; a car on
+	// the level has none.
+	Grade float32
+
 	// Slip is the magnitude of the rear slip angle from the last step, used by
 	// the renderer to decide when to lay down skid marks.
 	Slip float32
@@ -170,6 +175,27 @@ func (v *Vehicle) burn(c Controls, dt float32) (power, top float32) {
 		v.Nitro = min(v.Nitro+dt*rate, 1)
 	}
 	return 1, 1
+}
+
+// gravity is what pulls a car down a hill, in metres per second squared.
+const gravity float32 = 9.81
+
+// held returns the force of a brake on a car on a hill. On the level a brake
+// only has the car's own motion to stop. On a hill it has the hill's pull as
+// well, and has to go on holding it once the car has stopped: a brake that
+// only ever opposed motion would let the car go a hair's breadth each step
+// and then fetch it back, and it would creep down the hill with its brakes
+// on, over a stop line in the time a light takes to change.
+func held(brake, vLong, pull, mass, dt float32) float32 {
+	// What it would take to have the car at rest when the step ends.
+	stop := -(vLong*mass/dt + pull)
+	if mathx.Abs(stop) <= brake {
+		return stop
+	}
+	if vLong != 0 {
+		return -mathx.Sign(vLong) * brake
+	}
+	return -mathx.Sign(pull) * brake
 }
 
 // NewVehicle returns a vehicle at rest at the given pose.
@@ -238,7 +264,12 @@ func (v *Vehicle) Update(c Controls, dt float32) {
 	// Braking opposes motion and must not drag a stationary car backwards.
 	braking := -mathx.Sign(vLong) * min(brake, mathx.Abs(vLong)*s.Mass/dt)
 	resist := -s.Drag*vLong*mathx.Abs(vLong) - s.Rolling*vLong
-	fLong := drive + braking + resist
+	// A hill pulls the car back down it, and a brake has that to hold too.
+	pull := -s.Mass * gravity * v.Grade
+	if pull != 0 && brake > 0 {
+		braking = held(brake, vLong, pull, s.Mass, dt)
+	}
+	fLong := drive + braking + resist + pull
 
 	gripRear := s.GripRear
 	latLimit := s.MaxLateral
@@ -272,7 +303,9 @@ func (v *Vehicle) Update(c Controls, dt float32) {
 
 	// Weight transfer under acceleration and braking shifts grip between the
 	// axles, so a trailing throttle tightens the line and power loosens it.
-	transfer := mathx.Clamp(fLong/(s.Mass*9.81), -0.45, 0.45)
+	// The hill is left out: it is the car that is tipped there, not its
+	// weight thrown forward or back by the driving.
+	transfer := mathx.Clamp((fLong-pull)/(s.Mass*gravity), -0.45, 0.45)
 	fLatFront *= 1 - transfer
 	fLatRear *= 1 + transfer
 

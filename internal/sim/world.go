@@ -270,6 +270,7 @@ func (w *World) Update(c Controls, dt float32) {
 		c.Throttle *= wreckedPower
 		c.Boost = false
 	}
+	w.tilt()
 	w.Player.Update(c, dt)
 	if w.City.AtSea(w.Player.Pos) {
 		// There is nothing out there to drive on. The car is put back on
@@ -285,6 +286,18 @@ func (w *World) Update(c Controls, dt float32) {
 	w.recycleAgents()
 	w.Route.Update(w.Player.Pos, w.Player.Forward())
 	w.Judge.Update(w.Player, w.Signals, w.Time, dt)
+}
+
+// tilt tells every car how steeply the road climbs under it. A car is driven
+// on the plane; the hill it is on reaches it as a pull, and nothing else.
+func (w *World) tilt() {
+	if !w.City.Hilly() {
+		return
+	}
+	w.Player.Grade = w.City.Grade(w.Player.Pos, w.Player.Forward())
+	for _, a := range w.Agents {
+		a.V.Grade = w.City.Grade(a.V.Pos, a.V.Forward())
+	}
 }
 
 // GrowRadius is how far ahead of the player the city is brought into

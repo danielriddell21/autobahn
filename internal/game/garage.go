@@ -163,7 +163,7 @@ func (r *showroom) render(body sim.Body, p carPaint, dt float32) rl.Texture2D {
 	}
 	// The turntable, then the car on it.
 	turntable(3.3*reach, 48, rl.NewColor(64, 70, 80, 255))
-	drawCar(v, body, carLook{paint: p.col, wheels: true, player: true})
+	drawCar(v, body, carLook{paint: p.col, wheels: true, player: true}, footing{})
 	if r.scene.ok {
 		rl.EndShaderMode()
 	}

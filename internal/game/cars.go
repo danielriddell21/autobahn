@@ -94,13 +94,13 @@ func (g *Game) drawTraffic(eye mathx.Vec, drawPlayer bool) {
 				look.paint = colPoliceDark
 			}
 		}
-		drawCar(a.V, a.Body, look)
+		drawCar(a.V, a.Body, look, g.footingOf(a.V.Pos, a.V.Yaw))
 	}
 	if drawPlayer {
 		drawCar(g.world.Player, g.world.PlayerBody, carLook{
 			paint: g.playerPaint(), blink: g.blink, night: night, wheels: true,
 			player: true, boosting: g.world.Player.Boosting, indicator: g.playerIndicator(),
-		})
+		}, g.footingOf(g.world.Player.Pos, g.world.Player.Yaw))
 	}
 }
 
@@ -118,9 +118,10 @@ func (g *Game) playerIndicator() sim.Indicator {
 	return sim.IndicatorOff
 }
 
-func drawCar(v *sim.Vehicle, body sim.Body, look carLook) {
+func drawCar(v *sim.Vehicle, body sim.Body, look carLook, on footing) {
 	// Renders a vehicle in its own local space, so the whole car rotates with
-	// a single matrix push. +X is forward, +Z is the car's right.
+	// a single matrix push. +X is forward, +Z is the car's right. On a hill
+	// it is lifted to the ground and tipped as the ground is.
 	s := v.Spec
 	length, width := s.HalfLength*2, s.HalfWidth*2
 	waist := s.Height - body.RoofRise
@@ -128,11 +129,15 @@ func drawCar(v *sim.Vehicle, body sim.Body, look carLook) {
 	// A soft shadow on the road under it, which is most of what stops a car
 	// looking as though it is floating.
 	c := v.Box().Corners()
-	groundQuad(c[0], c[1], c[2], c[3], 0.02, colShadow)
+	groundQuad(on.land, c[0], c[1], c[2], c[3], 0.02, colShadow)
 
 	rl.PushMatrix()
-	rl.Translatef(v.Pos.X, 0, v.Pos.Z)
+	rl.Translatef(v.Pos.X, on.y, v.Pos.Z)
 	rl.Rotatef(-v.Yaw*rad2deg, 0, 1, 0)
+	if on.pitch != 0 || on.roll != 0 {
+		rl.Rotatef(on.pitch*rad2deg, 0, 0, 1)
+		rl.Rotatef(on.roll*rad2deg, 1, 0, 0)
+	}
 
 	paint := as(look.paint, matPaint)
 	dark := scaleColor(look.paint, 0.72)
