@@ -89,6 +89,28 @@ type Agent struct {
 	passSide float32
 	rng      *rand.Rand
 
+	// Lane changes and overtakes; see overtake.go. heldUp is how long the
+	// driver has been behind somebody slower than they want to go. pending is
+	// the lane they are signalling to move into, and signalFor how long they
+	// have been signalling. changing counts down while a change is under way,
+	// toward changeSide. outside is how long they have sat in an outer lane
+	// with nothing to pass. laneCool holds off the next change.
+	heldUp, laneCool, signalFor float32
+	pending                     *city.Lane
+	changing, changeSide        float32
+	outside                     float32
+	// overtaking is the car being passed on a single carriageway, passFor how
+	// much longer the pass may take, and aborting is set once it has been
+	// given up and the driver is dropping back behind.
+	overtaking *Vehicle
+	passFor    float32
+	aborting   bool
+	// wantKind is the turn the driver means to make at the end of this road,
+	// which on a wider road may need a different lane from the one they are
+	// in. hasWant is false when they have no preference.
+	wantKind city.TurnKind
+	hasWant  bool
+
 	// Manual hands the car to a human. A driven agent takes its controls from
 	// Input and is left alone otherwise: no route to follow, no lane to be
 	// nudged back onto, and no opinion about junctions.
@@ -114,6 +136,9 @@ func (a *Agent) style() Style {
 
 // Indicator returns the turn signal implied by the agent's next manoeuvre.
 func (a *Agent) Indicator() Indicator {
+	if ind, ok := a.laneIndicator(); ok {
+		return ind
+	}
 	if !a.hasNext {
 		return IndicatorOff
 	}
@@ -199,7 +224,7 @@ func (a *Agent) chooseNextToward(c *city.City, target mathx.Vec, chasing bool) {
 	// A unit on a call heads for its target; everyone else prefers to carry
 	// straight on, so traffic forms recognisable flows along the arterials
 	// instead of turning at random.
-	a.waited = 0
+	a.waited, a.hasWant = 0, false
 	if chasing {
 		if t, ok := a.pursuitTurn(c, target); ok {
 			a.next, a.hasNext = t, true
@@ -222,17 +247,37 @@ func (a *Agent) chooseNextToward(c *city.City, target mathx.Vec, chasing bool) {
 		a.next = a.lane.Succ[0]
 		return
 	}
+	// On a wider road the choice is made from every lane's turns, not just
+	// this one's, and the driver changes lane for it on the way.
+	cands := a.lane.Succ
+	if lanes := c.Roads[a.lane.Road].Class.Lanes(); lanes > 1 {
+		cands = nil
+		for i := range lanes {
+			if l := sibling(c, a.lane, i); l != nil {
+				cands = append(cands, l.Succ...)
+			}
+		}
+	}
 	var straight []city.Turn
-	for _, t := range a.lane.Succ {
+	for _, t := range cands {
 		if t.Kind == city.TurnStraight {
 			straight = append(straight, t)
 		}
 	}
+	pick := cands[a.rng.IntN(len(cands))]
 	if len(straight) > 0 && a.rng.Float32() < 0.62 {
-		a.next = straight[a.rng.IntN(len(straight))]
-	} else {
-		a.next = a.lane.Succ[a.rng.IntN(len(a.lane.Succ))]
+		pick = straight[a.rng.IntN(len(straight))]
 	}
+	a.wantKind, a.hasWant = pick.Kind, true
+	for _, t := range a.lane.Succ {
+		if t == pick {
+			a.next = t
+			return
+		}
+	}
+	// Not from this lane: carry on until there is a chance to move over.
+	a.repickTurn()
+	a.waited, a.hasWant = 0, true
 }
 
 // ringTurn carries on round a roundabout until the chosen exit comes up.
@@ -358,6 +403,7 @@ func (a *Agent) drive(w *World, dt float32) {
 		a.chooseNextToward(c, w.interceptOf(a), true)
 	}
 
+	gap, lead, ahead, limit := a.lookAhead(w, st, speed, limit, dt)
 	accel := idmFree(st, speed, limit)
 
 	// Slow for the turn before reaching it, not half-way round.
@@ -365,9 +411,6 @@ func (a *Agent) drive(w *World, dt float32) {
 		accel = min(accel, slowFor(st, speed, turnSpeed(a.next, st), a.lane.Length-a.s))
 	}
 
-	// Yield to whatever is directly in front, whether that is another agent or
-	// the player.
-	gap, lead, ahead := w.leaderFor(a)
 	if ahead != nil {
 		accel = min(accel, idmFollow(st, speed, lead, gap))
 	}
@@ -391,6 +434,21 @@ func (a *Agent) drive(w *World, dt float32) {
 	}, dt)
 	a.advanceRoute(c, w.Player.Pos, dt)
 	a.snapToRoute(c, dt)
+}
+
+// lookAhead finds whatever is directly in front, whether that is another agent
+// or the player, and decides whether to stay behind it. It returns the car to
+// follow, if any, and the speed the driver now wants.
+func (a *Agent) lookAhead(w *World, st Style, speed, limit, dt float32) (gap, lead float32, ahead *Vehicle, want float32) {
+	gap, lead, ahead = w.leaderFor(a)
+	a.manoeuvre(w, st, ahead, gap, lead, speed, limit, dt)
+	if a.overtaking == nil {
+		return gap, lead, ahead, limit
+	}
+	if ahead == a.overtaking && !a.aborting {
+		ahead = nil // pulling out round it, not queueing behind it
+	}
+	return gap, lead, ahead, a.passSpeed(limit)
 }
 
 // Getting round things, in metres and seconds.
@@ -417,6 +475,8 @@ const (
 // wants to be going, at once.
 func (a *Agent) goRound(ahead *Vehicle, gap, lead, speed, dt float32) {
 	switch {
+	case a.overtaking != nil:
+		a.sidestepWant = a.passSidestep()
 	case a.passing > 0:
 		// Committed: hold the line out until the obstruction is behind.
 		a.passing -= dt
@@ -430,6 +490,11 @@ func (a *Agent) goRound(ahead *Vehicle, gap, lead, speed, dt float32) {
 	}
 	// A car that is barely moving can only edge across.
 	rate := mathx.Clamp(0.8+speed*0.5, 0.8, sidestepRate)
+	if a.changing > 0 {
+		// Drifting across into another lane, unhurried.
+		a.changing -= dt
+		rate = min(rate, laneShift)
+	}
 	a.sidestep = mathx.MoveToward(a.sidestep, a.sidestepWant, rate*dt)
 }
 
@@ -539,6 +604,7 @@ func (a *Agent) rejoin(c *city.City) {
 	a.inTurn, a.u = false, 0
 	a.stoppedAt = -1
 	a.sidestep, a.sidestepWant, a.stuck, a.passing = 0, 0, 0, 0
+	a.clearManoeuvre()
 	a.chooseNext(c)
 }
 

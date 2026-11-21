@@ -811,6 +811,7 @@ func (w *World) relocate(a *Agent) {
 		a.stoppedAt = -1
 		a.dazed, a.waited = 0, 0
 		a.free, a.sidestep, a.sidestepWant, a.stuck, a.passing = false, 0, 0, 0, 0
+		a.clearManoeuvre()
 		a.V.Place(p, lane.Heading)
 		a.chooseNext(w.City)
 		return
