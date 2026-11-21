@@ -4,6 +4,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/danielriddell21/autobahn/internal/mathx"
 	"github.com/danielriddell21/autobahn/internal/vision"
 )
 
@@ -274,5 +275,43 @@ func TestBaseIsTheBottomRowOfABlob(t *testing.T) {
 	plain := vision.Detection{MinX: 7, MaxX: 31}
 	if lo, hi := plain.Base(); lo != 7 || hi != 31 {
 		t.Errorf("a detection with no base reports %v..%v, want its own box", lo, hi)
+	}
+}
+
+func TestGroundPlacesPointsAroundTheCar(t *testing.T) {
+	front := vision.DefaultCamera(420, 236)
+	ahead, right, ok := front.Ground(210, 200)
+	if !ok || mathx.Abs(ahead-front.GroundDistance(200)) > 1e-3 || mathx.Abs(right) > 1e-3 {
+		t.Errorf("the bonnet camera's centre column should lie dead ahead: %.2f, %.2f", ahead, right)
+	}
+
+	m := vision.MirrorCameras(256, 144)
+	rear := m[vision.MirrorRear]
+	ahead, right, ok = rear.Ground(64, 120) // left of centre, low in the image
+	if !ok || ahead > rear.Ahead-1 {
+		t.Errorf("a point low in the rear image should be behind the car, got %.1f ahead", ahead)
+	}
+	// Looking backwards, the left of the image is the car's right.
+	if right <= 0 {
+		t.Errorf("the left of the rear image should be right of the car, got %.1f", right)
+	}
+
+	if _, right, _ = m[vision.MirrorLeft].Ground(128, 120); right >= 0 {
+		t.Errorf("the left camera should see the left of the car, got %.1f", right)
+	}
+	if _, right, _ = m[vision.MirrorRight].Ground(128, 120); right <= 0 {
+		t.Errorf("the right camera should see the right of the car, got %.1f", right)
+	}
+	if _, _, ok = rear.Ground(128, 0); ok {
+		t.Error("the top row is sky, and places nothing on the road")
+	}
+}
+
+func TestMirrorNames(t *testing.T) {
+	want := map[vision.Mirror]string{vision.MirrorRear: "rear", vision.MirrorLeft: "left", vision.MirrorRight: "right"}
+	for m, name := range want {
+		if m.String() != name {
+			t.Errorf("mirror %d is called %q, want %q", m, m.String(), name)
+		}
 	}
 }

@@ -58,6 +58,15 @@ const (
 	// than the scanner's minimum size well into the distance.
 	laneMarkerRise float32 = 0.32
 	stopLineRange  float32 = 95
+	// sideLaneRange is how far ahead the lanes alongside are marked, and
+	// sideLaneSpacing how far apart. They are spaced wider than the car's own
+	// markers, and stop nearer, so neighbouring boxes never run together: the
+	// lanes beside are for knowing they are there, not for steering along.
+	sideLaneRange   float32 = 40
+	sideLaneSpacing float32 = 8
+	// mirrorRange is how far behind and beside the car the mirrors pick out
+	// another vehicle.
+	mirrorRange float32 = 60
 )
 
 // Where each kind of prop's box sits on its post, in metres: how far below the
@@ -118,7 +127,9 @@ func Layout(w *sim.World, v View) []Box {
 	pr := newProjector(v)
 	lo := &layout{p: pr, eye: v.Position.Ground(), fwd: pr.fwd.Ground().Norm()}
 
-	// Lane guidance first, so anything solid paints over it.
+	// Lane guidance first, so anything solid paints over it: the lanes
+	// alongside, then the car's own over them.
+	lo.sideLanes(w)
 	lo.laneMarkers(w)
 	lo.stopLine(w)
 	lo.props(w)
@@ -153,6 +164,42 @@ func (lo *layout) laneMarkers(w *sim.World) {
 			cl = vision.ClassLaneMarkerAlt
 		}
 		lo.add(boxOf(lo.p, cl, pt, laneMarkerRise, laneMarkerSize, laneMarkerRise, laneMarkerSize, 0))
+	}
+}
+
+// sideLanes marks the middles of the lanes beside the car's own, up to the end
+// of the road it is on: a lane going the same way, or the nearest one coming
+// the other.
+func (lo *layout) sideLanes(w *sim.World) {
+	l := w.Route.Lane()
+	if l == nil || w.Route.Crossing() || w.City.Roads[l.Road].Ring {
+		return
+	}
+	s := w.Player.Pos.Sub(l.A).Dot(l.Fwd)
+	for _, o := range w.City.Lanes {
+		if o.Road != l.Road || o == l {
+			continue
+		}
+		cl := vision.ClassLaneSide
+		if o.Dir != l.Dir {
+			if o.Index != 0 {
+				continue
+			}
+			cl = vision.ClassLaneOncoming
+		}
+		for d := sideLaneSpacing; d <= sideLaneRange; d += sideLaneSpacing {
+			// The same distance along the road as the car's own lane, which on
+			// a lane running the other way is measured from its far end.
+			at := s + d
+			if at > l.Length {
+				break
+			}
+			pt := o.A.Add(l.Fwd.Mul(at - o.A.Sub(l.A).Dot(l.Fwd)))
+			if !lo.visible(pt, sideLaneRange+5) {
+				continue
+			}
+			lo.add(boxOf(lo.p, cl, pt, laneMarkerRise, laneMarkerSize, laneMarkerRise, laneMarkerSize, 0))
+		}
 	}
 }
 
@@ -196,8 +243,12 @@ func (lo *layout) propFacesUs(prop city.Prop) bool {
 }
 
 func (lo *layout) vehicles(w *sim.World) {
+	lo.vehiclesWithin(w, vehicleRange)
+}
+
+func (lo *layout) vehiclesWithin(w *sim.World, limit float32) {
 	for _, a := range w.Agents {
-		if !lo.visible(a.V.Pos, vehicleRange) {
+		if !lo.visible(a.V.Pos, limit) {
 			continue
 		}
 		cl := vision.ClassVehicle
@@ -332,6 +383,31 @@ func set(img *image.RGBA, x, y int, c color.RGBA) {
 	img.Pix[o], img.Pix[o+1], img.Pix[o+2], img.Pix[o+3] = c.R, c.G, c.B, c.A
 }
 
+// LayoutMirror returns the detection boxes visible in one of the mirror
+// cameras. A mirror is for traffic, so it shows vehicles and nothing else.
+func LayoutMirror(w *sim.World, v View) []Box {
+	pr := newProjector(v)
+	lo := &layout{p: pr, eye: v.Position.Ground(), fwd: pr.fwd.Ground().Norm()}
+	lo.vehiclesWithin(w, mirrorRange)
+	return lo.out
+}
+
+// MirrorView returns the view through a mirror camera on a car at the given
+// pose, placed and pointed by the camera's own calibration.
+func MirrorView(c vision.Camera, pos mathx.Vec, yaw float32) View {
+	const look = 24 // an arbitrary distance along the optical axis
+
+	fwd := mathx.FromAngle(yaw)
+	eye := pos.Add(fwd.Mul(c.Ahead)).Add(fwd.Right().Mul(c.Right))
+	at := eye.Add(mathx.FromAngle(yaw + c.Yaw).Mul(look))
+	return View{
+		Position: mathx.V3(eye.X, c.Mount, eye.Z),
+		Target:   mathx.V3(at.X, c.Mount-look*mathx.Tan(c.Pitch), at.Z),
+		FovY:     c.FovY,
+		Width:    c.Width, Height: c.Height,
+	}
+}
+
 // BonnetView returns the view for a bonnet-mounted camera on a car at the
 // given pose. The game renders the scene through it and the evaluation harness
 // projects boxes through it, so neither can drift from the calibration the
@@ -349,4 +425,45 @@ func BonnetView(c vision.Camera, pos mathx.Vec, yaw float32) View {
 		FovY:     c.FovY,
 		Width:    c.Width, Height: c.Height,
 	}
+}
+
+// MirrorEye looks through a mirror camera in software. Only the boxes matter to
+// the scanner, so a mirror needs no rendered scene behind them: the game and
+// the evaluation harness both read mirrors this way, and so see the same
+// thing.
+type MirrorEye struct {
+	img  *image.RGBA
+	px   []color.RGBA
+	scan *vision.Scanner
+	// Boxes is what the last look laid out, kept for anything that wants to
+	// show it.
+	Boxes []Box
+}
+
+// NewMirrorEye returns an eye for mirror images of the given size.
+func NewMirrorEye(width, height int) *MirrorEye {
+	return &MirrorEye{
+		img:  image.NewRGBA(image.Rect(0, 0, width, height)),
+		px:   make([]color.RGBA, width*height),
+		scan: vision.NewScanner(),
+	}
+}
+
+// Look lays out, rasterises and scans one mirror camera on a car at the given
+// pose. The detections are valid until the next look through the same eye.
+func (e *MirrorEye) Look(w *sim.World, c vision.Camera, pos mathx.Vec, yaw float32) []vision.Detection {
+	e.Boxes = LayoutMirror(w, MirrorView(c, pos, yaw))
+	RasteriseInto(e.img, e.Boxes)
+	b := e.img.Bounds()
+	return e.scan.Scan(Pixels(e.img, e.px), b.Dx(), b.Dy())
+}
+
+// Pixels reinterprets an image as the pixel slice the scanner reads, filling a
+// buffer the caller owns so a long run does not allocate a frame at a time.
+func Pixels(img *image.RGBA, into []color.RGBA) []color.RGBA {
+	for i := range into {
+		o := i * 4
+		into[i] = color.RGBA{R: img.Pix[o], G: img.Pix[o+1], B: img.Pix[o+2], A: img.Pix[o+3]}
+	}
+	return into
 }

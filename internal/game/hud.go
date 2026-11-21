@@ -2,6 +2,7 @@ package game
 
 import (
 	"fmt"
+	"strings"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 
@@ -297,6 +298,31 @@ func (g *Game) drawAIPanel() {
 	rl.DrawRectangleLines(x, y, w, h, hudEdge)
 
 	g.drawClassLegend(x, y+h+4)
+	g.drawMirrors(x, y-30)
+}
+
+// drawMirrors shows the boxes each mirror camera produced, small, in a strip
+// above the camera panel: left door, rear window, right door, as a driver
+// would glance across them.
+func (g *Game) drawMirrors(right, bottom int32) {
+	const pw, ph = 112, 63
+	order := [...]vision.Mirror{vision.MirrorLeft, vision.MirrorRear, vision.MirrorRight}
+	x := right
+	y := bottom - ph
+	for i, m := range order {
+		px := x + int32(i)*(pw+6)
+		panel(px-2, y-16, pw+4, ph+18)
+		rl.DrawText(strings.ToUpper(m.String()), px, y-13, 10, hudDim)
+		rl.DrawRectangle(px, y, pw, ph, hudPanel)
+		sx, sy := float32(pw)/float32(autopilot.MirrorWidth), float32(ph)/float32(autopilot.MirrorHeight)
+		for _, b := range g.mirrorBoxes[m] {
+			v := vision.RGBA(b.Class)
+			rl.DrawRectangleLinesEx(rl.NewRectangle(
+				float32(px)+b.MinX*sx, float32(y)+b.MinY*sy, b.Width()*sx, b.Height()*sy,
+			), 1, rl.NewColor(v.R, v.G, v.B, v.A))
+		}
+		rl.DrawRectangleLines(px, y, pw, ph, hudEdge)
+	}
 }
 
 func (g *Game) drawClassLegend(x, y int32) {
@@ -313,6 +339,7 @@ func (g *Game) drawClassLegend(x, y int32) {
 		vision.ClassStopSign, vision.ClassGiveWay, vision.ClassStopLine,
 		vision.ClassSpeed20, vision.ClassSpeed30, vision.ClassSpeed40,
 		vision.ClassLaneMarker, vision.ClassLaneMarkerAlt,
+		vision.ClassLaneSide, vision.ClassLaneOncoming,
 	}
 	var cx int32
 	for _, c := range classes {

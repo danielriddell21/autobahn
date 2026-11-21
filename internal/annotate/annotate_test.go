@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/autobahn/internal/annotate"
+	"github.com/danielriddell21/autobahn/internal/autopilot"
 	"github.com/danielriddell21/autobahn/internal/city"
 	"github.com/danielriddell21/autobahn/internal/mathx"
 	"github.com/danielriddell21/autobahn/internal/sim"
@@ -234,5 +235,78 @@ func TestOnlyPropsFacingTheCarAreAnnotated(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Fatal("no signalled approach long enough to stand on")
+	}
+}
+
+// put parks an agent at a point beside the player, measured in the player's
+// own frame, pointing the same way.
+func put(w *sim.World, a *sim.Agent, ahead, right float32) {
+	p := w.Player
+	at := p.Pos.Add(p.Forward().Mul(ahead)).Add(p.Forward().Right().Mul(right))
+	a.V.Place(at, p.Yaw)
+}
+
+// A car behind and to one side has to come out of the mirrors where it is, or
+// the autopilot would change lane into it.
+func TestMirrorsPlaceTheCarsAroundUs(t *testing.T) {
+	w := sim.NewWorld(sim.Config{Seed: 7, Traffic: 3})
+	w.Agents = w.Agents[:3]
+	for _, a := range w.Agents {
+		a.V.Place(mathx.V(1e4, 1e4), 0) // out of sight
+	}
+	type spot struct{ ahead, right float32 }
+	cases := []spot{{-14, 0}, {-9, 3.6}, {-1, -3.6}, {-30, -3.6}}
+	for _, at := range cases {
+		put(w, w.Agents[0], at.ahead, at.right)
+		d := autopilot.New(vision.DefaultCamera(420, 236))
+		mirrors := d.Mirrors()
+		for m := range mirrors {
+			eye := annotate.NewMirrorEye(mirrors[m].Width, mirrors[m].Height)
+			d.Watch(vision.Mirror(m), eye.Look(w, mirrors[m], w.Player.Pos, w.Player.Yaw))
+		}
+		found := false
+		for _, n := range d.Around() {
+			// The nearest point of the car, so up to a car's half-length nearer.
+			if mathx.Abs(n.Right-at.right) < 1.5 && mathx.Abs(n.Ahead-at.ahead) < 3.5 {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("a car %.0fm ahead and %.1fm right was not placed there: saw %+v", at.ahead, at.right, d.Around())
+		}
+	}
+}
+
+func TestMirrorsShowOnlyWhatIsBehindAndBeside(t *testing.T) {
+	w := sim.NewWorld(sim.Config{Seed: 7, Traffic: 1})
+	a := w.Agents[0]
+	put(w, a, 20, 0)
+	cams := vision.MirrorCameras(256, 144)
+	rear := annotate.LayoutMirror(w, annotate.MirrorView(cams[vision.MirrorRear], w.Player.Pos, w.Player.Yaw))
+	if len(rear) != 0 {
+		t.Errorf("a car 20m ahead showed in the rear mirror: %+v", rear)
+	}
+	put(w, a, -20, 0)
+	rear = annotate.LayoutMirror(w, annotate.MirrorView(cams[vision.MirrorRear], w.Player.Pos, w.Player.Yaw))
+	if len(rear) != 1 || rear[0].Class != vision.ClassVehicle {
+		t.Errorf("a car 20m behind should show once in the rear mirror, got %+v", rear)
+	}
+}
+
+func TestSideLanesAreMarkedOnADualCarriageway(t *testing.T) {
+	w := world(t)
+	// The player starts on an arterial, which has a lane alongside.
+	if w.Route.Lane() == nil || w.Route.Lane().Class != city.Arterial {
+		t.Skip("the player does not start on an arterial")
+	}
+	_, view := bonnet()
+	side := 0
+	for _, b := range annotate.Layout(w, view(w)) {
+		if b.Class == vision.ClassLaneSide {
+			side++
+		}
+	}
+	if side == 0 {
+		t.Error("no markers for the lane alongside on a dual carriageway")
 	}
 }

@@ -626,7 +626,7 @@ func PaletteBases() []color.RGBA {
 	for _, c := range leafShades {
 		out = append(out, toRGBAColor(c))
 	}
-	for cl := vision.ClassVehicle; cl <= vision.ClassStopLine; cl++ {
+	for cl := vision.ClassVehicle; cl <= vision.ClassLaneOncoming; cl++ {
 		out = append(out, vision.RGBA(cl))
 	}
 	return out

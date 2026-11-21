@@ -190,6 +190,10 @@ func (s State) String() string {
 // enough to be obeyed.
 type Driver struct {
 	cam vision.Camera
+	// mirrors are the cameras watching behind and beside the car, and around
+	// what they saw on their last look.
+	mirrors [vision.NumMirrors]vision.Camera
+	around  [vision.NumMirrors][]Neighbour
 
 	// Mode is how the autopilot is driving, and may be changed at any time.
 	Mode Mode
@@ -234,14 +238,67 @@ type Driver struct {
 	blindTimer float32
 }
 
-// New returns a driver calibrated to the given camera.
+// New returns a driver calibrated to the given camera, with mirrors at the
+// default size.
 func New(cam vision.Camera) *Driver {
-	return &Driver{cam: cam, SeenLimit: defaultLimit, State: StateSearching}
+	return &Driver{
+		cam: cam, mirrors: vision.MirrorCameras(MirrorWidth, MirrorHeight),
+		SeenLimit: defaultLimit, State: StateSearching,
+	}
 }
+
+// MirrorWidth and MirrorHeight are the size of the mirror images. A mirror is
+// only for knowing what is around the car, so it is coarser than the camera
+// the car steers by.
+const (
+	MirrorWidth  = 256
+	MirrorHeight = 144
+)
+
+// Mirrors returns the mirror cameras the driver is calibrated to, which are
+// the ones the world should be shown through.
+func (d *Driver) Mirrors() [vision.NumMirrors]vision.Camera { return d.mirrors }
 
 // Reset clears the driver's memory.
 func (d *Driver) Reset() {
-	*d = Driver{cam: d.cam, Mode: d.Mode, SeenLimit: defaultLimit, State: StateSearching}
+	*d = Driver{cam: d.cam, mirrors: d.mirrors, Mode: d.Mode, SeenLimit: defaultLimit, State: StateSearching}
+}
+
+// Neighbour is a vehicle seen in a mirror, placed on the road around the car:
+// how far ahead of the middle of the car its nearest point is, negative behind,
+// and how far to the right.
+type Neighbour struct {
+	Ahead, Right float32
+}
+
+// Watch takes one look through a mirror. The vehicles in it replace whatever
+// that mirror showed last time.
+func (d *Driver) Watch(m vision.Mirror, dets []vision.Detection) {
+	cam := d.mirrors[m]
+	seen := d.around[m][:0]
+	for _, det := range dets {
+		if !vision.IsVehicle(det.Class) {
+			continue
+		}
+		// The middle of the bottom edge is where the near side of the car
+		// meets the road.
+		lo, hi := det.Base()
+		ahead, right, ok := cam.Ground((lo+hi)/2, det.MaxY)
+		if !ok {
+			continue
+		}
+		seen = append(seen, Neighbour{Ahead: ahead, Right: right})
+	}
+	d.around[m] = seen
+}
+
+// Around returns every vehicle the mirrors showed on their last look.
+func (d *Driver) Around() []Neighbour {
+	var out []Neighbour
+	for _, seen := range d.around {
+		out = append(out, seen...)
+	}
+	return out
 }
 
 // targetKind is why the car may have to slow down.

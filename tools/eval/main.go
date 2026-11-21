@@ -126,6 +126,11 @@ func driveOne(seed uint64, cfg runConfig) result {
 	driver := autopilot.New(cam)
 	driver.Mode = cfg.mode
 	scanner := vision.NewScanner()
+	mirrors := driver.Mirrors()
+	var eyes [vision.NumMirrors]*annotate.MirrorEye
+	for m := range eyes {
+		eyes[m] = annotate.NewMirrorEye(mirrors[m].Width, mirrors[m].Height)
+	}
 
 	if cfg.verbose {
 		// The judge already publishes every fault; listening tells us what the
@@ -162,7 +167,10 @@ func driveOne(seed uint64, cfg runConfig) result {
 		if perceived += fixedStep; perceived >= interval || dets == nil {
 			perceived = 0
 			annotate.RasteriseInto(frame, annotate.Layout(w, annotate.BonnetView(cam, w.Player.Pos, w.Player.Yaw)))
-			dets = scanner.Scan(asColors(frame, px), cfg.width, cfg.height)
+			dets = scanner.Scan(annotate.Pixels(frame, px), cfg.width, cfg.height)
+			for m, eye := range eyes {
+				driver.Watch(vision.Mirror(m), eye.Look(w, mirrors[m], w.Player.Pos, w.Player.Yaw))
+			}
 			detSum += len(dets)
 			detFrames++
 		}
@@ -199,18 +207,6 @@ type faultWatcher func(sim.Infraction)
 
 // OnEvent implements the telemetry subscriber interface.
 func (f faultWatcher) OnEvent(in sim.Infraction) { f(in) }
-
-func asColors(img *image.RGBA, into []color.RGBA) []color.RGBA {
-	// Reinterprets an RGBA image as the pixel slice the scanner reads,
-	// filling a buffer the caller owns so a long run does not allocate per frame.
-	for i := range into {
-		o := i * 4
-		into[i] = color.RGBA{
-			R: img.Pix[o], G: img.Pix[o+1], B: img.Pix[o+2], A: img.Pix[o+3],
-		}
-	}
-	return into
-}
 
 func report(results []result) float64 {
 	sort.Slice(results, func(i, j int) bool { return results[i].seed < results[j].seed })

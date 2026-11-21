@@ -158,6 +158,10 @@ type Game struct {
 	visionCam vision.Camera
 	driver    *autopilot.Driver
 	dets      []vision.Detection
+	// eyes look through the autopilot's mirrors, and mirrorBoxes is what each
+	// showed last, for the panel.
+	eyes        [vision.NumMirrors]*annotate.MirrorEye
+	mirrorBoxes [vision.NumMirrors][]annotate.Box
 
 	auto       bool
 	showHUD    bool
@@ -536,6 +540,7 @@ func (g *Game) perceive(dt float32) {
 	g.perceived = 0
 	g.renderAICamera()
 	g.scanAICamera()
+	g.watchMirrors()
 	g.detSum += len(g.dets)
 	g.detFrames++
 }
@@ -741,6 +746,19 @@ func (g *Game) renderAICamera() {
 	boxes := annotate.Layout(g.world, g.aiView)
 	drawBoxes(boxes, g.showLabels)
 	rl.EndTextureMode()
+}
+
+// watchMirrors takes a look through each of the autopilot's mirrors.
+func (g *Game) watchMirrors() {
+	p := g.world.Player
+	cams := g.driver.Mirrors()
+	for m := range g.eyes {
+		if g.eyes[m] == nil {
+			g.eyes[m] = annotate.NewMirrorEye(cams[m].Width, cams[m].Height)
+		}
+		g.driver.Watch(vision.Mirror(m), g.eyes[m].Look(g.world, cams[m], p.Pos, p.Yaw))
+		g.mirrorBoxes[m] = g.eyes[m].Boxes
+	}
 }
 
 func (g *Game) scanAICamera() {

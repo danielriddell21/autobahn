@@ -40,41 +40,41 @@ const (
 	ClassLaneMarker
 	ClassLaneMarkerAlt
 	ClassStopLine
+	// ClassLaneSide marks the middle of a lane alongside the car's own, going
+	// the same way: somewhere it could move over to.
+	ClassLaneSide
+	// ClassLaneOncoming marks the middle of the lane beside the car's own that
+	// carries traffic the other way.
+	ClassLaneOncoming
 	numClasses
 )
 
+// classNames are the labels drawn beside each box.
+var classNames = [numClasses]string{
+	ClassVehicle:       "VEHICLE",
+	ClassPolice:        "POLICE",
+	ClassLightRed:      "LIGHT:RED",
+	ClassLightRedAmber: "LIGHT:RED+AMBER",
+	ClassLightAmber:    "LIGHT:AMBER",
+	ClassLightGreen:    "LIGHT:GREEN",
+	ClassStopSign:      "STOP",
+	ClassGiveWay:       "GIVE WAY",
+	ClassSpeed20:       "LIMIT 20",
+	ClassSpeed30:       "LIMIT 30",
+	ClassSpeed40:       "LIMIT 40",
+	ClassLaneMarker:    "LANE",
+	ClassLaneMarkerAlt: "LANE",
+	ClassStopLine:      "STOP LINE",
+	ClassLaneSide:      "LANE ALONGSIDE",
+	ClassLaneOncoming:  "ONCOMING LANE",
+}
+
 // String returns the class label drawn beside each box.
 func (c Class) String() string {
-	switch c {
-	case ClassVehicle:
-		return "VEHICLE"
-	case ClassPolice:
-		return "POLICE"
-	case ClassLightRed:
-		return "LIGHT:RED"
-	case ClassLightRedAmber:
-		return "LIGHT:RED+AMBER"
-	case ClassLightAmber:
-		return "LIGHT:AMBER"
-	case ClassLightGreen:
-		return "LIGHT:GREEN"
-	case ClassStopSign:
-		return "STOP"
-	case ClassGiveWay:
-		return "GIVE WAY"
-	case ClassSpeed20:
-		return "LIMIT 20"
-	case ClassSpeed30:
-		return "LIMIT 30"
-	case ClassSpeed40:
-		return "LIMIT 40"
-	case ClassLaneMarker, ClassLaneMarkerAlt:
-		return "LANE"
-	case ClassStopLine:
-		return "STOP LINE"
-	default:
+	if c <= ClassNone || c >= numClasses {
 		return "?"
 	}
+	return classNames[c]
 }
 
 // SpeedValue returns the limit a speed sign class encodes, in m/s, and whether
@@ -118,6 +118,8 @@ var classColors = [numClasses]color.RGBA{
 	ClassLaneMarker:    {0, 0, 255, 255},
 	ClassLaneMarkerAlt: {0, 255, 128, 255},
 	ClassStopLine:      {128, 255, 0, 255},
+	ClassLaneSide:      {128, 128, 255, 255},
+	ClassLaneOncoming:  {255, 128, 128, 255},
 }
 
 // RGBA returns the exact colour a class is annotated in.
@@ -183,11 +185,70 @@ type Camera struct {
 	FovY          float32 // vertical field of view, degrees
 	Mount         float32 // height above the road, metres
 	Pitch         float32 // downward tilt, radians
+	// Yaw is which way the lens points relative to the car's nose, in radians,
+	// positive to the right: zero for the bonnet camera, pi for one looking
+	// out of the back.
+	Yaw float32
+	// Ahead and Right are where the lens sits relative to the middle of the
+	// car, in metres. They place what a mirror camera sees around the car.
+	Ahead, Right float32
 }
 
 // DefaultCamera returns the bonnet-mounted camera used by the autopilot.
 func DefaultCamera(w, h int) Camera {
 	return Camera{Width: w, Height: h, FovY: 62, Mount: 1.35, Pitch: 0.10}
+}
+
+// Mirror names one of the cameras looking behind and beside the car.
+type Mirror int
+
+// The mirror cameras.
+const (
+	MirrorRear Mirror = iota
+	MirrorLeft
+	MirrorRight
+	NumMirrors
+)
+
+// String returns the mirror's name.
+func (m Mirror) String() string {
+	switch m {
+	case MirrorLeft:
+		return "left"
+	case MirrorRight:
+		return "right"
+	default:
+		return "rear"
+	}
+}
+
+// MirrorCameras returns the cameras a car watches its surroundings through, at
+// the given image size: one out of the back window, and one on each door
+// looking out sideways, which covers the blind spot a real door mirror leaves
+// for a glance over the shoulder.
+func MirrorCameras(w, h int) [NumMirrors]Camera {
+	const halfPi = 1.5707963
+	base := Camera{Width: w, Height: h, FovY: 62, Mount: 1.2, Pitch: 0.12}
+	rear, left, right := base, base, base
+	rear.Yaw, rear.Ahead = 2*halfPi, -2.1
+	left.Yaw, left.Ahead, left.Right = -halfPi, 0.4, -0.95
+	right.Yaw, right.Ahead, right.Right = halfPi, 0.4, 0.95
+	return [NumMirrors]Camera{MirrorRear: rear, MirrorLeft: left, MirrorRight: right}
+}
+
+// Ground places a point on the road seen at the given pixel in the car's own
+// frame: how far ahead of the middle of the car it is, and how far to the
+// right. It reports false for a pixel at or above the horizon.
+func (c Camera) Ground(pixelX, pixelY float32) (ahead, right float32, ok bool) {
+	dist := c.GroundDistance(pixelY)
+	if dist >= 1e5 {
+		return 0, 0, false
+	}
+	side := dist * mathx.Tan(c.Bearing(pixelX))
+	cos, sin := mathx.Cos(c.Yaw), mathx.Sin(c.Yaw)
+	// Turn the lens's own frame, forward along its axis and right across it,
+	// into the car's.
+	return c.Ahead + dist*cos - side*sin, c.Right + dist*sin + side*cos, true
 }
 
 func (c Camera) focal() float32 {
