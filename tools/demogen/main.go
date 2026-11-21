@@ -329,13 +329,47 @@ func sheetMaps(cfg config) error {
 			}
 			g.SetCameraMode(game.CameraChase)
 			g.ShowHUD(false)
-			settle(g, 260)
+			toVantage(g.World())
+			settle(g, 150)
 			cells = append(cells, demo.Downscale(g.Snapshot(), cfg.scale))
 		}
 		sheet := demo.Montage(cells, 2, 12, color.RGBA{R: 16, G: 18, B: 22, A: 255})
 		return writePNG(cfg.path("maps.png"), sheet)
 	})
 }
+
+// toVantage puts the car where a map looks most like itself, for a still. A
+// drive begins on a main road near the middle, which in most places is the
+// least telling street there is: the seaside's is inland, and the trees that
+// carry a season stand along the side streets. So the car is put on the
+// front where there is one, and otherwise on the nearest street with cars
+// parked along it. From there the autopilot drives on as it would anywhere.
+func toVantage(w *sim.World) {
+	c := w.City
+	at, found := w.Player.Pos, false
+	if front, _, ok := c.Shoreline(); ok {
+		at, found = mathx.V(at.X, front), true
+	} else {
+		for _, p := range c.Parked {
+			if !found || p.Pos.DistTo(w.Player.Pos) < at.DistTo(w.Player.Pos) {
+				at, found = p.Pos, true
+			}
+		}
+	}
+	if !found {
+		return
+	}
+	pr := c.Project(at)
+	if !pr.Valid {
+		return
+	}
+	// Short of the spot, so that it is in the frame rather than under the car.
+	w.Player.Place(pr.Lane.Point(max(pr.S-vantageBack, 2)), pr.Lane.Heading)
+	w.EnsureBuilt(w.Player.Pos)
+}
+
+// vantageBack is how far short of its vantage the car is put, in metres.
+const vantageBack float32 = 30
 
 func sheetCameras(cfg config) error {
 	// Shows one scene from each viewpoint.

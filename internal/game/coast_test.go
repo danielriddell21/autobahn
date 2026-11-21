@@ -93,6 +93,15 @@ func TestEveryMapIsFinishedItsOwnWay(t *testing.T) {
 			}
 		}
 	}
+	for _, m := range city.Maps() {
+		town := townFor(m)
+		if town.sheds != (m == city.MapMotorway) {
+			t.Errorf("%s: sheds = %v", m.Name(), town.sheds)
+		}
+		if town.verges != (m == city.MapVillage) {
+			t.Errorf("%s: verges = %v", m.Name(), town.verges)
+		}
+	}
 	if townFor(city.MapCity).shops != 1 {
 		t.Error("every building in the city should have a shop at its foot")
 	}

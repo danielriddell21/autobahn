@@ -204,6 +204,10 @@ func (g *Game) drawBlocks(eye mathx.Vec) {
 		// off for the junctions they face.
 		kerb := g.outline(i)
 		surface := g.look.pave
+		if g.town.verges {
+			// Grass to the kerb, and round the houses.
+			surface = g.look.park
+		}
 		field := fieldOf(b, g.opts.Map)
 		switch {
 		case b.Park:

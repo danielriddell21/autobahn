@@ -180,20 +180,7 @@ func (lk seasonLook) drawTree(t tree, ground float32) {
 	crown := t.height - trunk
 	y := ground + trunk
 	if state == treeBare {
-		// The trunk carries on up, with a few boughs off it.
-		rl.DrawCube(vec3(t.at.X, y+crown*0.4, t.at.Z), 0.2, crown*0.8, 0.2, colTrunk)
-		for i, up := range [3]float32{0.25, 0.48, 0.68} {
-			reach := t.spread * (1.5 - 0.4*float32(i))
-			if i%2 == 0 {
-				rl.DrawCube(vec3(t.at.X, y+crown*up, t.at.Z), reach, 0.12, 0.12, colTrunk)
-			} else {
-				rl.DrawCube(vec3(t.at.X, y+crown*up, t.at.Z), 0.12, 0.12, reach, colTrunk)
-			}
-			if lk.snow {
-				rl.DrawCube(vec3(t.at.X, y+crown*up+0.09, t.at.Z),
-					max(reach*float32((i+1)%2), 0.14), 0.06, max(reach*float32(i%2), 0.14), colSnow)
-			}
-		}
+		lk.drawBareCrown(t, y, crown)
 		return
 	}
 	// Three stacked blocks, shrinking toward the top.
@@ -215,6 +202,40 @@ func (lk seasonLook) drawTree(t tree, ground float32) {
 // has reserved.
 func crownShade(leaf rl.Color, tier int) rl.Color {
 	return scaleColor(leaf, min(0.8+0.1*float32(tier), 1))
+}
+
+// Bare boughs, in degrees: how steeply a bough climbs away from the trunk,
+// and how much more steeply the twig off the end of it does.
+const (
+	boughRise float32 = 38
+	twigRise  float32 = 30
+)
+
+// drawBareCrown draws a tree with no leaves on it: the trunk carrying on up
+// to a point, with boughs off it on every side that climb as they go and
+// shorten toward the top, each ending in a twig. Boughs that run out level
+// make a telegraph pole; it is the climbing that makes it a tree.
+func (lk seasonLook) drawBareCrown(t tree, y, crown float32) {
+	rl.DrawCube(vec3(t.at.X, y+crown*0.42, t.at.Z), 0.2, crown*0.84, 0.2, colTrunk)
+	turn := scatter(t.at.X, t.at.Z, 9)[0] * 360
+	for tier, up := range [3]float32{0.08, 0.34, 0.58} {
+		reach := t.spread * (1.2 - 0.3*float32(tier))
+		for k := range 3 {
+			rl.PushMatrix()
+			rl.Translatef(t.at.X, y+crown*up, t.at.Z)
+			// Three boughs to a tier, each tier turned against the last.
+			rl.Rotatef(turn+float32(k)*120+float32(tier)*55, 0, 1, 0)
+			rl.Rotatef(boughRise, 0, 0, 1)
+			rl.DrawCube(vec3(reach/2, 0, 0), reach, 0.12, 0.12, colTrunk)
+			if lk.snow {
+				rl.DrawCube(vec3(reach/2, 0.08, 0), reach*0.9, 0.05, 0.13, colSnow)
+			}
+			rl.Translatef(reach, 0, 0)
+			rl.Rotatef(twigRise, 0, 0, 1)
+			rl.DrawCube(vec3(reach*0.25, 0, 0), reach*0.5, 0.08, 0.08, colTrunk)
+			rl.PopMatrix()
+		}
+	}
 }
 
 // litterRange is how near the eye a tree has to be before the leaves under

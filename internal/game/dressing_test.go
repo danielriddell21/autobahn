@@ -175,3 +175,20 @@ func TestSomeShopsHaveAwningsAndSomeAreLit(t *testing.T) {
 		t.Errorf("%d of %d shops are lit at night", lit, n)
 	}
 }
+
+func TestAFrontageIsTheSideFacingTheStreet(t *testing.T) {
+	b := city.Building{Center: mathx.V(10, 20), W: 12, D: 8, Front: mathx.V(0, -1)}
+	fr, ok := frontOf(b)
+	if !ok || fr.at != mathx.V(10, 16) || fr.face != 12 {
+		t.Errorf("a building facing down the grid fronts at %v, %.0f m wide, ok %v", fr.at, fr.face, ok)
+	}
+	b.Front = mathx.V(1, 0)
+	fr, ok = frontOf(b)
+	if !ok || fr.at != mathx.V(16, 20) || fr.face != 8 {
+		t.Errorf("a building facing along the grid fronts at %v, %.0f m wide, ok %v", fr.at, fr.face, ok)
+	}
+	b.Front = mathx.Vec{}
+	if _, ok := frontOf(b); ok {
+		t.Error("a building facing nowhere has a frontage")
+	}
+}

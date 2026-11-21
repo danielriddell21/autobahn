@@ -51,6 +51,13 @@ type townLook struct {
 	// pitched is the share of low buildings with a pitched roof rather than
 	// a flat one.
 	pitched float32
+	// sheds makes every building a shed: blank walls with a band of colour
+	// round the top and a shallow roof, a roller door where it is not a
+	// shop. It is what stands beside a dual carriageway.
+	sheds bool
+	// verges puts grass where the pavement would be, and gives each house a
+	// front garden behind a wall. It is what makes a lane of a street.
+	verges bool
 }
 
 // townFor returns how a map's buildings are finished.
@@ -59,9 +66,9 @@ func townFor(m city.Map) townLook {
 	case city.MapSeaside:
 		return townLook{facades: &seasideShades, shops: 0.6, pitched: 0.6}
 	case city.MapVillage:
-		return townLook{facades: &villageShades, shops: 0.22, pitched: 0.9}
+		return townLook{facades: &villageShades, shops: 0.22, pitched: 0.9, verges: true}
 	case city.MapMotorway:
-		return townLook{facades: &shedShades, shops: 0.5, pitched: 0.12}
+		return townLook{facades: &shedShades, shops: 0.4, sheds: true}
 	}
 	return townLook{facades: &buildingShades, shops: 1, pitched: 0.6}
 }
@@ -107,6 +114,10 @@ func drawBuilding(b city.Building, town townLook, night float32, snow bool) {
 	shade := town.facades[int(b.Shade)%len(town.facades)]
 	h := scatter(b.Center.X, b.Center.Z, 11)
 	x, z, top := b.Center.X, b.Center.Z, b.Height
+	if town.sheds {
+		drawShed(b, town, shade, h, night, snow)
+		return
+	}
 
 	// The walls are marked as a façade, which is what tells the shader to
 	// put windows in them.
@@ -162,6 +173,27 @@ func drawBuilding(b city.Building, town townLook, night float32, snow bool) {
 	drawFront(b, town, shade, h, night)
 }
 
+// shedRise is how far the roof of a shed climbs to its ridge, in metres: a
+// good deal less than a house's.
+const shedRise float32 = 1.1
+
+// drawShed draws a building as a shed: blank walls, a band of colour round
+// the top where the name would go, and a shallow roof over the lot.
+func drawShed(b city.Building, town townLook, shade rl.Color, h [3]float32, night float32, snow bool) {
+	x, z, top := b.Center.X, b.Center.Z, b.Height
+	rl.DrawCube(vec3(x, top/2, z), b.W, top, b.D, shade)
+	band := awningShades[int(h[0]*97)%len(awningShades)]
+	rl.DrawCube(vec3(x, top-0.9, z), b.W*1.01, 1.2, b.D*1.01, band)
+	// A plinth, darker than the cladding above it.
+	rl.DrawCube(vec3(x, 0.4, z), b.W*1.006, 0.8, b.D*1.006, scaleColor(shade, 0.6))
+	tin := scaleColor(shade, 0.78)
+	if snow {
+		tin = colSnow
+	}
+	gable(b.Center, b.W*1.02, b.D*1.02, top, shedRise, tin, shade)
+	drawFront(b, town, shade, h, night)
+}
+
 // gable draws a pitched roof over a w by d rectangle centred on c: two slopes
 // rising from height y to a ridge along the longer side, and a triangle of
 // wall closing each end.
@@ -214,53 +246,98 @@ func gable(c mathx.Vec, w, d, y, rise float32, roof, wall rl.Color) {
 func shopHasAwning(h [3]float32) bool  { return h[1] < 0.55 }
 func shopLitAtNight(h [3]float32) bool { return h[2] < 0.65 }
 
+// A front garden, in metres: how far the wall stands from the house, and
+// the gap in it for the path.
+const (
+	gardenDepth float32 = 2.6
+	gardenGate  float32 = 1.6
+)
+
 // isShop decides whether a building is a shop or somebody's house, from
 // where it stands and how much of the place is shops.
 func isShop(b city.Building, town townLook) bool {
 	return scatter(b.Center.X, b.Center.Z, 17)[0] < town.shops
 }
 
-// drawFront dresses the side of a building that faces its street. A shop has
-// its ground floor glazed, and an awning over some; a house has a front door.
-func drawFront(b city.Building, town townLook, shade rl.Color, h [3]float32, night float32) {
+// frontage is the side of a building that faces its street: where the middle
+// of it is, which way it looks, and how wide it is.
+type frontage struct {
+	at, out mathx.Vec
+	face    float32
+}
+
+// frontOf returns a building's frontage, and whether it has one.
+func frontOf(b city.Building) (frontage, bool) {
 	f := b.Front
 	if f.X == 0 && f.Z == 0 {
-		return
+		return frontage{}, false
 	}
-	// face is how wide the front is, and reach how far it is from the centre.
 	face, reach := b.W, b.D/2
 	if f.X != 0 {
 		face, reach = b.D, b.W/2
 	}
-	at := b.Center.Add(f.Mul(reach))
-	// slab stands a flat piece against the front: out from the wall, at a
-	// height, so thick, so tall and so wide.
-	slab := func(out, y, thick, tall, wide float32, col rl.Color) {
-		p := at.Add(f.Mul(out))
-		if f.X != 0 {
-			rl.DrawCube(vec3(p.X, y, p.Z), thick, tall, wide, col)
-			return
-		}
-		rl.DrawCube(vec3(p.X, y, p.Z), wide, tall, thick, col)
-	}
+	return frontage{at: b.Center.Add(f.Mul(reach)), out: f, face: face}, true
+}
 
-	if !isShop(b, town) {
-		slab(0.03, 1.05, 0.08, 2.1, 1.0, scaleColor(shade, 0.5))
-		slab(0.3, 0.09, 0.6, 0.18, 1.5, colStone)
+// slab stands a flat piece against the front: so far out from the wall and
+// along it, at a height, so thick, so tall and so wide.
+func (fr frontage) slab(out, along, y, thick, tall, wide float32, col rl.Color) {
+	p := fr.at.Add(fr.out.Mul(out)).Add(fr.out.Right().Mul(along))
+	if fr.out.X != 0 {
+		rl.DrawCube(vec3(p.X, y, p.Z), thick, tall, wide, col)
 		return
 	}
+	rl.DrawCube(vec3(p.X, y, p.Z), wide, tall, thick, col)
+}
 
+// drawFront dresses the side of a building that faces its street: a shop
+// front, the door of a house, or the roller door of a shed.
+func drawFront(b city.Building, town townLook, shade rl.Color, h [3]float32, night float32) {
+	fr, ok := frontOf(b)
+	if !ok {
+		return
+	}
+	switch {
+	case isShop(b, town):
+		fr.drawShop(shade, h, night)
+	case town.sheds:
+		// A roller door, with a ramp up to it.
+		door := min(fr.face*0.4, 5)
+		fr.slab(0.03, 0, 2.1, 0.08, 4.2, door, scaleColor(shade, 0.45))
+		fr.slab(0.9, 0, 0.1, 1.8, 0.2, door*1.1, colKerb)
+	default:
+		fr.drawHouse(shade, town.verges)
+	}
+}
+
+// drawShop glazes the ground floor, and hangs an awning over some.
+func (fr frontage) drawShop(shade rl.Color, h [3]float32, night float32) {
 	glass := scaleColor(colGlass, 0.7)
 	if night > 0.35 && shopLitAtNight(h) {
 		glass = as(colShopLit, matGlow)
 	}
-	slab(0.03, 1.8, 0.1, 2.4, face*0.84, glass)
-	slab(0.05, 0.3, 0.14, 0.6, face*0.86, scaleColor(shade, 0.6))
+	fr.slab(0.03, 0, 1.8, 0.1, 2.4, fr.face*0.84, glass)
+	fr.slab(0.05, 0, 0.3, 0.14, 0.6, fr.face*0.86, scaleColor(shade, 0.6))
 	if shopHasAwning(h) {
 		cloth := awningShades[int(h[0]*97)%len(awningShades)]
-		slab(0.7, 3.12, 1.4, 0.1, face*0.8, cloth)
-		slab(1.38, 2.97, 0.05, 0.3, face*0.8, scaleColor(cloth, 0.8))
+		fr.slab(0.7, 0, 3.12, 1.4, 0.1, fr.face*0.8, cloth)
+		fr.slab(1.38, 0, 2.97, 0.05, 0.3, fr.face*0.8, scaleColor(cloth, 0.8))
 	}
+}
+
+// drawHouse gives a house its front door and step, and with a garden, a
+// wall along the front of it broken for the path to the door.
+func (fr frontage) drawHouse(shade rl.Color, garden bool) {
+	fr.slab(0.03, 0, 1.05, 0.08, 2.1, 1.0, scaleColor(shade, 0.5))
+	fr.slab(0.3, 0, 0.09, 0.6, 0.18, 1.5, colStone)
+	if !garden {
+		return
+	}
+	wall := (fr.face*0.96 - gardenGate) / 2
+	for _, side := range [2]float32{-1, 1} {
+		fr.slab(gardenDepth, side*(gardenGate+wall)/2, city.KerbHeight+0.35, 0.3, 0.7, wall, colStone)
+	}
+	fr.slab(gardenDepth/2, 0, city.KerbHeight+0.012, gardenDepth, 0.02, gardenGate*0.7, colPath)
 }
 
 // furnitureKind is one of the things that stand on a pavement.
