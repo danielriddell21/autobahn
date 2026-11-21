@@ -77,8 +77,8 @@ func roofOf(b city.Building) roofKind {
 }
 
 // drawBuilding draws one building: its walls, its roof and its shop front.
-func drawBuilding(b city.Building, night float32, snow bool) {
-	shade := buildingShades[int(b.Shade)%len(buildingShades)]
+func drawBuilding(b city.Building, shades *[6]rl.Color, night float32, snow bool) {
+	shade := shades[int(b.Shade)%len(shades)]
 	h := scatter(b.Center.X, b.Center.Z, 11)
 	x, z, top := b.Center.X, b.Center.Z, b.Height
 

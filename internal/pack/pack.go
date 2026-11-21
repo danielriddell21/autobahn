@@ -62,7 +62,9 @@ var packs = [numPacks]Pack{
 	},
 	Coast: {
 		ID: Coast, Name: "coast", Price: priceCoast,
-		Blurb: "a seaside town in summer",
+		Blurb:  "a seaside town in summer",
+		Maps:   []city.Map{city.MapSeaside},
+		Bodies: []sim.BodyKind{sim.Convertible, sim.CityCar},
 	},
 	Country: {
 		ID: Country, Name: "country", Price: priceCountry,

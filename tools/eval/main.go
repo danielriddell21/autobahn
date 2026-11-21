@@ -25,6 +25,7 @@ import (
 
 	"github.com/danielriddell21/autobahn/internal/annotate"
 	"github.com/danielriddell21/autobahn/internal/autopilot"
+	"github.com/danielriddell21/autobahn/internal/city"
 	"github.com/danielriddell21/autobahn/internal/mathx"
 	"github.com/danielriddell21/autobahn/internal/sim"
 	"github.com/danielriddell21/autobahn/internal/vision"
@@ -60,8 +61,15 @@ func main() {
 		modeName = flag.String("mode", "normal", "autopilot style: cautious, normal, brisk, aggressive or getaway")
 		verbose  = flag.Bool("verbose", false, "report the circumstances of every fault")
 		failOver = flag.Int("max-points", -1, "exit non-zero if mean penalty exceeds this")
+		mapName  = flag.String("map", "city", "the map to drive, or all for every one in turn")
 	)
 	flag.Parse()
+
+	maps, err := mapsNamed(*mapName)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "eval:", err)
+		os.Exit(2)
+	}
 
 	mode, ok := autopilot.ParseMode(*modeName)
 	if !ok {
@@ -74,18 +82,41 @@ func main() {
 		verbose: *verbose,
 	}
 
-	results := drive(*seeds, *from, cfg, max(*workers, 1))
-	mean := report(results)
-
-	if *failOver >= 0 && mean > float64(*failOver) {
-		fmt.Fprintf(os.Stderr,
-			"\neval: mean penalty %.1f exceeds the %d allowed\n", mean, *failOver)
+	// Every map is held to the same mark, and every one is driven before
+	// any verdict, so a run that fails says everything that failed.
+	failed := false
+	for _, m := range maps {
+		cfg.world = m
+		if len(maps) > 1 {
+			fmt.Printf("\n== %s, in %s ==\n", m.Name(), m.Season().Name())
+		}
+		mean := report(drive(*seeds, *from, cfg, max(*workers, 1)))
+		if *failOver >= 0 && mean > float64(*failOver) {
+			fmt.Fprintf(os.Stderr,
+				"\neval: %s: mean penalty %.1f exceeds the %d allowed\n", m.Name(), mean, *failOver)
+			failed = true
+		}
+	}
+	if failed {
 		os.Exit(1)
 	}
 }
 
+// mapsNamed reads -map: one map by name, or all of them.
+func mapsNamed(name string) ([]city.Map, error) {
+	if name == "all" {
+		return city.Maps(), nil
+	}
+	m, ok := city.ParseMap(name)
+	if !ok {
+		return nil, fmt.Errorf("unknown map %q", name)
+	}
+	return []city.Map{m}, nil
+}
+
 // runConfig is what every city in a run shares.
 type runConfig struct {
+	world         city.Map
 	mode          autopilot.Mode
 	seconds       float32
 	traffic       int
@@ -175,7 +206,7 @@ func (s *session) step() {
 }
 
 func driveOne(seed uint64, cfg runConfig) result {
-	w := sim.NewWorld(sim.Config{Seed: seed, Traffic: cfg.traffic, Police: cfg.police})
+	w := sim.NewWorld(sim.Config{Seed: seed, Map: cfg.world, Traffic: cfg.traffic, Police: cfg.police})
 	s := newSession(w, cfg)
 	driver := s.driver
 

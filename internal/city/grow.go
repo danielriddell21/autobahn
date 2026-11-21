@@ -44,6 +44,7 @@ func NewGrowing(p Params) *City {
 	return &City{
 		Seed:   p.Seed,
 		params: p,
+		plan:   worldgen.NewPlan(p.Seed, float64(p.MinSpan), float64(p.MaxSpan)),
 		lanes:  spatial.New[int](laneCellSize),
 		lat: worldgen.NewGrowable(p.Seed, worldgen.LatticeConfig{
 			MinSpan: float64(p.MinSpan), MaxSpan: float64(p.MaxSpan),
@@ -153,7 +154,8 @@ func (c *City) neighboursReached(n *worldgen.LatticeNode) bool {
 // of the junctions at each end, so the radius has to be known first.
 func (c *City) settleShape(n *Node, ln *worldgen.LatticeNode) {
 	var widest float32
-	for _, id := range ln.Edges {
+	edges := c.edgesOf(ln)
+	for _, id := range edges {
 		widest = max(widest, halfWidthOf(latticeClass(c.lat, c.lat.Edges[id])))
 	}
 	// The junction box reaches past the carriageways by the kerb radius, so a
@@ -164,7 +166,12 @@ func (c *City) settleShape(n *Node, ln *worldgen.LatticeNode) {
 	// A roundabout needs room and somewhere to send traffic, and the choice
 	// has to come from the junction's position rather than from a running
 	// stream, or a city reached in a different order would put them elsewhere.
-	if len(ln.Edges) < 3 || cellChance(c.Seed, roundaboutSalt, ln.Col, ln.Row) >= c.params.Roundabouts {
+	if len(edges) < 3 || cellChance(c.Seed, roundaboutSalt, ln.Col, ln.Row) >= c.params.Roundabouts {
+		return
+	}
+	if c.params.Coast && ln.Row >= c.params.CoastRow {
+		// A roundabout takes a scoop out of every block round it, and on the
+		// front one of those would be the beach.
 		return
 	}
 	n.Roundabout = true
@@ -179,12 +186,13 @@ func (c *City) settleControl(n *Node, ln *worldgen.LatticeNode) {
 		n.Control = ControlGiveWay
 		return
 	}
-	if len(ln.Edges) < 3 {
+	edges := c.edgesOf(ln)
+	if len(edges) < 3 {
 		n.Control = ControlNone
 		return
 	}
 	hasArterial := false
-	for _, id := range ln.Edges {
+	for _, id := range edges {
 		if latticeClass(c.lat, c.lat.Edges[id]) == Arterial {
 			hasArterial = true
 		}
@@ -205,7 +213,7 @@ func (c *City) settleControl(n *Node, ln *worldgen.LatticeNode) {
 // the lanes along it.
 func (c *City) buildRoads(cells geom.Rect) {
 	c.eachNode(cells, func(ln *worldgen.LatticeNode) {
-		for _, id := range ln.Edges {
+		for _, id := range c.edgesOf(ln) {
 			e := c.lat.Edges[id]
 			if _, done := c.roadOf[e.ID]; done {
 				continue
@@ -252,7 +260,7 @@ func (c *City) wireNodes(cells geom.Rect) {
 
 // roadsBuilt reports whether every edge at a node has become a road.
 func (c *City) roadsBuilt(n *worldgen.LatticeNode) bool {
-	for _, id := range n.Edges {
+	for _, id := range c.edgesOf(n) {
 		if _, ok := c.roadOf[id]; !ok {
 			return false
 		}

@@ -271,6 +271,11 @@ func (w *World) Update(c Controls, dt float32) {
 		c.Boost = false
 	}
 	w.Player.Update(c, dt)
+	if w.City.AtSea(w.Player.Pos) {
+		// There is nothing out there to drive on. The car is put back on
+		// the nearest road, which is the front.
+		w.PlaceOnNearestLane()
+	}
 	for _, a := range w.Agents {
 		a.drive(w, dt)
 	}

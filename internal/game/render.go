@@ -180,6 +180,12 @@ func (g *Game) drawGround(eye mathx.Vec) {
 	loZ := max(eye.Z-r, c.Min.Z-groundEdge)
 	hiX := min(eye.X+r, c.Max.X+groundEdge)
 	hiZ := min(eye.Z+r, c.Max.Z+groundEdge)
+	if _, sea, ok := c.Shoreline(); ok {
+		// The sea, from the foot of the beach out past anything in view, and
+		// no road surface under it.
+		rl.DrawPlane(vec3(eye.X, -0.035, sea+seaReach/2), rl.NewVector2(seaReach, seaReach), colSea)
+		hiZ = min(hiZ, sea)
+	}
 	if hiX <= loX || hiZ <= loZ {
 		return
 	}
@@ -206,12 +212,18 @@ func (g *Game) drawBlocks(eye mathx.Vec) {
 		// off for the junctions they face.
 		kerb := g.outline(i)
 		surface := colSidewalk
-		if b.Park {
+		switch {
+		case b.Park:
 			surface = g.look.park
+		case b.Beach:
+			surface = colSand
 		}
 		groundWall(centre, kerb, -0.02, city.KerbHeight, colKerb)
 		groundFan(centre, kerb, city.KerbHeight, surface)
 		drawPark(b)
+		if b.Beach {
+			drawBeach(b)
+		}
 	}
 }
 
@@ -351,7 +363,7 @@ func (g *Game) drawBuildings(eye mathx.Vec) {
 		if b.Center.DistTo(eye) > g.cullRange() {
 			continue
 		}
-		drawBuilding(b, g.light.night, g.look.snow)
+		drawBuilding(b, g.facades, g.light.night, g.look.snow)
 	}
 }
 

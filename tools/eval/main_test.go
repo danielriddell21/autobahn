@@ -110,3 +110,19 @@ func TestAutopilotChangesLaneToPass(t *testing.T) {
 		t.Errorf("the lane change broke the rules: %v", s.w.Judge.Log())
 	}
 }
+
+func TestMapsNamedReadsOneMapOrAllOfThem(t *testing.T) {
+	all, err := mapsNamed("all")
+	if err != nil || len(all) != len(city.Maps()) {
+		t.Fatalf("all = %v, %v; want every map", all, err)
+	}
+	for _, m := range city.Maps() {
+		got, err := mapsNamed(m.Name())
+		if err != nil || len(got) != 1 || got[0] != m {
+			t.Errorf("mapsNamed(%q) = %v, %v", m.Name(), got, err)
+		}
+	}
+	if _, err := mapsNamed("atlantis"); err == nil {
+		t.Error("a map that does not exist should be refused")
+	}
+}

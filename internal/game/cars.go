@@ -12,8 +12,13 @@ import (
 // come from its body.
 const wheelWidth float32 = 0.25
 
-// colCargo is the box on the back of a lorry.
-var colCargo = rl.NewColor(204, 202, 194, 255)
+var (
+	// colCargo is the box on the back of a lorry, and the top half of a camper.
+	colCargo   = rl.NewColor(204, 202, 194, 255)
+	colSeat    = rl.NewColor(104, 72, 54, 255)
+	colIcePink = rl.NewColor(222, 150, 170, 255)
+	colWafer   = rl.NewColor(204, 164, 104, 255)
+)
 
 // carLook is everything about how one car is drawn that is not its shape.
 type carLook struct {
@@ -42,6 +47,12 @@ func bootShare(k sim.BodyKind) float32 {
 		return 0.02
 	case sim.Taxi:
 		return 0.07
+	case sim.Convertible:
+		return 0.2
+	case sim.CityCar:
+		return 0.04
+	case sim.IceCreamVan, sim.Camper:
+		return 0.02
 	case sim.Bus:
 		return 0 // the decks run the whole length
 	case sim.Lorry:
@@ -147,11 +158,20 @@ func drawCabin(s sim.Spec, body sim.Body, look carLook, waist float32, paint, da
 	case sim.Lorry:
 		drawCabAndBox(s, front-cabin, front, waist, roof, paint, glass)
 		return
-	case sim.Van:
+	case sim.Convertible:
+		drawOpenCabin(rear, front, half, waist, roof, glass)
+		return
+	case sim.Camper:
+		drawCamper(s, waist, roof, glass)
+		return
+	case sim.Van, sim.IceCreamVan:
 		// A van is a cab and a box: glass only at the front.
 		split := front - cabin*0.3
 		rl.DrawCube(vec3((rear+split)/2, (waist+roof)/2, 0), split-rear, roof-waist, s.HalfWidth*1.96, paint)
 		taperBox(split, front, half, waist, split, front-0.45, half*0.94, roof-0.06, glass, dark)
+		if body.Kind == sim.IceCreamVan {
+			drawIceCreamFittings(s, rear, split, waist, roof, glass)
+		}
 		return
 	default:
 	}
@@ -173,6 +193,45 @@ func drawCabin(s sim.Spec, body sim.Body, look carLook, waist float32, paint, da
 		rl.DrawCube(vec3(mid, (waist+roof)/2-0.03, side*(half+top)/2),
 			0.13, roof-waist-0.04, 0.05, dark)
 	}
+}
+
+// drawOpenCabin builds a car with no roof: a raked screen, the seats behind
+// it, and a hoop behind each of those.
+func drawOpenCabin(rear, front, half, waist, roof float32, glass rl.Color) {
+	// The well the seats are in, which is what says there is no roof.
+	rl.DrawCube(vec3((rear+front)/2-0.1, waist+0.012, 0), front-rear-0.5, 0.02, half*1.7, colTrim)
+	taperBox(front-0.34, front-0.24, half*0.96, waist, front-0.6, front-0.52, half*0.9, roof, glass, colTrim)
+	seat := rear + (front-rear)*0.42
+	for _, side := range [2]float32{1, -1} {
+		z := side * half * 0.48
+		rl.DrawCube(vec3(seat, waist+0.13, z), 0.2, 0.34, half*0.62, colSeat)
+		rl.DrawCube(vec3(seat-0.22, waist+0.17, z), 0.08, 0.3, half*0.5, colTrim)
+	}
+}
+
+// drawCamper builds a camper van: a white top half with glass all round it,
+// and a roof that lifts.
+func drawCamper(s sim.Spec, waist, roof float32, glass rl.Color) {
+	length, width := s.HalfLength*2, s.HalfWidth*2
+	rl.DrawCube(vec3(0, (waist+roof)/2, 0), length*0.97, roof-waist, width, colCargo)
+	rl.DrawCube(vec3(0.02, waist+(roof-waist)*0.48, 0), length*0.975, (roof-waist)*0.44, width*1.012, glass)
+	rl.DrawCube(vec3(-length*0.08, roof+0.09, 0), length*0.6, 0.18, width*0.86, colCargo)
+}
+
+// drawIceCreamFittings dresses a van to sell ice cream from: a stripe, a
+// hatch on the kerb side with a shade over it, and a cone on the roof.
+func drawIceCreamFittings(s sim.Spec, rear, split, waist, roof float32, glass rl.Color) {
+	mid := (rear + split) / 2
+	for _, side := range [2]float32{1, -1} {
+		rl.DrawCube(vec3(mid, waist+0.12, side*(s.HalfWidth*0.98+0.012)), split-rear, 0.2, 0.03, colIcePink)
+	}
+	// Traffic keeps left, so the kerb is on the van's left.
+	kerb := -s.HalfWidth * 0.98
+	rl.DrawCube(vec3(mid, waist+(roof-waist)*0.55, kerb-0.012), (split-rear)*0.5, (roof-waist)*0.42, 0.03, glass)
+	rl.DrawCube(vec3(mid, waist+(roof-waist)*0.82, kerb-0.3), (split-rear)*0.56, 0.05, 0.6, colIcePink)
+	at := mathx.V(mid, 0)
+	pillar(at, roof, roof+0.55, 0.05, 0.2, 8, colWafer)
+	pillar(at, roof+0.55, roof+0.8, 0.22, 0.08, 8, colIcePink)
 }
 
 // drawDecks builds a double-decker on top of its lower body: one slab the

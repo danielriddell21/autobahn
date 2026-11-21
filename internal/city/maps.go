@@ -12,6 +12,9 @@ type Map int
 const (
 	// MapCity is the British city the game began with.
 	MapCity Map = iota
+	// MapSeaside is a seaside town: low terraces, and the sea along one
+	// side with a beach below the front.
+	MapSeaside
 	numMaps
 )
 
@@ -29,7 +32,9 @@ func (m Map) Valid() bool { return m >= 0 && m < numMaps }
 
 // Name returns the map's name, as a menu shows it and -map reads it.
 func (m Map) Name() string {
-	switch m { //nolint:gocritic // one map now, more to come
+	switch m {
+	case MapSeaside:
+		return "seaside"
 	default:
 		return "city"
 	}
@@ -74,7 +79,9 @@ func (s Season) Name() string {
 
 // Season returns the time of year a map is driven in.
 func (m Map) Season() Season {
-	switch m { //nolint:gocritic // one map now, more to come
+	switch m {
+	case MapSeaside:
+		return Summer
 	default:
 		return Autumn
 	}
@@ -99,8 +106,18 @@ func squashName(s string) string {
 // which city of that kind it is.
 func ParamsFor(m Map, seed uint64) Params {
 	p := DefaultParams(seed)
-	if m.Valid() {
-		p.Map = m
+	if !m.Valid() {
+		return p
+	}
+	p.Map = m
+	if m == MapSeaside {
+		// Shorter blocks of low terraces with a few more greens among them,
+		// and the front three streets down from where a drive begins. That
+		// grid line is one of the main roads, so the seafront is a proper
+		// promenade rather than a back street.
+		p.MinSpan, p.MaxSpan = 70, 120
+		p.Roundabouts, p.Parks, p.Rise = 0.2, 0.14, 0.22
+		p.Coast, p.CoastRow = true, 3
 	}
 	return p
 }

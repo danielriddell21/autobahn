@@ -39,6 +39,10 @@ func fingerprint(c *city.City) []string {
 	for _, p := range c.Props {
 		out = append(out, fmt.Sprintf("prop %d at %.2f,%.2f", p.Kind, p.Pos.X, p.Pos.Z))
 	}
+	for _, b := range c.Blocks {
+		out = append(out, fmt.Sprintf("block %.2f,%.2f-%.2f,%.2f park=%v beach=%v",
+			b.Min.X, b.Min.Z, b.Max.X, b.Max.Z, b.Park, b.Beach))
+	}
 	for _, p := range c.Parked {
 		out = append(out, fmt.Sprintf("parked %.2f,%.2f h=%.2f shape=%d paint=%d",
 			p.Pos.X, p.Pos.Z, p.Heading, p.Shape, p.Paint))
@@ -82,27 +86,35 @@ func diff(t *testing.T, want, got []string) {
 // same junctions, the same lanes with the same successors and limits, the same
 // buildings and signs. If it is not, driving out and back would change the
 // world behind you.
+//
+// It is held for every map: each is the same generator asked for something
+// different, and none may answer differently depending on the order it is
+// asked in.
 func TestGrownCityMatchesOneBuiltAtOnce(t *testing.T) {
 	const seed = 7
 	const span = 600
 
-	whole := city.NewGrowing(city.DefaultParams(seed))
-	whole.EnsureAround(mathx.V(0, 0), span)
+	for _, m := range city.Maps() {
+		t.Run(m.Name(), func(t *testing.T) {
+			whole := city.NewGrowing(city.ParamsFor(m, seed))
+			whole.EnsureAround(mathx.V(0, 0), span)
 
-	// The same ground, reached in four overlapping steps from different
-	// directions, in an order no single pass would ever use.
-	grown := city.NewGrowing(city.DefaultParams(seed))
-	for _, at := range []mathx.Vec{
-		mathx.V(-300, -300), mathx.V(300, -300),
-		mathx.V(-300, 300), mathx.V(300, 300),
-		mathx.V(0, 0),
-	} {
-		grown.EnsureAround(at, span/2)
+			// The same ground, reached in four overlapping steps from
+			// different directions, in an order no single pass would use.
+			grown := city.NewGrowing(city.ParamsFor(m, seed))
+			for _, at := range []mathx.Vec{
+				mathx.V(-300, -300), mathx.V(300, -300),
+				mathx.V(-300, 300), mathx.V(300, 300),
+				mathx.V(0, 0),
+			} {
+				grown.EnsureAround(at, span/2)
+			}
+			// Then the full extent, so both cover the same ground.
+			grown.EnsureAround(mathx.V(0, 0), span)
+
+			diff(t, fingerprint(whole), fingerprint(grown))
+		})
 	}
-	// Then the full extent, so both cover the same ground.
-	grown.EnsureAround(mathx.V(0, 0), span)
-
-	diff(t, fingerprint(whole), fingerprint(grown))
 }
 
 func TestGrowingIsIdempotent(t *testing.T) {

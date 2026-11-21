@@ -216,6 +216,9 @@ type Building struct {
 type Block struct {
 	Min, Max mathx.Vec
 	Park     bool
+	// Beach marks the strand below a seafront: open sand, with nothing built
+	// on it.
+	Beach bool
 	// Corners says how each corner is cut back for the junction it faces, in
 	// the order (Min.X, Min.Z), (Max.X, Min.Z), (Min.X, Max.Z), (Max.X, Max.Z).
 	Corners [4]Corner
@@ -360,6 +363,9 @@ type City struct {
 	// nothing is ever built twice or revised once built. See grow.go.
 	params Params
 	lat    *worldgen.Lattice
+	// plan is where the lattice's grid lines fall, which is how the coast is
+	// found before the ground beside it exists.
+	plan   worldgen.Plan
 	roadOf map[int]int // lattice edge ID to road ID
 	// lastCells is the area the previous growth covered, so asking for it again
 	// costs nothing.
@@ -376,13 +382,22 @@ type Params struct {
 	MinSpan, MaxSpan float32 // block span range in metres
 	// Roundabouts is the share of eligible junctions built as roundabouts.
 	Roundabouts float32
+	// Parks is the share of blocks left as open ground.
+	Parks float32
+	// Rise is how far the skyline climbs toward the middle of the place: 1
+	// is a city with towers at its heart, 0 a place the same height all over.
+	Rise float32
+	// Coast puts the sea along one side. Nothing is built beyond the grid
+	// line CoastRow, which becomes the seafront, with a beach below it.
+	Coast    bool
+	CoastRow int
 }
 
 // DefaultParams returns generation parameters for a reasonably sized city.
 func DefaultParams(seed uint64) Params {
 	return Params{
 		Seed: seed, Cols: 9, Rows: 9, MinSpan: 80, MaxSpan: 150,
-		Roundabouts: 0.28,
+		Roundabouts: 0.28, Parks: parkShare, Rise: 1,
 	}
 }
 
@@ -846,6 +861,10 @@ func (c *City) placeRoadProps(r *Road, side float32) {
 // plan thinned away — is not set back at all, and the block runs on flush
 // into its neighbour instead of leaving a strip of road nobody can drive.
 func (c *City) fillCell(col, row int, corners [4]*Node) {
+	if c.params.Coast && row >= c.params.CoastRow {
+		c.fillShore(row, corners)
+		return
+	}
 	west := c.streetHalfWidth(corners[0], corners[2])
 	east := c.streetHalfWidth(corners[1], corners[3])
 	north := c.streetHalfWidth(corners[0], corners[1])
@@ -857,7 +876,7 @@ func (c *City) fillCell(col, row int, corners [4]*Node) {
 		return
 	}
 
-	park := cellChance(c.Seed, parkSalt, col, row) < parkShare
+	park := cellChance(c.Seed, parkSalt, col, row) < c.params.Parks
 	block := Block{Min: lo, Max: hi, Park: park}
 	// Each corner faces one junction, and is cut back to suit it.
 	sides := [4][2]float32{{west, north}, {east, north}, {west, south}, {east, south}}
@@ -886,7 +905,7 @@ func (c *City) fillCell(col, row int, corners [4]*Node) {
 // neighbouring junctions, or zero if the plan has none there. It reads the
 // plan rather than the roads, which may not all be built when a block is.
 func (c *City) streetHalfWidth(a, b *Node) float32 {
-	for _, id := range c.lat.Nodes[a.ID].Edges {
+	for _, id := range c.edgesOf(c.lat.Nodes[a.ID]) {
 		e := c.lat.Edges[id]
 		if c.lat.Other(e, a.ID) == b.ID {
 			return halfWidthOf(latticeClass(c.lat, e))
@@ -926,7 +945,7 @@ func (c *City) fillBlock(col, row int, lo, hi mathx.Vec, downtown float32) {
 		if w < 5 || d < 5 {
 			return
 		}
-		h := 7 + draw()*10 + downtown*downtown*(18+draw()*58)
+		h := 7 + draw()*10 + c.params.Rise*downtown*downtown*(18+draw()*58)
 		c.Buildings = append(c.Buildings, Building{
 			Center: mathx.V(cx, cz), W: w, D: d, Height: h,
 			Shade:  uint8(draw() * 6),

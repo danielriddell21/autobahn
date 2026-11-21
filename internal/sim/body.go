@@ -25,6 +25,13 @@ const (
 	// to get going and slower to stop. Only traffic drives them.
 	Bus
 	Lorry
+	// Convertible is a low open two-seater and CityCar the smallest thing on
+	// the road. They come with the coast, as do the two that only traffic
+	// drives there: the ice cream van and the camper.
+	Convertible
+	CityCar
+	IceCreamVan
+	Camper
 	numBodies
 )
 
@@ -45,6 +52,14 @@ func (b BodyKind) Name() string {
 		return "bus"
 	case Lorry:
 		return "lorry"
+	case Convertible:
+		return "convertible"
+	case CityCar:
+		return "city car"
+	case IceCreamVan:
+		return "ice cream van"
+	case Camper:
+		return "camper"
 	default:
 		return "hatchback"
 	}
@@ -135,6 +150,30 @@ func BodyOf(k BodyKind) Body {
 		b.Spec.MaxSpeed = 25
 		b.RoofFrac, b.RoofRise, b.Boxy = 0.22, 2.45, true
 		b.Ride, b.Wheel = 0.5, 0.5
+	case Convertible:
+		b.Spec.HalfLength, b.Spec.HalfWidth, b.Spec.Height = 2.1, 0.93, 1.2
+		b.Spec.Mass, b.Spec.EngineForce = 1180, 9800
+		b.Spec.MaxSpeed = 50
+		b.Spec.GripFront, b.Spec.GripRear = 97000, 102000
+		b.RoofFrac, b.RoofRise = 0.36, 0.3
+		b.Ride = 0.22
+	case CityCar:
+		b.Spec.HalfLength, b.Spec.HalfWidth, b.Spec.Height = 1.6, 0.78, 1.34
+		b.Spec.Mass, b.Spec.EngineForce = 780, 6400
+		b.Spec.MaxSpeed = 36
+		b.RoofFrac, b.RoofRise = 0.6, 0.46
+		b.Wheel = 0.26
+	case IceCreamVan:
+		b.Spec.HalfLength, b.Spec.HalfWidth, b.Spec.Height = 2.75, 1.05, 2.3
+		b.Spec.Mass, b.Spec.EngineForce = 2300, 6600
+		b.Spec.MaxSpeed, b.Spec.BrakeForce = 24, 13000
+		b.RoofFrac, b.RoofRise, b.Boxy = 0.72, 1.0, true
+		b.Livery = 2 // white, with its trimmings
+	case Camper:
+		b.Spec.HalfLength, b.Spec.HalfWidth, b.Spec.Height = 2.3, 0.92, 2.0
+		b.Spec.Mass, b.Spec.EngineForce = 1500, 5600
+		b.Spec.MaxSpeed, b.Spec.BrakeForce = 28, 14000
+		b.RoofFrac, b.RoofRise, b.Boxy = 0.94, 0.95, true
 	default:
 		b.Spec.HalfLength, b.Spec.HalfWidth, b.Spec.Height = 2.18, 0.92, 1.46
 		b.Spec.Mass = 1320
@@ -175,6 +214,23 @@ var mixes = map[city.Map]mix{
 		Bus:       3,
 		Lorry:     3,
 	},
+	// The seaside is on holiday: fewer vans and lorries, more small cars and
+	// open ones, campers heading for the front and an ice cream van working
+	// along it.
+	city.MapSeaside: {
+		Hatchback:   28,
+		Saloon:      16,
+		Estate:      14,
+		Van:         8,
+		Taxi:        6,
+		HotHatch:    6,
+		Bus:         3,
+		Lorry:       1,
+		Convertible: 6,
+		CityCar:     6,
+		IceCreamVan: 2,
+		Camper:      4,
+	},
 }
 
 // mixFor returns the traffic mix of a map.
@@ -206,7 +262,7 @@ func RandomBody(rng *rand.Rand, m city.Map) Body {
 func PlayerBody() Body { return PlayerBodyOf(HotHatch) }
 
 // playerBodies are the shapes the garage offers, in the order it lists them.
-var playerBodies = []BodyKind{HotHatch, Hatchback, Saloon, Estate, Taxi, Van}
+var playerBodies = []BodyKind{HotHatch, Hatchback, Saloon, Estate, Taxi, Van, Convertible, CityCar}
 
 // PlayerBodies returns the shapes the player may choose from.
 func PlayerBodies() []BodyKind { return slices.Clone(playerBodies) }
@@ -249,7 +305,7 @@ func PlayerBodyOf(k BodyKind) Body {
 }
 
 // parkedShapes are the cars people leave at the kerb.
-var parkedShapes = []BodyKind{Hatchback, Hatchback, Saloon, Saloon, Estate, HotHatch, Van}
+var parkedShapes = []BodyKind{Hatchback, Hatchback, Saloon, Saloon, Estate, HotHatch, Van, CityCar}
 
 // ParkedBody returns the car standing in a parking space. The city says only
 // that a car is there and gives a draw to choose it with.

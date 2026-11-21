@@ -88,10 +88,10 @@ demo-list:
 soak frames="1800":
     {{go}} run -tags "{{tags}}" ./cmd/autobahn -autopilot -frames {{frames}} -stats
 
-# fail if the autopilot has got worse: the gate CI holds a change to
+# fail if the autopilot has got worse on any map: the gate CI holds a change to
 [group('test')]
 gate:
-    {{go}} run ./tools/eval -seeds 24 -seconds 60 -max-points 12
+    {{go}} run ./tools/eval -map all -seeds 24 -seconds 60 -max-points 12
 
 # full gate: lint + test + build + boundary + the autopilot gate. all must pass
 # before committing
