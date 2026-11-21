@@ -237,6 +237,7 @@ func (f subscriber) OnEvent(in sim.Infraction) { f(in) }
 // TestTheWorldExtendsAsYouDrive is the point of growing the city: nobody
 // should ever reach the end of it.
 func TestTheWorldExtendsAsYouDrive(t *testing.T) {
+	t.Parallel()
 	w := sim.NewWorld(sim.Config{Seed: 7, Traffic: 40, Police: 3})
 	before := len(w.City.Lanes)
 

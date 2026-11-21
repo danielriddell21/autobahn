@@ -1,11 +1,17 @@
 package sim_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/danielriddell21/autobahn/internal/city"
 	"github.com/danielriddell21/autobahn/internal/sim"
 )
+
+// The long drives in this package each build a world of their own and run
+// beside one another, because a minute and a half of traffic is slow under
+// the race detector. Do not ask for coverage in the same run: its counters
+// are atomic there, and four worlds contending for them never finish.
 
 // run steps a world with nobody at the wheel of the player's car.
 func run(w *sim.World, seconds float32, each func()) {
@@ -24,6 +30,7 @@ func run(w *sim.World, seconds float32, each func()) {
 // the road, so it crept forward a few millimetres a step with its brakes on,
 // and after a while it was over the line and gone.
 func TestTrafficDoesNotRunRedLights(t *testing.T) {
+	t.Parallel()
 	w := sim.NewWorld(sim.Config{Seed: 7, Traffic: 60, Police: 0})
 	crossing := map[*sim.Agent]bool{}
 	run(w, 90, func() {
@@ -47,36 +54,41 @@ func TestTrafficDoesNotRunRedLights(t *testing.T) {
 // reasonable can add up to everybody waiting for everybody else, and a city in
 // that state looks fine for the first minute.
 func TestTrafficKeepsMoving(t *testing.T) {
+	t.Parallel()
 	for _, seed := range []uint64{3, 7, 17} {
-		w := sim.NewWorld(sim.Config{Seed: seed, Traffic: 70, Police: 5})
-		// Park the player on the pavement, out of everybody's way.
-		w.Player.Place(w.Player.Pos.Sub(w.Player.Forward().Right().Mul(11)), w.Player.Yaw)
-		run(w, 45, nil)
+		t.Run(fmt.Sprint("seed ", seed), func(t *testing.T) {
+			t.Parallel()
+			w := sim.NewWorld(sim.Config{Seed: seed, Traffic: 70, Police: 5})
+			// Park the player on the pavement, out of everybody's way.
+			w.Player.Place(w.Player.Pos.Sub(w.Player.Forward().Right().Mul(11)), w.Player.Yaw)
+			run(w, 45, nil)
 
-		before := map[*sim.Agent]float32{}
-		for _, a := range w.Agents {
-			before[a] = a.V.Odometer
-		}
-		run(w, 75, nil)
-
-		stuck := 0
-		for _, a := range w.Agents {
-			if a.V.Odometer-before[a] < 15 {
-				stuck++
+			before := map[*sim.Agent]float32{}
+			for _, a := range w.Agents {
+				before[a] = a.V.Odometer
 			}
-		}
-		// A long red and a queue behind it can hold a few cars for a minute.
-		// A tenth of the city has not moved because it cannot.
-		if limit := len(w.Agents) / 10; stuck > limit {
-			t.Errorf("seed %d: %d of %d cars moved less than 15m in 75s, want at most %d",
-				seed, stuck, len(w.Agents), limit)
-		}
+			run(w, 75, nil)
+
+			stuck := 0
+			for _, a := range w.Agents {
+				if a.V.Odometer-before[a] < 15 {
+					stuck++
+				}
+			}
+			// A long red and a queue behind it can hold a few cars for a minute.
+			// A tenth of the city has not moved because it cannot.
+			if limit := len(w.Agents) / 10; stuck > limit {
+				t.Errorf("%d of %d cars moved less than 15m in 75s, want at most %d",
+					stuck, len(w.Agents), limit)
+			}
+		})
 	}
 }
 
 // Traffic already on a roundabout has priority, and must not stop on it to let
 // somebody in. Doing so locks the ring solid within a minute.
 func TestCirculatingTrafficDoesNotStopOnTheRing(t *testing.T) {
+	t.Parallel()
 	w := sim.NewWorld(sim.Config{Seed: 7, Traffic: 80, Police: 0})
 	parked := map[*sim.Agent]float32{}
 	worst := float32(0)

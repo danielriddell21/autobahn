@@ -17,7 +17,10 @@ jobs:
       raylib: true
       build-tags: x11
       vet: true
-      test-command: go test -tags x11 -race -coverprofile=coverage.txt ./...
+      # Twice, rather than once with both flags. Under the race detector
+      # coverage counts atomically, and the two together took the traffic
+      # tests from a minute to more than the ten the package is allowed.
+      test-command: go test -tags x11 -race ./... && go test -tags x11 -coverprofile=coverage.txt ./...
       build-command: go build -tags x11 ./...
       # gremlins runs `go test` itself and cannot be given a build tag, so
       # mutation testing cannot compile the raylib packages.
