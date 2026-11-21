@@ -298,23 +298,26 @@ func (g *Game) drawAIPanel() {
 	rl.DrawRectangleLines(x, y, w, h, hudEdge)
 
 	g.drawClassLegend(x, y+h+4)
-	g.drawMirrors(x, y-30)
+	g.drawMirrors(x, w, y-22-6)
 }
 
 // drawMirrors shows the boxes each mirror camera produced, small, in a strip
-// above the camera panel: left door, rear window, right door, as a driver
-// would glance across them.
-func (g *Game) drawMirrors(right, bottom int32) {
-	const pw, ph = 112, 63
+// above the camera panel and the same width as it: left door, rear window,
+// right door, as a driver would glance across them. bottom is where the strip's
+// own panel ends.
+func (g *Game) drawMirrors(x, w, bottom int32) {
+	const gap, label = 6, 14
+	pw := (w - 2*gap) / 3
+	ph := pw * autopilot.MirrorHeight / autopilot.MirrorWidth
+	top := bottom - ph - label - 8
+	// One panel behind all three, matching the camera panel's padding.
+	panel(x-4, top, w+8, bottom-top)
+	y := top + label + 4
+	sx, sy := float32(pw)/float32(autopilot.MirrorWidth), float32(ph)/float32(autopilot.MirrorHeight)
 	order := [...]vision.Mirror{vision.MirrorLeft, vision.MirrorRear, vision.MirrorRight}
-	x := right
-	y := bottom - ph
 	for i, m := range order {
-		px := x + int32(i)*(pw+6)
-		panel(px-2, y-16, pw+4, ph+18)
-		rl.DrawText(strings.ToUpper(m.String()), px, y-13, 10, hudDim)
-		rl.DrawRectangle(px, y, pw, ph, hudPanel)
-		sx, sy := float32(pw)/float32(autopilot.MirrorWidth), float32(ph)/float32(autopilot.MirrorHeight)
+		px := x + int32(i)*(pw+gap)
+		rl.DrawText(strings.ToUpper(m.String()), px, top+5, 10, hudDim)
 		for _, b := range g.mirrorBoxes[m] {
 			v := vision.RGBA(b.Class)
 			rl.DrawRectangleLinesEx(rl.NewRectangle(

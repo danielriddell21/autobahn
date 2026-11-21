@@ -64,6 +64,11 @@ const (
 	// lanes beside are for knowing they are there, not for steering along.
 	sideLaneRange   float32 = 40
 	sideLaneSpacing float32 = 8
+	// sideMarkerSize and sideMarkerRise make the side markers bigger than the
+	// car's own, so they are still seen at the far end of their range, which is
+	// how the autopilot knows how much road the lane alongside has left.
+	sideMarkerSize float32 = 0.75
+	sideMarkerRise float32 = 0.5
 	// mirrorRange is how far behind and beside the car the mirrors pick out
 	// another vehicle.
 	mirrorRange float32 = 60
@@ -198,7 +203,7 @@ func (lo *layout) sideLanes(w *sim.World) {
 			if !lo.visible(pt, sideLaneRange+5) {
 				continue
 			}
-			lo.add(boxOf(lo.p, cl, pt, laneMarkerRise, laneMarkerSize, laneMarkerRise, laneMarkerSize, 0))
+			lo.add(boxOf(lo.p, cl, pt, sideMarkerRise, sideMarkerSize, sideMarkerRise, sideMarkerSize, 0))
 		}
 	}
 }

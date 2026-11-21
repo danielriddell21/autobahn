@@ -22,6 +22,8 @@ type Command struct {
 	Throttle float32
 	Brake    float32
 	Steer    float32 // -1 full left .. +1 full right
+	// Indicator is the turn signal for a lane change or overtake.
+	Indicator Indicator
 }
 
 // defaultLimit is the national built-up limit of 30 mph, assumed until a sign
@@ -137,20 +139,49 @@ type profile struct {
 	cornerDecel float32 // braking for a bend
 	comfort     float32 // braking for everything else
 	creep       float32 // fastest approach to an unconfirmed junction, m/s
+
+	// How it gets past people, after the traffic styles in package sim.
+	overtake  float32 // keenness to pass, 0 to 1: how much slower a car has to be
+	patience  float32 // seconds sat behind a slower car before passing it
+	keepLeft  float32 // seconds in an outer lane with nothing to pass before moving back
+	laneGap   float32 // scales the room wanted to move into a lane
+	oncoming  bool    // passes on a single carriageway
+	undertake bool    // passes on the inside
+	// Bending the rules, which the normal mode never does.
+	rolling bool // treats a stop sign as a give way when it is clear
+	press   bool // closes up on a car it has been held up behind
 }
 
 func (m Mode) profile() profile {
 	switch m {
 	case ModeCautious:
-		return profile{0.85, 6.5, 2.4, 2.0, 2.6, 2.2, 8}
+		return profile{
+			speed: 0.85, followGap: 6.5, followDecel: 2.4, grip: 2.0, cornerDecel: 2.6, comfort: 2.2, creep: 8,
+			overtake: 0.15, patience: 20, keepLeft: 3, laneGap: 1.5,
+		}
 	case ModeBrisk:
-		return profile{1.15, 3.8, 3.4, 3.0, 3.8, 3.1, 10.5}
+		return profile{
+			speed: 1.15, followGap: 3.8, followDecel: 3.4, grip: 3.0, cornerDecel: 3.8, comfort: 3.1, creep: 10.5,
+			overtake: 0.75, patience: 4, keepLeft: 9, laneGap: 0.85, oncoming: true,
+		}
 	case ModeAggressive:
-		return profile{1.3, 3.0, 4.0, 3.5, 4.4, 3.6, 12}
+		return profile{
+			speed: 1.3, followGap: 3.0, followDecel: 4.0, grip: 3.5, cornerDecel: 4.4, comfort: 3.6, creep: 12,
+			overtake: 1, patience: 1.5, keepLeft: 14, laneGap: 0.65, oncoming: true,
+			undertake: true, rolling: true, press: true,
+		}
 	case ModeGetaway:
-		return profile{1.8, 2.6, 4.6, 4.2, 5.0, 4.2, 13.5}
+		return profile{
+			speed: 1.8, followGap: 2.6, followDecel: 4.6, grip: 4.2, cornerDecel: 5.0, comfort: 4.2, creep: 13.5,
+			overtake: 1, patience: 0.5, keepLeft: 20, laneGap: 0.55, oncoming: true,
+			undertake: true, rolling: true, press: true,
+		}
 	default:
-		return profile{1, followGap, followDecel, cornerGrip, cornerDecel, comfortStop, junctionCreep}
+		return profile{
+			speed: 1, followGap: followGap, followDecel: followDecel, grip: cornerGrip,
+			cornerDecel: cornerDecel, comfort: comfortStop, creep: junctionCreep,
+			overtake: 0.45, patience: 8, keepLeft: 5, laneGap: 1,
+		}
 	}
 }
 
@@ -165,6 +196,8 @@ const (
 	StateHalted
 	StateWaiting
 	StateSearching
+	StateChangingLane
+	StateOvertaking
 )
 
 // String returns a short label for the state.
@@ -180,6 +213,10 @@ func (s State) String() string {
 		return "WAITING"
 	case StateSearching:
 		return "NO LANE"
+	case StateChangingLane:
+		return "CHANGING LANE"
+	case StateOvertaking:
+		return "OVERTAKING"
 	default:
 		return "CRUISING"
 	}
@@ -236,6 +273,29 @@ type Driver struct {
 	stopDone   bool
 	waited     float32
 	blindTimer float32
+
+	// Lane changes and overtakes; see manoeuvre.go. shift is how far to the
+	// right of its lane markers the car is steering, and shiftWant where that
+	// is heading. lastLane is where the markers were last frame, to notice
+	// them jump when the route follows the car into another lane. path is
+	// the shifted line actually being driven.
+	shift, shiftWant float32
+	lastLane         float32
+	haveLast         bool
+	shifted, path    []lanePoint
+	move             move
+	moveSide         float32 // offset of the lane being moved to
+	signalTimer      float32
+	moveTimer        float32
+	passing          bool
+	heldUp, outside  float32
+	// The car in front, as tracked from frame to frame.
+	leadDist, leadSpeed float32
+	leadSeen            bool
+	speed               float32 // the car's own, as of the last frame
+	// reach is how far ahead the lane to the left, the lane to the right and
+	// the oncoming lane were last known to go on.
+	reach [3]float32
 }
 
 // New returns a driver calibrated to the given camera, with mirrors at the
@@ -324,7 +384,8 @@ type target struct {
 func (d *Driver) Drive(dets []vision.Detection, speed, dt float32) Command {
 	d.Detections = len(dets)
 
-	lane := d.lanePoints(dets)
+	raw := d.lanePoints(dets)
+	lane := d.shiftLane(raw, dt)
 	d.readSigns(dets, lane)
 
 	cmd := Command{}
@@ -349,6 +410,9 @@ func (d *Driver) Drive(dets []vision.Detection, speed, dt float32) Command {
 	} else {
 		d.blindTimer = 0
 	}
+
+	cruise = d.manoeuvre(dets, raw, cruise, speed, dt, pf)
+	d.path = lane
 
 	// Collect everything that constrains speed, then obey the tightest.
 	targets := d.bendTargets(lane, pf)
@@ -386,9 +450,11 @@ func (d *Driver) Drive(dets []vision.Detection, speed, dt float32) Command {
 		d.Reason = "waiting at the line"
 		governed = 0
 	}
+	d.describeMove()
 
 	d.TargetSpeed = max(governed, 0)
 	applyLongitudinal(&cmd, speed, d.TargetSpeed, need)
+	cmd.Indicator = d.indicator()
 	return cmd
 }
 
@@ -590,6 +656,14 @@ func clearance(dist float32) float32 {
 	return 1.45 + dist*0.02
 }
 
+// Closing up on a car that is in the way, for the modes that do: how much of
+// the usual gap is kept, and the slowest it is done at. In a crawling queue
+// there is nothing to gain by it.
+const (
+	pressGap   float32 = 0.85
+	pressSpeed float32 = 6
+)
+
 // Vehicle box interpretation, in metres.
 const (
 	endOnWidth  float32 = 2.2 // the widest a car looks from directly behind
@@ -622,11 +696,18 @@ func (d *Driver) inPath(det vision.Detection, lane []lanePoint) (float32, bool) 
 	left, right := (dist+depth)*tl, (dist+depth)*tr
 	centre := laneLateralAt(lane, dist)
 	room := clearance(dist)
+	if d.move != moveNone && d.move != moveSignal {
+		room = tightPath // moving across: only what is actually in the way
+	}
 	return dist, left < centre+room && right > centre-room
 }
 
 func (d *Driver) vehicleTargets(dets []vision.Detection, lane []lanePoint, pf profile) []target {
 	var out []target
+	gap := pf.followGap
+	if pf.press && d.heldUp > pf.patience && d.speed > pressSpeed {
+		gap *= pressGap // sat on the bumper of somebody in the way
+	}
 	// The car in front. A vehicle box's bottom edge is where its tyres meet
 	// the road, which is the usable range cue.
 	for _, det := range dets {
@@ -642,7 +723,7 @@ func (d *Driver) vehicleTargets(dets []vision.Detection, lane []lanePoint, pf pr
 		// Behind moving traffic that settles into a gap that grows with speed;
 		// behind a queue it stops.
 		out = append(out, target{
-			kind: targetVehicle, dist: max(dist-pf.followGap, 0), decel: pf.followDecel,
+			kind: targetVehicle, dist: max(dist-gap, 0), decel: pf.followDecel,
 			why: fmt.Sprintf("vehicle %.0fm ahead", dist),
 		})
 	}
@@ -672,7 +753,7 @@ func (d *Driver) junctionTargets(dets []vision.Detection, lane []lanePoint, spee
 	case d.aspect == vision.ClassLightGreen:
 		return nil
 	case d.sign == vision.ClassStopSign && !d.stopDone:
-		d.haltAtStopSign(stopAt, speed, dt)
+		d.haltAtStopSign(stopAt, speed, dt, pf)
 		if !d.stopHeld {
 			out = append(out, target{dist: stop, why: "stop sign"})
 		}
@@ -806,9 +887,14 @@ func (d *Driver) readPrioritySign(dets []vision.Detection, stopAt float32, haveS
 	return stopAt, haveStop
 }
 
-func (d *Driver) haltAtStopSign(stopAt, speed, dt float32) {
+func (d *Driver) haltAtStopSign(stopAt, speed, dt float32, pf profile) {
 	// A stop sign has to be obeyed with a genuine halt, then a short pause
-	// before moving off again.
+	// before moving off again, unless the driver is one who counts a crawl
+	// over the line as stopping.
+	if pf.rolling && !d.stopHeld && stopAt < stopBuffer+3 && speed < 2.2 {
+		d.stopDone = true
+		return
+	}
 	if !d.stopHeld && stopAt < stopBuffer+1.2 && speed < 0.4 {
 		d.stopHeld, d.stopTimer = true, 0
 	}

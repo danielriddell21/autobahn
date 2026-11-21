@@ -120,6 +120,11 @@ const (
 	infractionPause float32 = 5.0
 )
 
+// overtakeTime is how long a car may spend on the other side of a single
+// carriageway before it counts as the wrong way. Passing somebody there is
+// allowed, and takes a few seconds; staying there is not.
+const overtakeTime float32 = 10
+
 // NewJudge returns a judge for vehicles driving in c.
 func NewJudge(c *city.City) *Judge {
 	return &Judge{
@@ -231,7 +236,11 @@ func (j *Judge) checkDirection(v *Vehicle, proj city.LaneProjection, speed, now,
 	// where it should be.
 	if speed > 3 && v.Vel.Dot(proj.Lane.Fwd) < -0.5*speed && j.onRoad && !j.inBox {
 		j.wrongTimer += dt
-		if j.wrongTimer >= wrongWayTime {
+		limit := wrongWayTime
+		if proj.Lane.Class.Lanes() == 1 {
+			limit = overtakeTime
+		}
+		if j.wrongTimer >= limit {
 			j.record(Infraction{
 				Kind: WrongWay, At: now, Pos: v.Pos,
 				Detail: "driving against the flow",

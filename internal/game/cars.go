@@ -3,6 +3,7 @@ package game
 import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 
+	"github.com/danielriddell21/autobahn/internal/autopilot"
 	"github.com/danielriddell21/autobahn/internal/mathx"
 	"github.com/danielriddell21/autobahn/internal/sim"
 )
@@ -67,9 +68,23 @@ func (g *Game) drawTraffic(eye mathx.Vec, drawPlayer bool) {
 	if drawPlayer {
 		drawCar(g.world.Player, sim.PlayerBody(), carLook{
 			paint: carPaints[0], blink: g.blink, night: night, wheels: true,
-			player: true, boosting: g.world.Player.Boosting,
+			player: true, boosting: g.world.Player.Boosting, indicator: g.playerIndicator(),
 		})
 	}
+}
+
+// playerIndicator is the signal the autopilot is showing, while it drives.
+func (g *Game) playerIndicator() sim.Indicator {
+	if !g.auto {
+		return sim.IndicatorOff
+	}
+	switch g.lastCmd.Indicator {
+	case autopilot.IndicateLeft:
+		return sim.IndicatorLeft
+	case autopilot.IndicateRight:
+		return sim.IndicatorRight
+	}
+	return sim.IndicatorOff
 }
 
 func drawCar(v *sim.Vehicle, body sim.Body, look carLook) {

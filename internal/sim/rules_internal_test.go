@@ -117,9 +117,10 @@ func TestCrossingAJunctionIsNotTheWrongWay(t *testing.T) {
 		t.Errorf("a car in the junction box was given %d faults: %v", j.Faults, j.Log())
 	}
 
-	// The same thing half-way along the lane is exactly what the rule is for.
+	// The same thing half-way along the lane is exactly what the rule is for,
+	// once it has gone on longer than any overtake would.
 	v.Pos = l.Point(l.Length / 2)
-	for i := range 180 {
+	for i := range 60 * 12 {
 		j.Update(v, sig, 3+float32(i)/60, 1.0/60)
 	}
 	wrong := 0
@@ -130,6 +131,35 @@ func TestCrossingAJunctionIsNotTheWrongWay(t *testing.T) {
 	}
 	if wrong == 0 {
 		t.Error("driving against the flow in the middle of a lane went unnoticed")
+	}
+}
+
+// Passing on a single carriageway means a few seconds on the other side of the
+// road, which is allowed. On a dual carriageway it never is.
+func TestAnOvertakeIsNotTheWrongWay(t *testing.T) {
+	c := city.Generate(city.DefaultParams(7))
+	for _, cls := range []city.RoadClass{city.Collector, city.Arterial} {
+		var l *city.Lane
+		for _, cand := range c.Lanes {
+			if cand.Class == cls && !c.Roads[cand.Road].Ring && cand.Length > 60 && c.Complete(c.Nodes[cand.ToNode]) {
+				l = cand
+				break
+			}
+		}
+		if l == nil {
+			t.Fatalf("no %s lane", cls.Name())
+		}
+		j := NewJudge(c)
+		sig := NewSignals(c, 7)
+		v := NewVehicle(CarSpec(), l.Point(l.Length/2), l.Heading+3.14159)
+		v.Vel = l.Fwd.Mul(-9)
+		for i := range 60 * 4 {
+			j.Update(v, sig, float32(i)/60, 1.0/60)
+		}
+		single := cls.Lanes() == 1
+		if got := j.Faults != 0; got == single {
+			t.Errorf("four seconds against a %s lane: faulted %v, want %v", cls.Name(), got, !single)
+		}
 	}
 }
 

@@ -117,20 +117,67 @@ func drive(seeds int, from uint64, cfg runConfig, workers int) []result {
 	return out
 }
 
-func driveOne(seed uint64, cfg runConfig) result {
-	w := sim.NewWorld(sim.Config{Seed: seed, Traffic: cfg.traffic, Police: cfg.police})
+// session is one car being driven by the autopilot through the whole
+// perception loop, a fixed step at a time.
+type session struct {
+	w         *sim.World
+	driver    *autopilot.Driver
+	cam       vision.Camera
+	scanner   *vision.Scanner
+	mirrors   [vision.NumMirrors]vision.Camera
+	eyes      [vision.NumMirrors]*annotate.MirrorEye
+	frame     *image.RGBA
+	px        []color.RGBA
+	dets      []vision.Detection
+	perceived float32
+	interval  float32
+	// looks counts perception frames, and seen the detections over them.
+	looks, seen int
+}
+
+func newSession(w *sim.World, cfg runConfig) *session {
 	cam := vision.Camera{
 		Width: cfg.width, Height: cfg.height,
 		FovY: 62, Mount: 1.35, Pitch: 0.10,
 	}
-	driver := autopilot.New(cam)
-	driver.Mode = cfg.mode
-	scanner := vision.NewScanner()
-	mirrors := driver.Mirrors()
-	var eyes [vision.NumMirrors]*annotate.MirrorEye
-	for m := range eyes {
-		eyes[m] = annotate.NewMirrorEye(mirrors[m].Width, mirrors[m].Height)
+	s := &session{
+		w: w, driver: autopilot.New(cam), cam: cam, scanner: vision.NewScanner(),
+		// One frame buffer for the whole run: the rasteriser clears and reuses it.
+		frame:    image.NewRGBA(image.Rect(0, 0, cfg.width, cfg.height)),
+		px:       make([]color.RGBA, cfg.width*cfg.height),
+		interval: 1 / max(cfg.perception, 1),
 	}
+	s.driver.Mode = cfg.mode
+	s.mirrors = s.driver.Mirrors()
+	for m := range s.eyes {
+		s.eyes[m] = annotate.NewMirrorEye(s.mirrors[m].Width, s.mirrors[m].Height)
+	}
+	return s
+}
+
+// step runs one fixed step: a look through the cameras if one is due, the
+// autopilot's decision, and the world moving on.
+func (s *session) step() {
+	w := s.w
+	// Perception on its own clock, as in the game.
+	if s.perceived += fixedStep; s.perceived >= s.interval || s.dets == nil {
+		s.perceived = 0
+		annotate.RasteriseInto(s.frame, annotate.Layout(w, annotate.BonnetView(s.cam, w.Player.Pos, w.Player.Yaw)))
+		s.dets = s.scanner.Scan(annotate.Pixels(s.frame, s.px), s.cam.Width, s.cam.Height)
+		for m, eye := range s.eyes {
+			s.driver.Watch(vision.Mirror(m), eye.Look(w, s.mirrors[m], w.Player.Pos, w.Player.Yaw))
+		}
+		s.looks++
+		s.seen += len(s.dets)
+	}
+	cmd := s.driver.Drive(s.dets, w.Player.Speed(), fixedStep)
+	w.Update(sim.Controls{Throttle: cmd.Throttle, Brake: cmd.Brake, Steer: cmd.Steer}, fixedStep)
+}
+
+func driveOne(seed uint64, cfg runConfig) result {
+	w := sim.NewWorld(sim.Config{Seed: seed, Traffic: cfg.traffic, Police: cfg.police})
+	s := newSession(w, cfg)
+	driver := s.driver
 
 	if cfg.verbose {
 		// The judge already publishes every fault; listening tells us what the
@@ -144,44 +191,18 @@ func driveOne(seed uint64, cfg runConfig) result {
 		}))
 	}
 
-	// One frame buffer for the whole run: the rasteriser clears and reuses it.
-	frame := image.NewRGBA(image.Rect(0, 0, cfg.width, cfg.height))
-	px := make([]color.RGBA, cfg.width*cfg.height)
-
 	var (
-		dets       []vision.Detection
-		perceived  float32
-		detSum     int
-		detFrames  int
 		speedSum   float32
 		blindCount int
 		steps      int
 	)
-	interval := 1 / max(cfg.perception, 1)
-
 	for t := float32(0); t < cfg.seconds; t += fixedStep {
 		steps++
 		speedSum += w.Player.Speed()
-
-		// Perception on its own clock, as in the game.
-		if perceived += fixedStep; perceived >= interval || dets == nil {
-			perceived = 0
-			annotate.RasteriseInto(frame, annotate.Layout(w, annotate.BonnetView(cam, w.Player.Pos, w.Player.Yaw)))
-			dets = scanner.Scan(annotate.Pixels(frame, px), cfg.width, cfg.height)
-			for m, eye := range eyes {
-				driver.Watch(vision.Mirror(m), eye.Look(w, mirrors[m], w.Player.Pos, w.Player.Yaw))
-			}
-			detSum += len(dets)
-			detFrames++
-		}
-
-		cmd := driver.Drive(dets, w.Player.Speed(), fixedStep)
+		s.step()
 		if driver.State == autopilot.StateSearching {
 			blindCount++
 		}
-		w.Update(sim.Controls{
-			Throttle: cmd.Throttle, Brake: cmd.Brake, Steer: cmd.Steer,
-		}, fixedStep)
 	}
 
 	r := result{
@@ -193,8 +214,8 @@ func driveOne(seed uint64, cfg runConfig) result {
 		r.avgSpeed = mathx.ToMPH(speedSum / float32(steps))
 		r.blind = float32(blindCount) / float32(steps)
 	}
-	if detFrames > 0 {
-		r.detections = float32(detSum) / float32(detFrames)
+	if s.looks > 0 {
+		r.detections = float32(s.seen) / float32(s.looks)
 	}
 	for _, in := range w.Judge.Log() {
 		r.byKind[in.Kind.String()]++
