@@ -61,7 +61,8 @@ func parse(name string, args []string, out io.Writer) (opts game.Options, done b
 	join := fs.String("join", "", "join a chase hosted at this address")
 	camera := fs.String("camera", "chase", "viewpoint: chase, bonnet or high")
 	modeName := fs.String("mode", "normal", "autopilot style: cautious, normal, brisk, aggressive or getaway")
-	timeOfDay := fs.String("time", "day", "light: day, dusk or night")
+	timeOfDay := fs.String("time", "day", "the time of day to start at: dawn, day, dusk or night")
+	dayLength := fs.Float64("daylength", 0, "real minutes a whole day lasts; 0 holds the time of day")
 	car := fs.String("car", "hothatch", "the player's car: "+strings.Join(game.CarNames(), ", "))
 	paintName := fs.String("paint", "rosso", "the player's paint, as the garage names it, spaces dropped")
 	hz := fs.Float64("perception", float64(opts.PerceptionH), "perception updates per second")
@@ -116,19 +117,13 @@ func parse(name string, args []string, out io.Writer) (opts game.Options, done b
 		return opts, false, fmt.Errorf("unknown mode %q", *modeName)
 	}
 	opts.Mode = mode
-	switch *timeOfDay {
-	case "day":
-		opts.Time = game.TimeDay
-	case "dusk":
-		opts.Time = game.TimeDusk
-	case "night":
-		opts.Time = game.TimeNight
-	default:
-		return opts, false, fmt.Errorf("unknown time %q", *timeOfDay)
+	if opts.Time, err = parseTime(*timeOfDay); err != nil {
+		return opts, false, err
 	}
 	if opts.Car, opts.Paint, err = game.ParseCar(*car, *paintName); err != nil {
 		return opts, false, err
 	}
+	opts.DayLength = float32(max(*dayLength, 0))
 	opts.PerceptionH = float32(*hz)
 	opts.Frames = *frames
 	opts.Screenshot = *shot
@@ -136,4 +131,14 @@ func parse(name string, args []string, out io.Writer) (opts game.Options, done b
 	opts.DebugVision = *dbg
 
 	return opts, false, nil
+}
+
+// parseTime reads a time of day as -time names it.
+func parseTime(name string) (game.TimeOfDay, error) {
+	for t := range game.NumTimes {
+		if t.String() == name {
+			return t, nil
+		}
+	}
+	return game.TimeDay, fmt.Errorf("unknown time %q", name)
 }

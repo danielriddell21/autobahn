@@ -90,6 +90,7 @@ func (g *Game) publish() {
 
 	s := Snapshot{
 		Clock:  g.world.Time,
+		Hour:   g.clock.hour,
 		Runner: poseOf(g.world.Player, false),
 		Agents: make([]Pose, 0, len(g.world.Agents)),
 		Chaser: -1,
@@ -165,6 +166,8 @@ func (g *Game) adopt(s Snapshot, dt float32) {
 	// only the moving parts are taken from the host.
 	g.world.Signals.SetClock(s.Clock)
 	g.world.Time = s.Clock
+	g.clock.hour, g.clock.glide = wrapHour(s.Hour), 0
+	g.light = lightingAt(g.clock.hour)
 	ease(g.world.Player, s.Runner, dt)
 
 	for i, p := range s.Agents {

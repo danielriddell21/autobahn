@@ -35,8 +35,10 @@ type Settings struct {
 	Police  int `json:"police"`
 	// Camera is the viewpoint a new session opens on.
 	Camera CameraMode `json:"camera"`
-	// Time is the light the city is seen in.
-	Time TimeOfDay `json:"time"`
+	// Time is the time of day a session starts at, and DayLength how fast
+	// the day then goes round.
+	Time      TimeOfDay `json:"time"`
+	DayLength DayLength `json:"dayLength"`
 	// Mode is how the autopilot drives.
 	Mode autopilot.Mode `json:"mode"`
 	// Car is the shape of the player's car, and Paint its colour, as chosen
@@ -50,6 +52,7 @@ func DefaultSettings() Settings {
 	return Settings{
 		Volume: 0.7, ShowPanel: true, ShowLabels: true,
 		Traffic: 70, Police: 7, Camera: CameraChase, Car: sim.HotHatch,
+		DayLength: DayMedium,
 	}
 }
 
@@ -73,8 +76,11 @@ func (s *Settings) clamp() {
 	if s.Mode < 0 || s.Mode >= autopilot.NumModes {
 		s.Mode = autopilot.ModeNormal
 	}
-	if s.Time < 0 || s.Time >= numTimes {
+	if s.Time < 0 || s.Time >= NumTimes {
 		s.Time = TimeDay
+	}
+	if s.DayLength < 0 || s.DayLength >= numDayLengths {
+		s.DayLength = DayMedium
 	}
 	if !sim.IsPlayerBody(s.Car) {
 		s.Car = sim.HotHatch
@@ -159,6 +165,9 @@ func (s Settings) applyViewTo(o Options) Options {
 	}
 	if !o.Given["time"] {
 		o.Time = s.Time
+	}
+	if !o.Given["daylength"] {
+		o.DayLength = s.DayLength.Minutes()
 	}
 	if !o.Given["paint"] {
 		o.Paint = s.Paint

@@ -102,7 +102,7 @@ func TestParseRejectsCommandLinesTheGameCannotHonour(t *testing.T) {
 
 func TestParseReadsTheTimeOfDay(t *testing.T) {
 	for arg, want := range map[string]game.TimeOfDay{
-		"day": game.TimeDay, "dusk": game.TimeDusk, "night": game.TimeNight,
+		"day": game.TimeDay, "dusk": game.TimeDusk, "night": game.TimeNight, "dawn": game.TimeDawn,
 	} {
 		opts, _, err := parse("autobahn", []string{"-time", arg}, &strings.Builder{})
 		if err != nil {
@@ -144,5 +144,12 @@ func TestParseCarAndPaint(t *testing.T) {
 	}
 	if _, _, err := parse("autobahn", []string{"-car", "tank"}, &strings.Builder{}); err == nil {
 		t.Error("an unknown car should be refused")
+	}
+}
+
+func TestParseReadsTheDayLength(t *testing.T) {
+	opts, _, err := parse("autobahn", []string{"-daylength", "6"}, &strings.Builder{})
+	if err != nil || opts.DayLength != 6 || !opts.Given["daylength"] {
+		t.Errorf("-daylength 6 gave %v (given %v), err %v", opts.DayLength, opts.Given["daylength"], err)
 	}
 }

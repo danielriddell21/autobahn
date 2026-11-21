@@ -81,8 +81,10 @@ type Options struct {
 	Camera CameraMode
 	// Mode is how the autopilot drives.
 	Mode autopilot.Mode
-	// Time is the light the city is seen in.
-	Time TimeOfDay
+	// Time is the time of day a session starts at, and DayLength how many
+	// real minutes a day then lasts; 0 holds it there.
+	Time      TimeOfDay
+	DayLength float32
 	// Car is the shape of the player's car, and Paint the index of its colour
 	// among the garage's paints.
 	Car        sim.BodyKind
@@ -126,10 +128,10 @@ type Game struct {
 	world *sim.World
 
 	// scene is the lighting shader, light what it is currently lighting the
-	// city with, and tod the time of day that light belongs to.
+	// city with, and clock the hour that light belongs to.
 	scene sceneShader
 	light lighting
-	tod   TimeOfDay
+	clock dayClock
 	// outlines caches each block's kerb line, and trees what has been planted;
 	// treedBlocks and treedRoads say how much of the city that covers.
 	outlines    [][]mathx.Vec
@@ -284,6 +286,7 @@ func New(opts Options) *Game {
 	g.aiTarget = rl.LoadRenderTexture(int32(opts.CamWidth), int32(opts.CamHeight))
 
 	g.scene = loadSceneShader()
+	g.clock.minutes = opts.DayLength
 	g.SetTime(opts.Time)
 	g.fov = groundFov
 
@@ -342,13 +345,26 @@ func (g *Game) Close() {
 	}
 }
 
-// Time returns the time of day the city is being shown at.
-func (g *Game) Time() TimeOfDay { return g.tod }
+// Time returns the time of day the city is nearest to being shown at.
+func (g *Game) Time() TimeOfDay { return g.clock.stage() }
 
-// SetTime changes the time of day.
+// SetTime puts the clock at a time of day at once.
 func (g *Game) SetTime(t TimeOfDay) {
-	g.tod = ((t % numTimes) + numTimes) % numTimes
-	g.light = lightingFor(g.tod)
+	g.opts.Time = ((t % NumTimes) + NumTimes) % NumTimes
+	g.clock.set(g.opts.Time)
+	g.light = lightingAt(g.clock.hour)
+}
+
+// SetDayLength changes how many real minutes a day lasts; 0 holds the clock.
+func (g *Game) SetDayLength(minutes float32) {
+	g.opts.DayLength = minutes
+	g.clock.minutes = minutes
+}
+
+// advanceDay moves the clock on and relights the city for the new hour.
+func (g *Game) advanceDay(dt float32) {
+	g.clock.step(dt)
+	g.light = lightingAt(g.clock.hour)
 }
 
 // sky clears the frame to the sky for the current time of day.
@@ -410,6 +426,7 @@ func (g *Game) Step(dt float32) {
 		g.blink, g.blinkT = !g.blink, 0
 	}
 	g.notices.Tick()
+	g.advanceDay(dt)
 
 	g.perceive(dt)
 
@@ -597,6 +614,9 @@ func (g *Game) stepChase(dt float32) {
 		g.blink, g.blinkT = !g.blink, 0
 	}
 
+	if g.net.Role() != netplay.Joining {
+		g.advanceDay(dt) // the joining player takes the hour from the host
+	}
 	if g.net.Role() == netplay.Joining {
 		g.joinChase(dt)
 	} else {
@@ -636,7 +656,9 @@ func (g *Game) handleInput() {
 	case rl.IsKeyPressed(rl.KeyH):
 		g.showHelp = !g.showHelp
 	case rl.IsKeyPressed(rl.KeyT):
-		g.SetTime(g.tod + 1)
+		if g.net.Role() != netplay.Joining {
+			g.clock.skip()
+		}
 	case rl.IsKeyPressed(rl.KeyM):
 		g.driver.Mode = (g.driver.Mode + 1) % autopilot.NumModes
 	}

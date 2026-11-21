@@ -235,8 +235,12 @@ func (s *Shell) showSettings(from screen) {
 				},
 			},
 			{
-				Label:  func() string { return "Time of day   " + set.Time.String() },
+				Label:  func() string { return "Start time    " + set.Time.String() },
 				Adjust: func(d int) { set.Time = cycleTime(set.Time, d) },
+			},
+			{
+				Label:  func() string { return "Day length    " + set.DayLength.String() },
+				Adjust: func(d int) { set.DayLength = cycleDayLength(set.DayLength, d) },
 			},
 			{Label: text("Back"), Action: s.leaveSettings},
 		},
@@ -278,7 +282,7 @@ func (s *Shell) applyCar() {
 
 // cycleTime steps through the times of day, wrapping at both ends.
 func cycleTime(t TimeOfDay, dir int) TimeOfDay {
-	return TimeOfDay((int(t) + dir + int(numTimes)) % int(numTimes))
+	return TimeOfDay((int(t) + dir + int(NumTimes)) % int(NumTimes))
 }
 
 // cycleCamera steps through the viewpoints, wrapping at both ends.
@@ -310,7 +314,12 @@ func (s *Shell) applyLive() {
 	}
 	s.game.ShowPanel(s.settings.ShowPanel)
 	s.game.showLabels = s.settings.ShowLabels
-	s.game.SetTime(s.settings.Time)
+	// The clock is only reset when the start time was changed, so opening
+	// the settings mid-drive does not throw the evening away.
+	if s.game.opts.Time != s.settings.Time {
+		s.game.SetTime(s.settings.Time)
+	}
+	s.game.SetDayLength(s.settings.DayLength.Minutes())
 	s.game.driver.Mode = s.settings.Mode
 }
 

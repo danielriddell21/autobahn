@@ -20,7 +20,7 @@ colour-coded detection boxes it has to read back out of the pixels.
 | `Shift` | nitrous, which a slide earns back |
 | `Tab` | hand the car to the autopilot, or take it back |
 | `C` | camera |
-| `T` | time of day: day, dusk, night |
+| `T` | skip ahead to the next time of day |
 | `H` | the rest |
 
 Two people can play: one hosts a chase and drives the runner, the other joins

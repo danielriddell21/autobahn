@@ -9,17 +9,17 @@ import (
 
 func TestTimesOfDayHaveNamesAndWrap(t *testing.T) {
 	names := map[string]bool{}
-	for tod := TimeDay; tod < numTimes; tod++ {
+	for tod := TimeDay; tod < NumTimes; tod++ {
 		if tod.String() == "" || names[tod.String()] {
 			t.Errorf("time %d is called %q, which is empty or already taken", tod, tod.String())
 		}
 		names[tod.String()] = true
 	}
-	if got := cycleTime(TimeNight, 1); got != TimeDay {
-		t.Errorf("the time after night is %v, want day", got)
+	if got := cycleTime(TimeDawn, 1); got != TimeDay {
+		t.Errorf("the time after dawn is %v, want day", got)
 	}
-	if got := cycleTime(TimeDay, -1); got != TimeNight {
-		t.Errorf("the time before day is %v, want night", got)
+	if got := cycleTime(TimeDay, -1); got != TimeDawn {
+		t.Errorf("the time before day is %v, want dawn", got)
 	}
 }
 
@@ -34,7 +34,11 @@ func TestItGetsDarkerThroughTheDay(t *testing.T) {
 	if !(lum(day) > lum(dusk) && lum(dusk) > lum(night)) {
 		t.Errorf("light falls %.2f, %.2f, %.2f through day, dusk and night", lum(day), lum(dusk), lum(night))
 	}
-	for _, l := range []lighting{day, dusk, night} {
+	dawn := lightingFor(TimeDawn)
+	if dawn.night <= day.night || dawn.night >= night.night {
+		t.Errorf("dawn's night is %.2f, want between day and night", dawn.night)
+	}
+	for _, l := range []lighting{day, dusk, night, dawn} {
 		d := l.sunDir
 		if n := d.X*d.X + d.Y*d.Y + d.Z*d.Z; mathx.Abs(n-1) > 0.001 {
 			t.Errorf("a light direction of length %.3f is not a direction", n)

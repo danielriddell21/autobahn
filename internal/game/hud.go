@@ -405,7 +405,7 @@ func controlBindings() []keymap.Binding {
 		{Key: "Shift", Action: "nitrous"},
 		{Key: "Tab", Action: "autopilot"},
 		{Key: "C", Action: "camera"},
-		{Key: "T", Action: "time of day"},
+		{Key: "T", Action: "skip to the next time of day"},
 		{Key: "M", Action: "autopilot mode"},
 		{Key: "V", Action: "AI camera (autopilot)"},
 		{Key: "L", Action: "labels"},

@@ -12,7 +12,10 @@ const (
 	TimeDay TimeOfDay = iota
 	TimeDusk
 	TimeNight
-	numTimes
+	// TimeDawn comes last so a stored setting keeps meaning what it did.
+	TimeDawn
+	// NumTimes is how many times of day there are.
+	NumTimes
 )
 
 // String returns the time's name, for a settings row to show.
@@ -22,6 +25,8 @@ func (t TimeOfDay) String() string {
 		return "dusk"
 	case TimeNight:
 		return "night"
+	case TimeDawn:
+		return "dawn"
 	default:
 		return "day"
 	}
@@ -50,6 +55,14 @@ func lightingFor(t TimeOfDay) lighting {
 			fog: vec3(0.83, 0.55, 0.45), fogRange: 420,
 			skyTop: rl.NewColor(66, 74, 132, 255), skyLow: rl.NewColor(236, 150, 108, 255),
 			night: 0.6,
+		}
+	case TimeDawn:
+		return lighting{
+			sunDir: norm3(0.82, 0.24, 0.4),
+			sun:    vec3(0.70, 0.52, 0.44), sky: vec3(0.48, 0.47, 0.58), ground: vec3(0.28, 0.25, 0.26),
+			fog: vec3(0.80, 0.68, 0.66), fogRange: 400,
+			skyTop: rl.NewColor(88, 106, 162, 255), skyLow: rl.NewColor(238, 180, 156, 255),
+			night: 0.45,
 		}
 	case TimeNight:
 		return lighting{

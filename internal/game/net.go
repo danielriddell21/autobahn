@@ -38,6 +38,8 @@ type Snapshot struct {
 	// Clock is the host's simulation time, which drives the signals. Sending
 	// it keeps every traffic light on both machines showing the same aspect.
 	Clock float32
+	// Hour is the host's time of day, so both players drive in the same light.
+	Hour float32
 	// Runner is the car being chased.
 	Runner Pose
 	// Agents are the traffic and police, in the order the seeded world creates
