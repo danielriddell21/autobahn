@@ -25,6 +25,8 @@ const (
 	engineTop float32 = 42
 	// sirenRange is how far a unit's siren carries, in metres.
 	sirenRange float32 = 130
+	// hornRange is how far another driver's horn carries, in metres.
+	hornRange float32 = 70
 )
 
 // Kit holds the game's sounds and the state needed to keep the continuous
@@ -36,6 +38,7 @@ type Kit struct {
 	siren  rl.Sound
 	skid   rl.Sound
 	thud   rl.Sound
+	horn   rl.Sound
 }
 
 // Open starts the audio device and synthesises the kit. It returns a silent
@@ -56,6 +59,7 @@ func Open(muted bool) *Kit {
 	k.siren = load(sirenCall())
 	k.skid = load(skidLoop())
 	k.thud = load(synth.Thud(70, 0.45, 9, 0x5eed, 0xf00d))
+	k.horn = load(hornBlast())
 
 	rl.SetSoundVolume(k.engine, 0.30)
 	rl.SetSoundVolume(k.siren, 0.45)
@@ -69,7 +73,7 @@ func (k *Kit) Close() {
 	if !k.live {
 		return
 	}
-	for _, s := range []rl.Sound{k.engine, k.siren, k.skid, k.thud} {
+	for _, s := range []rl.Sound{k.engine, k.siren, k.skid, k.thud, k.horn} {
 		rl.UnloadSound(s)
 	}
 	rl.CloseAudioDevice()
@@ -114,6 +118,18 @@ func (k *Kit) Siren(distance, bearing float32) {
 	if !rl.IsSoundPlaying(k.siren) {
 		rl.PlaySound(k.siren)
 	}
+}
+
+// Horn sounds another driver's horn, from the given distance and bearing, as
+// Siren takes them. A distance beyond earshot lets any horn already sounding
+// finish on its own.
+func (k *Kit) Horn(distance, bearing float32) {
+	if !k.live || distance > hornRange || rl.IsSoundPlaying(k.horn) {
+		return
+	}
+	rl.SetSoundPan(k.horn, clamp(sin(float64(bearing)), -1, 1))
+	rl.SetSoundVolume(k.horn, 0.12+0.4*(1-clamp(distance/hornRange, 0, 1)))
+	rl.PlaySound(k.horn)
 }
 
 // Skid plays tyre noise while the rear axle is sliding. slip is the rear slip
@@ -161,6 +177,16 @@ func sirenCall() []byte {
 	// The British two-tone: a pair of pitches alternating on about a half
 	// second, rather than the continuous wail used elsewhere.
 	return synth.TwoTone(760, 570, 0.42, 1.7, 0.0)
+}
+
+func hornBlast() []byte {
+	// A car horn is two notes a third or so apart sounding together, rough
+	// enough to have plenty of harmonics: a clipped sine does it.
+	return synth.Render(0.6, func(t float64) float64 {
+		v := synth.Sine(415, t) + synth.Sine(520, t)
+		v = math.Max(-0.9, math.Min(0.9, v*1.6))
+		return v * 0.5 * synth.Attack(t, 60) * math.Min(1, (0.6-t)*30)
+	})
 }
 
 func skidLoop() []byte {

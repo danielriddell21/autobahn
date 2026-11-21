@@ -111,6 +111,23 @@ type Agent struct {
 	wantKind city.TurnKind
 	hasWant  bool
 
+	// The human side; see temper.go. seen is the car in front as last
+	// registered and seenLead the speed it was seen doing; distracted counts
+	// down a glance away from the road. horn and flash count down a horn or a
+	// flash of the lights, lastAhead is who was in front last step, and
+	// greenWait how long the car in front has sat at a green. letting is a car
+	// being let out of a junction, for letFor more seconds, and asked the last
+	// one considered. atLine and pause hold a driver at the line for a moment
+	// after being released.
+	seen, lastAhead      *Vehicle
+	seenLead, distracted float32
+	horn, flash          float32
+	greenWait            float32
+	letting, asked       *Agent
+	letFor               float32
+	atLine               bool
+	pause                float32
+
 	// Manual hands the car to a human. A driven agent takes its controls from
 	// Input and is left alone otherwise: no route to follow, no lane to be
 	// nudged back onto, and no opinion about junctions.
@@ -411,21 +428,17 @@ func (a *Agent) drive(w *World, dt float32) {
 		accel = min(accel, slowFor(st, speed, turnSpeed(a.next, st), a.lane.Length-a.s))
 	}
 
+	// The car in front as the driver sees it, which is not quite as it is.
+	seen := a.perceive(st, ahead, gap, lead, speed, dt)
+	a.express(w, st, ahead, gap, lead, speed, dt)
 	if ahead != nil {
-		accel = min(accel, idmFollow(st, speed, lead, gap))
+		accel = min(accel, idmFollow(a.pressed(st), speed, seen, gap))
+	}
+	if a.sidestepWant == 0 {
+		a.sidestepWant = a.wander(st, w.Time, speed)
 	}
 	a.goRound(ahead, gap, lead, speed, dt)
-
-	// Junction rules produce a virtual obstacle at the stop line.
-	a.yielding = false
-	if d, stop := a.junctionStop(w); stop {
-		accel = min(accel, idmFollow(st, speed, 0, max(d, 0.05)))
-		// Only waiting for a gap wears a driver's patience down. Nobody edges
-		// out through a red light because it has been red a long time.
-		if a.yielding && speed < 0.5 {
-			a.waited += dt
-		}
-	}
+	accel = a.atJunction(w, st, speed, accel, dt)
 
 	a.applyLongitudinal(st, accel, speed)
 	a.applySteering(c, speed)
@@ -434,6 +447,29 @@ func (a *Agent) drive(w *World, dt float32) {
 	}, dt)
 	a.advanceRoute(c, w.Player.Pos, dt)
 	a.snapToRoute(c, dt)
+}
+
+// atJunction applies the junction rules, which produce a virtual obstacle at the
+// stop line, along with a driver's own hesitation there and any courtesy to
+// somebody waiting to pull out.
+func (a *Agent) atJunction(w *World, st Style, speed, accel, dt float32) float32 {
+	a.yielding = false
+	d, stop := a.junctionStop(w)
+	if stop {
+		accel = min(accel, idmFollow(st, speed, 0, max(d, 0.05)))
+		// Only waiting for a gap wears a driver's patience down. Nobody edges
+		// out through a red light because it has been red a long time.
+		if a.yielding && speed < 0.5 {
+			a.waited += dt
+		}
+	}
+	if a.hesitate(st, stop, speed, dt) {
+		accel = min(accel, -st.Decel)
+	}
+	if d, ok := w.courtesyStop(a, st, speed, dt); ok {
+		accel = min(accel, idmFollow(st, speed, 0, max(d, 0.05)))
+	}
+	return accel
 }
 
 // lookAhead finds whatever is directly in front, whether that is another agent
@@ -634,7 +670,7 @@ func slowFor(st Style, speed, target, dist float32) float32 {
 		return 1e6
 	}
 	need := (speed*speed - target*target) / (2 * max(dist, 0.5))
-	if need < st.Decel*0.45 {
+	if need < st.Decel*st.brakePoint() {
 		return 1e6 // plenty of room yet
 	}
 	return -need
@@ -743,7 +779,7 @@ func (a *Agent) controlStop(w *World, style Style, d float32) bool {
 	case city.ControlSignal:
 		return a.signalStop(w, style, d)
 	case city.ControlStop:
-		return a.signStop(d)
+		return a.signStop(style, d)
 	}
 	return false
 }
@@ -758,11 +794,13 @@ func (a *Agent) signalStop(w *World, style Style, d float32) bool {
 	return false
 }
 
-func (a *Agent) signStop(d float32) bool {
+func (a *Agent) signStop(style Style, d float32) bool {
 	if a.stoppedAt == a.lane.ToNode {
 		return false
 	}
-	if d < 3.2 && a.V.Speed() < 0.5 {
+	// Some drivers count a crawl past the sign as stopping.
+	rolled := style.RollingStop && d < 4.5 && a.V.Speed() < 2.5
+	if (d < 3.2 && a.V.Speed() < 0.5) || rolled {
 		a.stoppedAt = a.lane.ToNode // stop completed
 		return false
 	}

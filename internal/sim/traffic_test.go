@@ -117,6 +117,10 @@ func TestAHitCarRecovers(t *testing.T) {
 	if moved := a.V.Odometer - start; moved < 20 {
 		t.Errorf("25s after being hit the car has moved %.0fm", moved)
 	}
+	// Inside a junction the nearest lane says nothing, so judge it once out.
+	for i := 0; i < 600 && a.InJunction(); i++ {
+		w.Update(sim.Controls{Brake: 1}, 1.0/60)
+	}
 	if p := w.City.Project(a.V.Pos); !p.Valid || p.Dist > 4 {
 		t.Errorf("the car has ended up %.1fm from any lane", p.Dist)
 	}

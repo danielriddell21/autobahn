@@ -23,6 +23,7 @@ type carLook struct {
 	wheels    bool // near enough to be worth drawing round wheels
 	player    bool
 	boosting  bool
+	flashing  bool // the driver is flashing their headlights
 	// police is set for a marked unit, and lit while it is on a call.
 	police bool
 	unit   sim.UnitKind
@@ -52,7 +53,7 @@ func (g *Game) drawTraffic(eye mathx.Vec, drawPlayer bool) {
 		}
 		look := carLook{
 			paint: carPaints[a.Paint%len(carPaints)], indicator: a.Indicator(),
-			blink: g.blink, night: night, wheels: d < cullWheels,
+			blink: g.blink, night: night, wheels: d < cullWheels, flashing: a.Flashing(),
 		}
 		if a.Role == sim.RolePolice {
 			look.police, look.unit, look.lit = true, a.Unit, a.BluesAndTwos()
@@ -153,6 +154,9 @@ func drawLamps(v *sim.Vehicle, look carLook, waist float32) {
 	if look.night > 0.3 {
 		head = as(rl.NewColor(246, 242, 222, 255), matGlow)
 		tail = as(rl.NewColor(178, 44, 38, 255), matGlow)
+	}
+	if look.flashing {
+		head = as(rl.NewColor(252, 250, 236, 255), matGlow)
 	}
 	if v.Brake > 0.05 {
 		tail = as(rl.NewColor(238, 64, 52, 255), matGlow)

@@ -282,6 +282,8 @@ func (a *Agent) requestLane(c *city.City, idx int) {
 func (a *Agent) clearManoeuvre() {
 	a.pending, a.overtaking, a.aborting = nil, nil, false
 	a.changing, a.outside, a.heldUp, a.passFor = 0, 0, 0, 0
+	a.seen, a.lastAhead, a.letting, a.asked = nil, nil, nil, nil
+	a.distracted, a.greenWait, a.pause, a.atLine = 0, 0, 0, false
 }
 
 // signalLane counts down the signal, then moves across if the gap is there.

@@ -560,6 +560,21 @@ func (g *Game) updateAudio() {
 		}
 	}
 	g.audio.Siren(nearest, bearing)
+
+	// And the nearest driver leaning on their horn.
+	nearest, bearing = float32(1e9), 0
+	for _, a := range g.world.Agents {
+		if !a.Hooting() {
+			continue
+		}
+		rel := a.V.Pos.Sub(p.Pos)
+		if d := rel.Len(); d < nearest {
+			fwd := p.Forward()
+			nearest = d
+			bearing = mathx.Atan2(rel.Dot(fwd.Right()), rel.Dot(fwd))
+		}
+	}
+	g.audio.Horn(nearest, bearing)
 }
 
 func (g *Game) stepChase(dt float32) {
