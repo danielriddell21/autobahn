@@ -87,6 +87,25 @@ func groundQuad(a, b, c, d mathx.Vec, y float32, col rl.Color) {
 	rl.End()
 }
 
+// groundPatch lays a four-sided patch whose corners, given in order round
+// it, each have a height of their own: a piece of something lying on a slope.
+func groundPatch(a, b, c, d mathx.Vec, y [4]float32, col rl.Color) {
+	rl.Begin(rl.Triangles)
+	tint(col)
+	rl.Normal3f(0, 1, 0)
+	if b.Sub(a).Cross(c.Sub(a)) > 0 {
+		b, d = d, b
+		y[1], y[3] = y[3], y[1]
+	}
+	rl.Vertex3f(a.X, y[0], a.Z)
+	rl.Vertex3f(b.X, y[1], b.Z)
+	rl.Vertex3f(c.X, y[2], c.Z)
+	rl.Vertex3f(a.X, y[0], a.Z)
+	rl.Vertex3f(c.X, y[2], c.Z)
+	rl.Vertex3f(d.X, y[3], d.Z)
+	rl.End()
+}
+
 // groundDisc lays a flat disc at height y, bright in the middle and fading to
 // nothing at the rim, which is how a pool of light on the road is drawn.
 func groundDisc(centre mathx.Vec, radius, y float32, col rl.Color, sides int) {

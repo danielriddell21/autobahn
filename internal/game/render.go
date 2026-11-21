@@ -104,6 +104,12 @@ func (g *Game) drawWorld(cam rl.Camera3D, drawPlayer bool) {
 	// back by as much, or the plan it exists to show would be a blank haze.
 	g.scene.use(g.light, cam.Position, max(g.cullRange()/cullBlocks, cam.Position.Y/90))
 
+	g.drawSkyline(cam)
+
+	near, far := clipFor(cam.Position.Y)
+	rl.SetClipPlanes(float64(near), float64(far))
+	defer rl.SetClipPlanes(float64(clipNear), float64(clipFar))
+
 	rl.BeginMode3D(cam)
 	// Everything here is a closed shape or lies flat on the ground, so nothing
 	// is gained by culling back faces, and the hand-built pieces need not all
@@ -134,6 +140,28 @@ func (g *Game) drawWorld(cam rl.Camera3D, drawPlayer bool) {
 	}
 	rl.EnableBackfaceCulling()
 	rl.EndMode3D()
+}
+
+// How near and how far the camera sees, in metres, from where a car is.
+const (
+	clipNear float32 = 0.05
+	clipFar  float32 = 1000
+	// clipHigh is the height above which a camera is looking down at a plan
+	// rather than along a street.
+	clipHigh float32 = 40
+)
+
+// clipFor returns how near and how far a camera so high above the ground
+// should see. The depth of a scene is measured in steps that grow with the
+// square of the distance and shrink with how near the camera starts looking;
+// from a few hundred metres up, starting at arm's length, a kerb and the
+// road under it are the same depth and the two flicker. A camera that high
+// has nothing near it, so it starts looking a good way down.
+func clipFor(height float32) (near, far float32) {
+	if height < clipHigh {
+		return clipNear, clipFar
+	}
+	return height / 4, max(clipFar, height*4)
 }
 
 // cullRange is how far from the eye scenery is still drawn. From the car it is
@@ -190,9 +218,11 @@ func (g *Game) drawGround(eye mathx.Vec) {
 func (g *Game) outline(i int) []mathx.Vec {
 	for len(g.outlines) <= i {
 		b := g.world.City.Blocks[len(g.outlines)]
-		g.outlines = append(g.outlines, g.layOutline(b.Outline()))
+		kerb := g.layOutline(b.Outline())
+		g.outlines = append(g.outlines, kerb)
 		mid, _ := g.world.City.Lay(b.Min.Lerp(b.Max, 0.5))
 		g.blockMids = append(g.blockMids, mid)
+		g.risen = append(g.risen, g.raise(b, kerb))
 	}
 	return g.outlines[i]
 }
@@ -220,7 +250,16 @@ func (g *Game) drawBlocks(eye mathx.Vec) {
 			surface = colSand
 		}
 		groundWall(centre, kerb, -0.02, city.KerbHeight, colKerb)
-		groundFan(centre, kerb, city.KerbHeight, surface)
+		// Open ground that rises is grass, whatever the rim round it is.
+		g.rise = g.risen[i]
+		switch {
+		case g.rise == nil:
+			groundFan(centre, kerb, city.KerbHeight, surface)
+		case b.Park:
+			g.rise.draw(surface, surface)
+		default:
+			g.rise.draw(surface, g.look.park)
+		}
 		switch {
 		case field != fieldNone:
 			g.drawField(b, field)
@@ -231,6 +270,7 @@ func (g *Game) drawBlocks(eye mathx.Vec) {
 		default:
 			g.drawPark(b)
 		}
+		g.rise = nil
 	}
 }
 
@@ -523,6 +563,8 @@ type tree struct {
 	height float32
 	spread float32
 	shade  int
+	// lift is how far above the kerb the ground it stands on has risen.
+	lift float32
 }
 
 // Tree planting, in metres.
@@ -555,6 +597,8 @@ func (g *Game) plantTrees() {
 // plantPark scatters trees over a park, keeping them off its paths.
 func (g *Game) plantPark(b city.Block) {
 	if !b.Park {
+		// Nothing but what grows on the hill behind the houses.
+		g.trees = append(g.trees, copse(b, g.opts.Map)...)
 		return
 	}
 	if fieldOf(b, g.opts.Map) != fieldNone {
@@ -563,6 +607,7 @@ func (g *Game) plantPark(b city.Block) {
 		return
 	}
 	size := b.Max.Sub(b.Min)
+	rise, _ := swellOf(b, g.opts.Map)
 	n := int(size.X * size.Z / parkPerTree)
 	for i := range n {
 		h := scatter(b.Min.X, b.Min.Z, i)
@@ -572,6 +617,7 @@ func (g *Game) plantPark(b city.Block) {
 		}
 		g.trees = append(g.trees, tree{
 			at: at, height: 4.5 + h[2]*4, spread: 1.6 + h[2]*1.5, shade: i,
+			lift: rise.at(at),
 		})
 	}
 }
@@ -623,9 +669,9 @@ func (g *Game) drawTrees(eye mathx.Vec) {
 		if d > cullTrees {
 			continue
 		}
-		g.look.drawTree(t, city.KerbHeight)
+		g.look.drawTree(t, city.KerbHeight+t.lift)
 		if g.look.litter && d < litterRange {
-			g.look.drawLitter(t, city.KerbHeight)
+			g.look.drawLitter(t, city.KerbHeight+t.lift)
 		}
 	}
 }

@@ -144,11 +144,18 @@ type Game struct {
 	clock dayClock
 	// outlines caches each block's kerb line, and trees what has been planted;
 	// treedBlocks and treedRoads say how much of the city that covers.
-	outlines    [][]mathx.Vec
-	blockMids   []mathx.Vec
-	trees       []tree
-	treedBlocks int
-	treedRoads  int
+	outlines  [][]mathx.Vec
+	blockMids []mathx.Vec
+	// risen holds the rising ground of each block that has any, and rise is
+	// that of the block being dressed, nil on the level.
+	risen []*risen
+	rise  *risen
+	// viewW and viewH are the size of whatever is being drawn to, as the sky
+	// was last painted for it.
+	viewW, viewH int
+	trees        []tree
+	treedBlocks  int
+	treedRoads   int
 	// furniture is what stands on the pavements, bays the parking marked on
 	// them and parked the cars left there; the counts say how much of the
 	// city each covers.
@@ -400,7 +407,10 @@ func (g *Game) relight() {
 }
 
 // sky clears the frame to the sky for the current time of day.
-func (g *Game) sky(w, h int) { drawSky(g.light, int32(w), int32(h)) }
+func (g *Game) sky(w, h int) {
+	g.viewW, g.viewH = w, h
+	drawSky(g.light, int32(w), int32(h))
+}
 
 // World exposes the simulation, for tests and tools.
 func (g *Game) World() *sim.World { return g.world }

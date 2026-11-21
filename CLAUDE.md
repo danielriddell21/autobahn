@@ -119,6 +119,25 @@ Over 120 seeds the autopilot scores the same on the curved village as on the
 straight one, about four penalty points. Twenty-four seeds are not enough to
 tell the two apart, in either direction.
 
+## Height
+
+The streets are level, and so is everything built beside them. What rises is
+the ground nobody drives on, in every map but the city: a field, a green,
+the middle of a block behind its houses. `relief.go` in `internal/game` says
+how far, as a function of where the ground is on the plan, and draws a block
+that rises as a level rim stitched to a net of ground. While such a block is
+being dressed `Game.rise` is set, and `stand` and `flat` put things on the
+hill by it; anything else that goes on open ground has to ask the same way.
+
+The hills on the horizon are painted on the sky, outside the shader, so
+`ridgeShade` keeps them off the vision system's colours by its own
+arithmetic. They are the same from every street, which is right for
+something a long way off in a place with no edge.
+
+The camera's near plane is fitted to its height (`clipFor`). From a few
+hundred metres up, starting at arm's length, a kerb and the road under it
+are the same depth, and thin triangles flicker.
+
 ## Seasons
 
 A map is driven in one season and keeps it. The season dresses the scene and,

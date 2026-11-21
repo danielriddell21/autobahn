@@ -40,11 +40,27 @@ func pushStand(planned, on mathx.Vec, turn float32) {
 func (g *Game) stand(planned mathx.Vec) {
 	on, turn := g.world.City.Lay(planned)
 	pushStand(planned, on, turn)
+	if up := g.lift(planned); up != 0 {
+		// Up is up however the ground has turned.
+		rl.Translatef(0, up, 0)
+	}
 }
 
 // flat lays a four-cornered patch of ground.
 func (g *Game) flat(a, b, c, d mathx.Vec, y float32, col rl.Color) {
 	city := g.world.City
+	if g.rise != nil {
+		// On ground that rises a patch is draped: each corner as high as
+		// the ground is there, and a little over.
+		ya, yb, yc, yd := g.lift(a), g.lift(b), g.lift(c), g.lift(d)
+		a, _ = city.Lay(a)
+		b, _ = city.Lay(b)
+		c, _ = city.Lay(c)
+		d, _ = city.Lay(d)
+		y += drape
+		groundPatch(a, b, c, d, [4]float32{y + ya, y + yb, y + yc, y + yd}, col)
+		return
+	}
 	if city.Laid() {
 		a, _ = city.Lay(a)
 		b, _ = city.Lay(b)
