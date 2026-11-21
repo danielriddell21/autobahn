@@ -69,19 +69,19 @@ var packs = [numPacks]Pack{
 		Maps:  []city.Map{city.MapCity},
 	},
 	Coast: {
-		ID: Coast, Name: "coast", Price: priceCoast,
+		ID: Coast, Name: "seaside escape", Price: priceCoast,
 		Blurb:  "a seaside town in summer",
 		Maps:   []city.Map{city.MapSeaside},
 		Bodies: []sim.BodyKind{sim.Convertible, sim.CityCar},
 	},
 	Country: {
-		ID: Country, Name: "country", Price: priceCountry,
+		ID: Country, Name: "village green", Price: priceCountry,
 		Blurb:  "a village in spring",
 		Maps:   []city.Map{city.MapVillage},
 		Bodies: []sim.BodyKind{sim.FourByFour, sim.SUV},
 	},
 	Motorway: {
-		ID: Motorway, Name: "motorway", Price: priceMotorway,
+		ID: Motorway, Name: "motorway madness", Price: priceMotorway,
 		Blurb:  "a motorway town in winter",
 		Maps:   []city.Map{city.MapMotorway},
 		Bodies: []sim.BodyKind{sim.Minibus, sim.GrandTourer},

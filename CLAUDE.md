@@ -1,7 +1,7 @@
 # autobahn — Claude Code instructions
 
 autobahn is a 3D driving game in Go: procedurally generated British places — a
-city, a seaside town, a village and a motorway town — with traffic, signals,
+city, a seatown, a village and a roadtown — with traffic, signals,
 road rules and police, and an autopilot that sees the world only through a
 camera. It is built on raylib, not Ebiten — the only game in the
 family that is — and on [crucible](https://github.com/danielriddell21/crucible)
@@ -80,7 +80,7 @@ Two things about the existing maps look like mistakes and are not:
 * `ParamsFor(MapCity)` must stay equal to `DefaultParams`. The city grades
   its grid lines lopsidedly, with no collectors below zero, and the gate's
   numbers are measured on that. The other maps set `Balanced`.
-* The motorway town is nearly all traffic lights, and the village nearly all
+* The roadtown is nearly all traffic lights, and the village nearly all
   give ways. A roundabout is where the autopilot comes to grief: a motorway
   town built of them scored five to nine penalty points against one with
   lights, and the village with many put the gate's own seeds within a point
@@ -133,7 +133,7 @@ camera is fixed to the car and tips with it (`annotate.BonnetView` takes a
 what throws it is the road curving up or down between them. On the motorway,
 where it has to judge sixty metres ahead, swells 1500 m long put collisions
 up from five in 120 seeds to thirteen, and 2600 m put them back. The village
-and the seaside, which are slower, scored no worse on hills than on the flat.
+and the seatown, which are slower, scored no worse on hills than on the flat.
 
 A car is still driven on the plane. The hill reaches it as `Vehicle.Grade`,
 a pull along its length, and a brake that holds against it: without `held`

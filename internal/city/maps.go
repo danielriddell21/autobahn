@@ -44,11 +44,11 @@ func (m Map) Valid() bool { return m >= 0 && m < numMaps }
 func (m Map) Name() string {
 	switch m {
 	case MapSeaside:
-		return "seaside"
+		return "seatown"
 	case MapVillage:
 		return "village"
 	case MapMotorway:
-		return "motorway"
+		return "roadtown"
 	default:
 		return "city"
 	}

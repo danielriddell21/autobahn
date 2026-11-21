@@ -31,17 +31,17 @@ colour-coded detection boxes it has to read back out of the pixels.
 
 There are four places to drive, each in its own season. All of them are the
 same generator asked for something different, so none of them runs out: the
-seaside stops at the sea, and nothing stops anywhere else. The city is a
+seatown stops at the sea, and nothing stops anywhere else. The city is a
 grid. The other three are planned on one and then laid on ground that
-wanders, so their streets bend: the village winds, the seaside curves, and
-the motorway's dual carriageways sweep.
+wanders, so their streets bend: the village winds, the seatown curves, and
+the roadtown's dual carriageways sweep.
 
 | Map | Season | | Pack |
 | --- | --- | --- | --- |
 | `city` | autumn | where it began: towers, shop fronts, leaves coming down | base |
-| `seaside` | summer | painted terraces, a promenade, a beach and the sea down one side | coast |
-| `village` | spring | stone cottages on long lanes, with hedged fields between them | country |
-| `motorway` | winter | dual carriageways at fifty, under snow, with less grip in a bend | motorway |
+| `seatown` | summer | painted terraces, a promenade, a beach and the sea down one side | seaside escape |
+| `village` | spring | stone cottages on long lanes, with hedged fields between them | village green |
+| `roadtown` | winter | dual carriageways at fifty, under snow, with less grip in a bend | motorway madness |
 
 ![Every map from the driver's seat](docs/media/maps.png)
 
