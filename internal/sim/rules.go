@@ -234,7 +234,7 @@ func (j *Judge) checkDirection(v *Vehicle, proj city.LaneProjection, speed, now,
 	// Inside a junction that says nothing: a car turning right crosses the end
 	// of the lane coming the other way, pointing against it, and is exactly
 	// where it should be.
-	if speed > 3 && v.Vel.Dot(proj.Lane.Fwd) < -0.5*speed && j.onRoad && !j.inBox {
+	if speed > 3 && v.Vel.Dot(proj.Lane.DirAt(proj.S)) < -0.5*speed && j.onRoad && !j.inBox {
 		j.wrongTimer += dt
 		limit := wrongWayTime
 		if proj.Lane.Class.Lanes() == 1 {

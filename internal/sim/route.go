@@ -99,7 +99,7 @@ func (r *Route) Update(pos, fwd mathx.Vec) {
 		}
 	}
 
-	along := pos.Sub(r.lane.A).Dot(r.lane.Fwd)
+	along := r.lane.Run(pos)
 	r.s = mathx.Clamp(along, 0, r.lane.Length)
 	r.extend(1)
 	r.crossing = along > r.lane.Length && len(r.plan) > 0
@@ -116,12 +116,12 @@ func (r *Route) arrived(pos mathx.Vec) bool {
 	if len(r.plan) == 0 {
 		return false
 	}
-	if pos.Sub(r.lane.A).Dot(r.lane.Fwd) < r.lane.Length-0.5 {
+	if r.lane.Run(pos) < r.lane.Length-0.5 {
 		return false // still short of the junction
 	}
 	next := r.c.Lanes[r.plan[0].Lane]
 	rel := pos.Sub(next.A)
-	if rel.Dot(next.Fwd) < 0 || mathx.Abs(rel.Cross(next.Fwd)) > arriveWidth {
+	if rel.Dot(next.StartDir()) < 0 || mathx.Abs(rel.Cross(next.StartDir())) > arriveWidth {
 		return false
 	}
 	r.lane = next
@@ -214,7 +214,7 @@ func (r *Route) relocate(pos, fwd mathx.Vec) {
 
 func (r *Route) adopt(l *city.Lane, pos mathx.Vec) {
 	r.lane = l
-	r.s = mathx.Clamp(pos.Sub(l.A).Dot(l.Fwd), 0, l.Length)
+	r.s = l.Along(pos)
 	r.plan = r.plan[:0]
 	r.crossing, r.u = false, 0
 	// Joining a roundabout part-way round, leave by one of the next two exits.

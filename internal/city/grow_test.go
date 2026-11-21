@@ -12,16 +12,30 @@ import (
 // fingerprint reduces a city to a canonical description of everything a driver
 // could notice, keyed by position rather than by ID. Two cities that agree on
 // this are the same place, whatever order they were built in.
-func fingerprint(c *city.City) []string {
+func fingerprint(c *city.City) []string { return fingerprintWithin(c, 1e9) }
+
+// fingerprintWithin is the fingerprint of the part of a city within a
+// distance of where a drive begins.
+//
+// A place whose ground wanders from its plan cannot be compared right out to
+// its edge. How far it has been built is measured on the plan, and the same
+// stretch of ground reached from different directions asks for slightly
+// different stretches of plan, so two builds of one place agree everywhere
+// except the frontier, where each is unfinished in its own way.
+func fingerprintWithin(c *city.City, reach float32) []string {
+	near := func(p mathx.Vec) bool { return p.Len() <= reach }
 	var out []string
 	for _, n := range c.Nodes {
-		if !n.Settled() {
+		if !n.Settled() || !near(n.Pos) {
 			continue
 		}
-		out = append(out, fmt.Sprintf("node %d,%d r=%.2f round=%v ctrl=%d",
-			n.GridI, n.GridJ, n.Radius, n.Roundabout, n.Control))
+		out = append(out, fmt.Sprintf("node %d,%d at %.2f,%.2f r=%.2f round=%v ctrl=%d",
+			n.GridI, n.GridJ, n.Pos.X, n.Pos.Z, n.Radius, n.Roundabout, n.Control))
 	}
 	for _, l := range c.Lanes {
+		if !near(l.A) || !near(l.B) {
+			continue
+		}
 		if c.Roads[l.Road].Ring {
 			// Ring lanes are keyed by their own geometry; they have no grid
 			// cell of their own to name.
@@ -29,27 +43,33 @@ func fingerprint(c *city.City) []string {
 				l.A.X, l.A.Z, l.B.X, l.B.Z, len(l.Succ)))
 			continue
 		}
-		out = append(out, fmt.Sprintf("lane %.2f,%.2f->%.2f,%.2f idx=%d dir=%d ctrl=%d limit=%.1f succ=%d",
-			l.A.X, l.A.Z, l.B.X, l.B.Z, l.Index, l.Dir, l.Control, l.SpeedLimit, len(l.Succ)))
+		mid := l.Point(l.Length / 2)
+		out = append(out, fmt.Sprintf("lane %.2f,%.2f->%.2f,%.2f via %.2f,%.2f len=%.2f idx=%d dir=%d ctrl=%d limit=%.1f succ=%d",
+			l.A.X, l.A.Z, l.B.X, l.B.Z, mid.X, mid.Z, l.Length, l.Index, l.Dir, l.Control, l.SpeedLimit, len(l.Succ)))
 	}
 	for _, b := range c.Buildings {
-		out = append(out, fmt.Sprintf("building %.2f,%.2f %.1fx%.1f h=%.1f",
-			b.Center.X, b.Center.Z, b.W, b.D, b.Height))
+		if !near(b.Center) {
+			continue
+		}
+		out = append(out, fmt.Sprintf("building %.2f,%.2f %.1fx%.1f h=%.1f turned %.3f faces %.0f,%.0f",
+			b.Center.X, b.Center.Z, b.W, b.D, b.Height, b.Heading, b.Front.X, b.Front.Z))
 	}
 	for _, p := range c.Props {
-		out = append(out, fmt.Sprintf("prop %d at %.2f,%.2f", p.Kind, p.Pos.X, p.Pos.Z))
+		if near(p.Pos) {
+			out = append(out, fmt.Sprintf("prop %d at %.2f,%.2f facing %.3f", p.Kind, p.Pos.X, p.Pos.Z, p.Heading))
+		}
 	}
 	for _, b := range c.Blocks {
-		out = append(out, fmt.Sprintf("block %.2f,%.2f-%.2f,%.2f park=%v beach=%v",
-			b.Min.X, b.Min.Z, b.Max.X, b.Max.Z, b.Park, b.Beach))
+		if near(b.Min) && near(b.Max) {
+			out = append(out, fmt.Sprintf("block %.2f,%.2f-%.2f,%.2f park=%v beach=%v",
+				b.Min.X, b.Min.Z, b.Max.X, b.Max.Z, b.Park, b.Beach))
+		}
 	}
 	for _, p := range c.Parked {
-		out = append(out, fmt.Sprintf("parked %.2f,%.2f h=%.2f shape=%d paint=%d",
-			p.Pos.X, p.Pos.Z, p.Heading, p.Shape, p.Paint))
-	}
-	for _, b := range c.Buildings {
-		out = append(out, fmt.Sprintf("front %.2f,%.2f faces %.0f,%.0f",
-			b.Center.X, b.Center.Z, b.Front.X, b.Front.Z))
+		if near(p.Pos) {
+			out = append(out, fmt.Sprintf("parked %.2f,%.2f h=%.2f shape=%d paint=%d",
+				p.Pos.X, p.Pos.Z, p.Heading, p.Shape, p.Paint))
+		}
 	}
 	sort.Strings(out)
 	return out
@@ -112,7 +132,15 @@ func TestGrownCityMatchesOneBuiltAtOnce(t *testing.T) {
 			// Then the full extent, so both cover the same ground.
 			grown.EnsureAround(mathx.V(0, 0), span)
 
-			diff(t, fingerprint(whole), fingerprint(grown))
+			reach := float32(1e9)
+			if whole.Laid() {
+				reach = span * 0.55
+			}
+			got, want := fingerprintWithin(grown, reach), fingerprintWithin(whole, reach)
+			if len(want) < 200 {
+				t.Fatalf("only %d things to compare", len(want))
+			}
+			diff(t, want, got)
 		})
 	}
 }

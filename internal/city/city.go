@@ -131,6 +131,8 @@ type Node struct {
 	Control      ControlKind
 	Signalised   bool
 	GridI, GridJ int
+	// Rot is how far the junction has turned from the way the plan drew it.
+	Rot float32
 
 	// Roundabout marks a junction whose traffic circulates around an island
 	// instead of being governed by signals or priority.
@@ -201,11 +203,14 @@ type Lane struct {
 	// this approach belongs to.
 	Control ControlKind
 	Group   int
-}
 
-// Point returns the world position s metres along the lane.
-func (l *Lane) Point(s float32) mathx.Vec {
-	return l.A.Add(l.Fwd.Mul(mathx.Clamp(s, 0, l.Length)))
+	// path is the lane's centreline where it is not straight, with cum how
+	// far along each point of it is and bend how sharply it turns there. A
+	// straight lane has none. drawnA and drawnB are where the plan put its
+	// ends, so a change to the plan can be told from one that is not.
+	path           []mathx.Vec
+	cum, bend      []float32
+	drawnA, drawnB mathx.Vec
 }
 
 // Building is one procedurally placed structure on a city lot.
@@ -218,6 +223,9 @@ type Building struct {
 	// Front points from the building toward the street it faces, which is
 	// the side its shop front is on.
 	Front mathx.Vec
+	// Heading is how far the building has turned from the way the plan drew
+	// it, which was square to the grid.
+	Heading float32
 }
 
 // Block is a city block bounded by roads, measured kerb to kerb.
@@ -371,9 +379,23 @@ type City struct {
 	// nothing is ever built twice or revised once built. See grow.go.
 	params Params
 	lat    *worldgen.Lattice
-	// plan is where the lattice's grid lines fall, which is how the coast is
+	// lines is where the lattice's grid lines fall, which is how the coast is
 	// found before the ground beside it exists.
-	plan   worldgen.Plan
+	lines worldgen.Plan
+
+	// A place whose ground wanders from its plan is two cities: drawn is the
+	// plan, built by everything in this package exactly as a straight city
+	// is, and this one is what it comes to when laid on the ground by land.
+	// Both are nil for a place that is laid just as it was drawn. See lay.go
+	// and ground.go.
+	drawn *City
+	land  *lie
+	// epoch counts the times growth has changed anything, and work is the
+	// ground the last of them covered; taken is the epoch of the plan this
+	// city last caught up with.
+	epoch, taken int
+	work         geom.Rect
+
 	roadOf map[int]int // lattice edge ID to road ID
 	// lastCells is the area the previous growth covered, so asking for it again
 	// costs nothing.
@@ -412,6 +434,10 @@ type Params struct {
 	// the main roads, in metres per second. A zero leaves that class of
 	// road at the usual British urban limit.
 	Limits [3]float32
+	// Wind is how far the ground wanders from the plan, in metres. At zero a
+	// place is laid exactly as drawn, every street straight; above it the
+	// junctions are moved and turned and the streets bend to join them.
+	Wind float32
 	// Coast puts the sea along one side. Nothing is built beyond the grid
 	// line CoastRow, which becomes the seafront, with a beach below it.
 	Coast    bool
@@ -1089,12 +1115,10 @@ func (c *City) Project(p mathx.Vec) LaneProjection {
 	best := LaneProjection{Dist: 1e9}
 	c.lanes.Near(ground(p), laneCellSize, func(id int) {
 		l := c.Lanes[id]
-		s := mathx.Clamp(p.Sub(l.A).Dot(l.Fwd), 0, l.Length)
-		on := l.A.Add(l.Fwd.Mul(s))
-		if d := on.DistTo(p); d < best.Dist {
-			best = LaneProjection{
-				Lane: l, S: s, Dist: d, Valid: true,
-				Lateral: p.Sub(on).Dot(l.Fwd.Right()),
+		s, lateral := l.Locate(p)
+		if d := mathx.Abs(lateral); d < best.Dist || !best.Valid {
+			if on := l.Point(s); on.DistTo(p) < best.Dist {
+				best = LaneProjection{Lane: l, S: s, Dist: on.DistTo(p), Valid: true, Lateral: lateral}
 			}
 		}
 	})
@@ -1112,16 +1136,12 @@ func (c *City) ProjectAlong(p, fwd mathx.Vec) LaneProjection {
 	best := LaneProjection{Dist: 1e9}
 	c.lanes.Near(ground(p), laneCellSize, func(id int) {
 		l := c.Lanes[id]
-		if l.Fwd.Dot(fwd) < headingAgreement {
+		s, lateral := l.Locate(p)
+		if l.DirAt(s).Dot(fwd) < headingAgreement {
 			return
 		}
-		s := mathx.Clamp(p.Sub(l.A).Dot(l.Fwd), 0, l.Length)
-		on := l.A.Add(l.Fwd.Mul(s))
-		if d := on.DistTo(p); d < best.Dist {
-			best = LaneProjection{
-				Lane: l, S: s, Dist: d, Valid: true,
-				Lateral: p.Sub(on).Dot(l.Fwd.Right()),
-			}
+		if d := l.Point(s).DistTo(p); d < best.Dist {
+			best = LaneProjection{Lane: l, S: s, Dist: d, Valid: true, Lateral: lateral}
 		}
 	})
 	return best

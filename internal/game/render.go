@@ -189,20 +189,24 @@ func (g *Game) drawGround(eye mathx.Vec) {
 // blocks never change, and their corners are curves.
 func (g *Game) outline(i int) []mathx.Vec {
 	for len(g.outlines) <= i {
-		g.outlines = append(g.outlines, g.world.City.Blocks[len(g.outlines)].Outline())
+		b := g.world.City.Blocks[len(g.outlines)]
+		g.outlines = append(g.outlines, g.layOutline(b.Outline()))
+		mid, _ := g.world.City.Lay(b.Min.Lerp(b.Max, 0.5))
+		g.blockMids = append(g.blockMids, mid)
 	}
 	return g.outlines[i]
 }
 
 func (g *Game) drawBlocks(eye mathx.Vec) {
 	for i, b := range g.world.City.Blocks {
-		centre := b.Min.Lerp(b.Max, 0.5)
+		// The pavement slab, raised to make a kerb, with its corners rounded
+		// off for the junctions they face. A block is planned square and
+		// laid as its streets lie, so it is its laid outline that is drawn.
+		kerb := g.outline(i)
+		centre := g.blockMids[i]
 		if centre.DistTo(eye) > g.cullRange()+b.Max.Sub(b.Min).Len()/2 {
 			continue
 		}
-		// The pavement slab, raised to make a kerb, with its corners rounded
-		// off for the junctions they face.
-		kerb := g.outline(i)
 		surface := g.look.pave
 		if g.town.verges {
 			// Grass to the kerb, and round the houses.
@@ -219,11 +223,13 @@ func (g *Game) drawBlocks(eye mathx.Vec) {
 		groundFan(centre, kerb, city.KerbHeight, surface)
 		switch {
 		case field != fieldNone:
-			drawField(b, field)
+			g.drawField(b, field)
 		case b.Beach:
+			// The land does not wander by the sea, so a beach is where it
+			// was planned.
 			drawBeach(b)
 		default:
-			drawPark(b)
+			g.drawPark(b)
 		}
 	}
 }
@@ -250,12 +256,15 @@ func (g *Game) drawRoundabouts(eye mathx.Vec) {
 }
 
 func (g *Game) drawMarkings(eye mathx.Vec) {
-	c := g.world.City
+	// The paint is worked out on the plan, where a road is a straight line,
+	// and laid on the ground a piece at a time.
+	ground := g.world.City
+	c := ground.Plan()
 	for _, r := range c.Roads {
 		if r.Ring {
 			continue // a circle has no centre line to paint
 		}
-		mid := c.Nodes[r.A].Pos.Lerp(c.Nodes[r.B].Pos, 0.5)
+		mid := ground.Nodes[r.A].Pos.Lerp(ground.Nodes[r.B].Pos, 0.5)
 		if mid.DistTo(eye) > cullMarkings+r.Length/2 {
 			continue
 		}
@@ -265,27 +274,28 @@ func (g *Game) drawMarkings(eye mathx.Vec) {
 		if length <= 1 {
 			continue
 		}
-		drawRoadPaint(r, a, b, length, mid.DistTo(eye))
+		g.drawRoadPaint(r, a, b, length, mid.DistTo(eye))
 	}
 
 	// Stop lines and pedestrian crossings on controlled approaches.
 	for _, l := range c.Lanes {
-		if l.Control == city.ControlNone || l.B.DistTo(eye) > cullMarkings {
+		at := ground.Lanes[l.ID].B
+		if l.Control == city.ControlNone || at.DistTo(eye) > cullMarkings {
 			continue
 		}
-		drawJunctionPaint(l, c.Roads[l.Road].Axis, l.B.DistTo(eye))
+		g.drawJunctionPaint(l, c.Roads[l.Road].Axis, at.DistTo(eye))
 	}
 }
 
-func drawRoadPaint(r *city.Road, a, b mathx.Vec, length, eyeDist float32) {
+func (g *Game) drawRoadPaint(r *city.Road, a, b mathx.Vec, length, eyeDist float32) {
 	centre := a.Lerp(b, 0.5)
-	drawCentreLine(r, a, centre, length, eyeDist)
+	g.drawCentreLine(r, a, centre, length, eyeDist)
 
 	// Double yellow lines against both kerbs: no waiting at any time.
 	for _, s := range [2]float32{-1, 1} {
 		for _, off := range [2]float32{0.26, 0.46} {
 			p := centre.Add(r.Dir.Right().Mul(s * (r.HalfWidth - off)))
-			drawStripe(p, r.Axis, length, 0.1, colLineWarm)
+			g.stripe(p, r.Axis, length, 0.1, colLineWarm)
 		}
 	}
 
@@ -295,19 +305,19 @@ func drawRoadPaint(r *city.Road, a, b mathx.Vec, length, eyeDist float32) {
 			off := s * city.LaneWidth
 			for t := float32(2); t < length-2; t += 6.5 {
 				p := a.Add(r.Dir.Mul(t + 1.6)).Add(r.Dir.Right().Mul(off))
-				drawStripe(p, r.Axis, 3.2, 0.14, colLinePale)
+				g.stripe(p, r.Axis, 3.2, 0.14, colLinePale)
 			}
 		}
 	}
 }
 
-func drawCentreLine(r *city.Road, a, centre mathx.Vec, length, eyeDist float32) {
+func (g *Game) drawCentreLine(r *city.Road, a, centre mathx.Vec, length, eyeDist float32) {
 	// The centre line dividing opposing traffic is white here: solid and
 	// doubled on the main roads, a long broken line elsewhere.
 	if r.Class == city.Arterial {
 		for _, off := range [2]float32{-0.18, 0.18} {
 			p := centre.Add(r.Dir.Right().Mul(off))
-			drawStripe(p, r.Axis, length, 0.14, colLinePale)
+			g.stripe(p, r.Axis, length, 0.14, colLinePale)
 		}
 		return
 	}
@@ -316,11 +326,11 @@ func drawCentreLine(r *city.Road, a, centre mathx.Vec, length, eyeDist float32) 
 	}
 	for t := float32(2); t < length-2; t += 9 {
 		p := a.Add(r.Dir.Mul(t + 2))
-		drawStripe(p, r.Axis, 4, 0.14, colLinePale)
+		g.stripe(p, r.Axis, 4, 0.14, colLinePale)
 	}
 }
 
-func drawJunctionPaint(l *city.Lane, axis int, eyeDist float32) {
+func (g *Game) drawJunctionPaint(l *city.Lane, axis int, eyeDist float32) {
 	bar := l.B.Sub(l.Fwd.Mul(0.5))
 	if l.Control == city.ControlGiveWay {
 		// A give way line is broken, and there are two of them.
@@ -328,11 +338,11 @@ func drawJunctionPaint(l *city.Lane, axis int, eyeDist float32) {
 			p := bar.Sub(l.Fwd.Mul(back))
 			for i := range 4 {
 				off := (float32(i) - 1.5) * 0.85
-				drawStripe(p.Add(l.Fwd.Right().Mul(off)), 1-axis, 0.5, 0.28, colLinePale)
+				g.stripe(p.Add(l.Fwd.Right().Mul(off)), 1-axis, 0.5, 0.28, colLinePale)
 			}
 		}
 	} else {
-		drawStripe(bar, 1-axis, city.LaneWidth-0.3, 0.5, colLinePale)
+		g.stripe(bar, 1-axis, city.LaneWidth-0.3, 0.5, colLinePale)
 	}
 
 	if l.Index != 0 || eyeDist >= cullCrossing || l.Control != city.ControlSignal {
@@ -343,28 +353,45 @@ func drawJunctionPaint(l *city.Lane, axis int, eyeDist float32) {
 	base := l.B.Add(l.Fwd.Mul(1.7))
 	for i := range 5 {
 		off := (float32(i) - 2) * 0.8
-		drawStripe(base.Add(l.Fwd.Right().Mul(off)), axis, 2.6, 0.4, colLinePale)
+		g.stripe(base.Add(l.Fwd.Right().Mul(off)), axis, 2.6, 0.4, colLinePale)
 	}
 }
 
-func drawStripe(p mathx.Vec, axis int, length, width float32, col rl.Color) {
+// stripe paints a rectangle on the road, planned at p. axis 0 runs along X
+// and axis 1 along Z; length follows the axis and width crosses it.
+func (g *Game) stripe(p mathx.Vec, axis int, length, width float32, col rl.Color) {
 	// Road paint sits just above the carriageway so it does not z-fight with it.
 	const y = 0.015
-	// Paints a flat rectangle on the road. axis 0 runs along X, axis 1
-	// along Z; length follows the axis and width crosses it.
-	if axis == 0 {
-		rl.DrawCube(vec3(p.X, y, p.Z), length, 0.02, width, col)
+	if !g.world.City.Laid() {
+		if axis == 0 {
+			rl.DrawCube(vec3(p.X, y, p.Z), length, 0.02, width, col)
+			return
+		}
+		rl.DrawCube(vec3(p.X, y, p.Z), width, 0.02, length, col)
 		return
 	}
-	rl.DrawCube(vec3(p.X, y, p.Z), width, 0.02, length, col)
+	half := mathx.V(length/2, 0)
+	if axis != 0 {
+		half = mathx.V(0, length/2)
+	}
+	g.strip(p.Sub(half), p.Add(half), width, y+0.01, col)
 }
 
 func (g *Game) drawBuildings(eye mathx.Vec) {
-	for _, b := range g.world.City.Buildings {
+	// A building is drawn as the plan has it, square to the grid, and stood
+	// where it stands on the ground.
+	planned := g.world.City.Plan().Buildings
+	for i, b := range g.world.City.Buildings {
 		if b.Center.DistTo(eye) > g.cullRange() {
 			continue
 		}
-		drawBuilding(b, g.town, g.light.night, g.look.snow)
+		// As big as it came out on the ground, which on a plot pulled out of
+		// square is a little smaller than planned.
+		as := planned[i]
+		as.W, as.D = b.W, b.D
+		pushStand(as.Center, b.Center, b.Heading)
+		drawBuilding(as, g.town, g.light.night, g.look.snow)
+		rl.PopMatrix()
 	}
 }
 
@@ -509,12 +536,19 @@ const (
 // it was last called. Where each one stands is worked out from the block or
 // road it belongs to, so the same city always grows the same trees.
 func (g *Game) plantTrees() {
-	c := g.world.City
+	// Planted on the plan, then each put where its spot lies on the ground.
+	c := g.world.City.Plan()
+	first := len(g.trees)
 	for ; g.treedBlocks < len(c.Blocks); g.treedBlocks++ {
 		g.plantPark(c.Blocks[g.treedBlocks])
 	}
 	for ; g.treedRoads < len(c.Roads); g.treedRoads++ {
 		g.plantStreet(c, c.Roads[g.treedRoads])
+	}
+	if g.world.City.Laid() {
+		for i := first; i < len(g.trees); i++ {
+			g.trees[i].at, _ = g.world.City.Lay(g.trees[i].at)
+		}
 	}
 }
 

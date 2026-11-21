@@ -180,7 +180,7 @@ func (lo *layout) sideLanes(w *sim.World) {
 	if l == nil || w.Route.Crossing() || w.City.Roads[l.Road].Ring {
 		return
 	}
-	s := w.Player.Pos.Sub(l.A).Dot(l.Fwd)
+	s := l.Run(w.Player.Pos)
 	for _, o := range w.City.Lanes {
 		if o.Road != l.Road || o == l {
 			continue
@@ -199,7 +199,7 @@ func (lo *layout) sideLanes(w *sim.World) {
 			if at > l.Length {
 				break
 			}
-			pt := o.A.Add(l.Fwd.Mul(at - o.A.Sub(l.A).Dot(l.Fwd)))
+			pt := o.Point(o.Along(l.Point(at)))
 			if !lo.visible(pt, sideLaneRange+5) {
 				continue
 			}

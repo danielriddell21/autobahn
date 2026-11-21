@@ -51,6 +51,8 @@ const (
 	sheepRoom float32 = 700
 	// hedgeTree is how far apart the trees in a hedgerow stand.
 	hedgeTree float32 = 26
+	// hedgePiece is the longest length a hedge is stood in.
+	hedgePiece float32 = 6
 )
 
 // fieldOf decides what a block of open ground is. Only the village has
@@ -112,12 +114,22 @@ func hedges(b city.Block) []hedgeRun {
 }
 
 // drawField dresses a field: its hedge, and what is growing or grazing in it.
-func drawField(b city.Block, k fieldKind) {
+func (g *Game) drawField(b city.Block, k fieldKind) {
 	ground := city.KerbHeight
 	for _, h := range hedges(b) {
-		mid := h.a.Lerp(h.b, 0.5)
-		rl.DrawCube(vec3(mid.X, ground+hedgeHeight/2, mid.Z),
-			max(h.b.X-h.a.X, 1.1), hedgeHeight, max(h.b.Z-h.a.Z, 1.1), colHedge)
+		// A hedge is stood a length at a time, so it follows the lane it
+		// runs beside.
+		length := h.a.DistTo(h.b)
+		pieces := max(int(length/hedgePiece), 1)
+		for i := range pieces {
+			p := h.a.Lerp(h.b, float32(i)/float32(pieces))
+			q := h.a.Lerp(h.b, float32(i+1)/float32(pieces))
+			mid := p.Lerp(q, 0.5)
+			g.stand(mid)
+			rl.DrawCube(vec3(mid.X, ground+hedgeHeight/2, mid.Z),
+				max(q.X-p.X+0.3, 1.1), hedgeHeight, max(q.Z-p.Z+0.3, 1.1), colHedge)
+			rl.PopMatrix()
+		}
 	}
 
 	in := hedgeInset + 3
@@ -132,18 +144,20 @@ func drawField(b city.Block, k fieldKind) {
 		y := ground + 0.012
 		if hi.X-lo.X >= hi.Z-lo.Z {
 			for z := lo.Z; z < hi.Z; z += rowPitch {
-				groundQuad(mathx.V(lo.X, z), mathx.V(hi.X, z), mathx.V(hi.X, z+0.8), mathx.V(lo.X, z+0.8), y, row)
+				g.strip(mathx.V(lo.X, z+0.4), mathx.V(hi.X, z+0.4), 0.8, y, row)
 			}
 		} else {
 			for x := lo.X; x < hi.X; x += rowPitch {
-				groundQuad(mathx.V(x, lo.Z), mathx.V(x+0.8, lo.Z), mathx.V(x+0.8, hi.Z), mathx.V(x, hi.Z), y, row)
+				g.strip(mathx.V(x+0.4, lo.Z), mathx.V(x+0.4, hi.Z), 0.8, y, row)
 			}
 		}
 	case fieldPasture:
 		for _, at := range flock(b) {
+			g.stand(at)
 			rl.DrawCube(vec3(at.X, ground+0.62, at.Z), 1.05, 0.55, 0.62, colSheep)
 			rl.DrawCube(vec3(at.X+0.6, ground+0.78, at.Z), 0.3, 0.3, 0.3, colTrim)
 			rl.DrawCube(vec3(at.X, ground+0.18, at.Z), 0.8, 0.36, 0.4, colTrim)
+			rl.PopMatrix()
 		}
 	}
 }

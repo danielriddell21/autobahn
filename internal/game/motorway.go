@@ -32,7 +32,7 @@ const (
 	barrierSetback float32 = 0.7
 	barrierMargin  float32 = 12
 	barrierHeight  float32 = 0.7
-	barrierPost    float32 = 4
+	barrierPitch   float32 = 4
 	// barrierLimit is the speed limit a road has to carry before it is
 	// thought worth fencing, in miles per hour.
 	barrierLimit float32 = 50
@@ -66,31 +66,54 @@ func barriersFor(c *city.City, r *city.Road) []barrier {
 	return out
 }
 
+// barrierStand is one post of a crash barrier, with the length of rail that
+// runs on from it to the next.
+type barrierStand struct {
+	at, run mathx.Vec // where the plan puts it, and the way the rail runs on
+	on      mathx.Vec // where it stands on the ground
+	turn    float32
+	last    bool // the end of the barrier, with no rail beyond it
+}
+
+// postsOf returns the posts of a barrier, a fixed distance apart.
+func postsOf(b barrier) []barrierStand {
+	span := b.b.Sub(b.a)
+	length := span.Len()
+	dir := span.Norm()
+	n := int(length / barrierPitch)
+	out := make([]barrierStand, 0, n+1)
+	for i := range n + 1 {
+		out = append(out, barrierStand{at: b.a.Add(dir.Mul(float32(i) * barrierPitch)), run: dir, last: i == n})
+	}
+	return out
+}
+
+// barrierPost is the distance between posts as a rail length.
 // drawBarriers draws the crash barriers near the eye, working out those of
-// any road that has appeared since it last looked.
+// any road that has appeared since it last looked. A barrier is stood a post
+// at a time, each with its length of rail, so it follows the road round.
 func (g *Game) drawBarriers(eye mathx.Vec) {
-	c := g.world.City
+	c := g.world.City.Plan()
 	for ; g.barrieredRoads < len(c.Roads); g.barrieredRoads++ {
-		g.barriers = append(g.barriers, barriersFor(c, c.Roads[g.barrieredRoads])...)
+		for _, b := range barriersFor(c, c.Roads[g.barrieredRoads]) {
+			for _, p := range postsOf(b) {
+				p.on, p.turn = g.world.City.Lay(p.at)
+				g.barriers = append(g.barriers, p)
+			}
+		}
 	}
 	ground := city.KerbHeight
-	for _, b := range g.barriers {
-		mid := b.a.Lerp(b.b, 0.5)
-		span := b.b.Sub(b.a)
-		length := span.Len()
-		if mid.DistTo(eye) > cullProps+length/2 {
+	for _, p := range g.barriers {
+		if p.on.DistTo(eye) > cullProps {
 			continue
 		}
-		// The rail, and the posts it is bolted to.
-		rl.DrawCube(vec3(mid.X, ground+barrierHeight, mid.Z),
-			max(mathx.Abs(span.X), 0.08), 0.3, max(mathx.Abs(span.Z), 0.08), colBarrier)
-		dir := span.Norm()
-		for d := float32(0); d <= length; d += barrierPost {
-			p := b.a.Add(dir.Mul(d))
-			if p.DistTo(eye) > cullProps {
-				continue
-			}
-			rl.DrawCube(vec3(p.X, ground+barrierHeight/2, p.Z), 0.12, barrierHeight, 0.12, colPole)
+		pushStand(p.at, p.on, p.turn)
+		rl.DrawCube(vec3(p.at.X, ground+barrierHeight/2, p.at.Z), 0.12, barrierHeight, 0.12, colPole)
+		if !p.last {
+			mid := p.at.Add(p.run.Mul(barrierPitch / 2))
+			rl.DrawCube(vec3(mid.X, ground+barrierHeight, mid.Z),
+				max(mathx.Abs(p.run.X)*barrierPitch, 0.08), 0.3, max(mathx.Abs(p.run.Z)*barrierPitch, 0.08), colBarrier)
 		}
+		rl.PopMatrix()
 	}
 }

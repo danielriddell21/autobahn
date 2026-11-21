@@ -200,7 +200,7 @@ func NewAgent(id int, c *city.City, lane *city.Lane, s float32, rng *rand.Rand) 
 		paint = body.Livery
 	}
 	a := &Agent{
-		ID: id, V: NewVehicle(seasoned(body.Spec, c), lane.Point(s), lane.Heading),
+		ID: id, V: NewVehicle(seasoned(body.Spec, c), lane.Point(s), lane.HeadingAt(s)),
 		Paint: paint, Body: body, Style: RandomStyle(rng), Role: RoleCivilian,
 		lane: lane, s: s, stoppedAt: -1, rng: rng,
 		surface: SeasonGrip(c.Map().Season()),
@@ -399,7 +399,7 @@ func (a *Agent) advanceRoute(c *city.City, chase mathx.Vec, dt float32) {
 	// Odometry alone drifts: a car that has been shunted, or has cut a corner,
 	// is further along than its wheels say. Where it actually is wins, or the
 	// route would trail behind the car and drag it backwards.
-	a.s = max(a.s+step, min(a.V.Pos.Sub(a.lane.A).Dot(a.lane.Fwd), a.lane.Length))
+	a.s = max(a.s+step, a.lane.Along(a.V.Pos))
 	if a.s >= a.lane.Length {
 		if !a.hasNext {
 			// Nowhere to go: park the agent for the respawner to recycle.
@@ -610,7 +610,20 @@ func (a *Agent) cruise(w *World, st Style) float32 {
 	if a.inTurn {
 		limit = min(limit, turnSpeed(a.next, st))
 	}
-	return limit
+	return min(limit, bendSpeed(a.lane, a.s, st))
+}
+
+// bendAhead is how far up the road a driver reads the bends, in metres.
+const bendAhead float32 = 45
+
+// bendSpeed is how fast a driver takes the road ahead, from how sharply it
+// turns at its sharpest within sight. A straight road is no constraint.
+func bendSpeed(l *city.Lane, s float32, st Style) float32 {
+	bend := l.Bend(s, bendAhead)
+	if bend < 1e-4 {
+		return 1e6
+	}
+	return mathx.Sqrt(cornerGrip/bend) * st.CornerBias
 }
 
 // dazeTime is how long a driver is out of it after a hard knock, in seconds,

@@ -55,7 +55,7 @@ func (c *City) Shoreline() (front, sea float32, ok bool) {
 	if !c.params.Coast {
 		return 0, 0, false
 	}
-	return float32(c.plan.Y(c.params.CoastRow)), float32(c.plan.Y(c.params.CoastRow + 1)), true
+	return float32(c.lines.Y(c.params.CoastRow)), float32(c.lines.Y(c.params.CoastRow + 1)), true
 }
 
 // AtSea reports whether a point is out past the beach, in the water.

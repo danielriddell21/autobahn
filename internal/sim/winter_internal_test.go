@@ -97,3 +97,50 @@ func TestAFastRoadIsJudgedFromFurtherBack(t *testing.T) {
 		t.Errorf("off the road the gap is judged from %.1f m", got)
 	}
 }
+
+// A driver slows for a bend by how sharp it is, and not at all for a road
+// that runs straight.
+func TestADriverSlowsForABend(t *testing.T) {
+	st := Normal()
+	straight := NewWorld(Config{Seed: 7, Traffic: 1, Police: 0}).City.Lanes[0]
+	if got := bendSpeed(straight, 0, st); got < 1e5 {
+		t.Errorf("a straight road is taken at %.1f m/s", got)
+	}
+	var winding city.Map = -1
+	for _, m := range city.Maps() {
+		if city.ParamsFor(m, 7).Wind > 0 {
+			winding = m
+		}
+	}
+	if winding < 0 {
+		t.Skip("no map has a road that bends")
+	}
+	c := NewWorld(Config{Seed: 7, Map: winding, Traffic: 1, Police: 0}).City
+	var gentle, sharp *city.Lane
+	for _, l := range c.Lanes {
+		b := l.Bend(0, l.Length)
+		if b < 1e-4 || c.Roads[l.Road].Ring {
+			continue
+		}
+		if gentle == nil || b < gentle.Bend(0, gentle.Length) {
+			gentle = l
+		}
+		if sharp == nil || b > sharp.Bend(0, sharp.Length) {
+			sharp = l
+		}
+	}
+	if gentle == nil || sharp == gentle {
+		t.Fatal("no two roads that bend differently")
+	}
+	fast, slow := bendSpeed(gentle, 0, st), bendSpeed(sharp, 0, st)
+	for s := float32(0); s < sharp.Length; s += 5 {
+		slow = min(slow, bendSpeed(sharp, s, st))
+	}
+	if slow >= fast || slow <= 1 {
+		t.Errorf("the sharpest bend is taken at %.1f m/s and the gentlest at %.1f", slow, fast)
+	}
+	// Past the bend, it is no longer a reason to go slowly.
+	if got := bendSpeed(sharp, sharp.Length+bendAhead, st); got < 1e5 {
+		t.Errorf("a bend already driven still holds a driver to %.1f m/s", got)
+	}
+}

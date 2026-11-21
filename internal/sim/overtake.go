@@ -245,7 +245,7 @@ func (a *Agent) laneLeadSpeed(w *World, to *city.Lane) float32 {
 	w.eachVehicle(a, func(v *Vehicle) {
 		along, lat := laneFrame(to, a.V.Pos, v.Pos)
 		if along > 0 && along < best && mathx.Abs(lat) < LaneHalf {
-			best, speed = along, max(v.Vel.Dot(to.Fwd), 0)
+			best, speed = along, max(v.Vel.Dot(to.DirAt(to.Along(v.Pos))), 0)
 		}
 	})
 	return speed
@@ -257,7 +257,8 @@ const LaneHalf = city.LaneWidth * 0.6
 // laneFrame measures q against a lane: how far ahead of p it is along the
 // lane, and how far to the right of the lane's line it sits.
 func laneFrame(l *city.Lane, p, q mathx.Vec) (along, lat float32) {
-	return q.Sub(p).Dot(l.Fwd), q.Sub(l.A).Dot(l.Fwd.Right())
+	_, lat = l.Locate(q)
+	return l.Run(q) - l.Run(p), lat
 }
 
 // eachVehicle calls f with the player's car and every agent but a.
@@ -320,7 +321,7 @@ func (w *World) laneClear(a *Agent, to *city.Lane, st Style, speed float32) bool
 			return
 		}
 		lengths := a.V.Spec.HalfLength + v.Spec.HalfLength
-		vs := v.Vel.Dot(to.Fwd)
+		vs := v.Vel.Dot(to.DirAt(to.Along(v.Pos)))
 		var need float32
 		if along >= 0 {
 			need = st.MinGap + max(speed-vs, 0)*1.2 + speed*0.3
@@ -346,7 +347,7 @@ func (a *Agent) switchLane(to *city.Lane) {
 		a.changeSide = -1
 	}
 	a.lane = to
-	a.s = mathx.Clamp(a.V.Pos.Sub(to.A).Dot(to.Fwd), 0, to.Length)
+	a.s = to.Along(a.V.Pos)
 	a.sidestep = lat
 	a.changing, a.pending, a.laneCool = laneSettle, nil, laneCooldown
 	a.outside, a.stuck = 0, 0

@@ -136,14 +136,19 @@ func ParamsFor(m Map, seed uint64) Params {
 		p.MinSpan, p.MaxSpan = 70, 120
 		p.Roundabouts, p.Parks, p.Rise = 0.2, 0.14, 0.22
 		p.Coast, p.CoastRow = true, 3
+		p.Wind = 26
 	}
 	if m == MapVillage {
-		// Long lanes with a main road only every fifth line, so most of the
-		// junctions are give ways and roundabouts rather than lights; two
-		// blocks in five left as fields, and nothing over three storeys.
+		// Long lanes with a main road only every fifth line, so nearly every
+		// junction is a give way rather than lights; two blocks in five left
+		// as fields, and nothing over three storeys. Roundabouts are the
+		// exception here as on the motorway, and for the same reason: they
+		// are where the autopilot comes to grief.
 		p.MinSpan, p.MaxSpan = 110, 200
-		p.Roundabouts, p.Parks, p.Rise = 0.4, 0.42, 0
+		p.Roundabouts, p.Parks, p.Rise = 0.15, 0.42, 0
 		p.Floor, p.Storeys, p.MainEvery, p.Balanced = 5.5, 4.5, 5, true
+		// Nothing in a village runs straight for long.
+		p.Wind = 40
 	}
 	if m == MapMotorway {
 		// Every other grid line is a dual carriageway and the ones between
@@ -157,6 +162,8 @@ func ParamsFor(m Map, seed uint64) Params {
 		p.Roundabouts, p.Parks, p.Rise = 0.1, 0.14, 0.12
 		p.Floor, p.Storeys, p.MainEvery, p.Balanced = 6, 6, 2, true
 		p.Limits = [3]float32{mathx.MPH(30), mathx.MPH(40), mathx.MPH(50)}
+		// Fast roads sweep rather than wind.
+		p.Wind = 18
 	}
 	return p
 }

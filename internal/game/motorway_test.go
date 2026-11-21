@@ -5,6 +5,7 @@ import (
 
 	"github.com/danielriddell21/autobahn/internal/city"
 	"github.com/danielriddell21/autobahn/internal/mathx"
+	"github.com/danielriddell21/autobahn/internal/sim"
 )
 
 func TestOnlyFastRoadsHaveCrashBarriers(t *testing.T) {
@@ -56,5 +57,60 @@ func TestOnlyFastRoadsHaveCrashBarriers(t *testing.T) {
 	}
 	if fenced == 0 {
 		t.Error("no road in the motorway town has a crash barrier")
+	}
+}
+
+func TestABarrierIsPostsAFixedDistanceApart(t *testing.T) {
+	posts := postsOf(barrier{a: mathx.V(10, 5), b: mathx.V(10, 5+barrierPitch*6+1)})
+	if len(posts) != 7 {
+		t.Fatalf("%d posts, want 7", len(posts))
+	}
+	for i, p := range posts {
+		if want := mathx.V(10, 5+barrierPitch*float32(i)); p.at.DistTo(want) > 0.001 {
+			t.Errorf("post %d stands at %v, want %v", i, p.at, want)
+		}
+		if p.last != (i == len(posts)-1) {
+			t.Errorf("post %d: last = %v", i, p.last)
+		}
+		if p.run != mathx.V(0, 1) {
+			t.Errorf("post %d's rail runs %v", i, p.run)
+		}
+	}
+}
+
+// A block's outline is laid with points all along its sides where the ground
+// wanders, so each side follows its street, and left alone where it does not.
+func TestAnOutlineFollowsTheGround(t *testing.T) {
+	plain := &Game{world: sim.NewWorld(sim.Config{Seed: 7, Traffic: 0})}
+	square := plain.world.City.Blocks[0].Outline()
+	if got := plain.layOutline(square); len(got) != len(square) || got[2] != square[2] {
+		t.Errorf("an outline in the city was changed: %v", got)
+	}
+
+	bent := &Game{world: sim.NewWorld(sim.Config{Seed: 7, Map: city.MapVillage, Traffic: 0})}
+	c := bent.world.City
+	if !c.Laid() {
+		t.Skip("the village is laid as drawn")
+	}
+	for _, b := range c.Blocks[:min(len(c.Blocks), 40)] {
+		planned := b.Outline()
+		var round float32
+		for i, p := range planned {
+			round += p.DistTo(planned[(i+1)%len(planned)])
+		}
+		got := bent.layOutline(planned)
+		if len(got) < int(round/layPiece)/2 {
+			t.Fatalf("an outline %.0f m round was laid in %d points", round, len(got))
+		}
+		first, _ := c.Lay(planned[0])
+		if got[0].DistTo(first) > 0.001 {
+			t.Fatalf("the outline starts at %v, want where its first corner lies, %v", got[0], first)
+		}
+		// A side follows its street: no two points far apart.
+		for i, p := range got {
+			if d := p.DistTo(got[(i+1)%len(got)]); d > layPiece*1.6 {
+				t.Fatalf("two points of an outline are %.1f m apart", d)
+			}
+		}
 	}
 }

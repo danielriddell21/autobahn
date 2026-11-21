@@ -145,6 +145,7 @@ type Game struct {
 	// outlines caches each block's kerb line, and trees what has been planted;
 	// treedBlocks and treedRoads say how much of the city that covers.
 	outlines    [][]mathx.Vec
+	blockMids   []mathx.Vec
 	trees       []tree
 	treedBlocks int
 	treedRoads  int
@@ -154,10 +155,11 @@ type Game struct {
 	furniture      []furnishing
 	furnishedRoads int
 	bays           []city.Bay
+	bayOn          []mathx.Vec
 	bayedRoads     int
 	parked         []parkedCar
 	// barriers are the crash barriers along the fast roads.
-	barriers       []barrier
+	barriers       []barrierStand
 	barrieredRoads int
 	fx             effects
 	// fov is the chase camera's lens, which opens up with speed.

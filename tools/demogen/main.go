@@ -364,7 +364,8 @@ func toVantage(w *sim.World) {
 		return
 	}
 	// Short of the spot, so that it is in the frame rather than under the car.
-	w.Player.Place(pr.Lane.Point(max(pr.S-vantageBack, 2)), pr.Lane.Heading)
+	from := max(pr.S-vantageBack, 2)
+	w.Player.Place(pr.Lane.Point(from), pr.Lane.HeadingAt(from))
 	w.EnsureBuilt(w.Player.Pos)
 }
 

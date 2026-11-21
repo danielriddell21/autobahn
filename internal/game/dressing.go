@@ -359,6 +359,10 @@ type furnishing struct {
 	kind       furnitureKind
 	at         mathx.Vec
 	along, out mathx.Vec
+	// on is where it stands on the ground and turn how far it has turned
+	// there, for a place whose ground wanders from its plan.
+	on   mathx.Vec
+	turn float32
 }
 
 // Street furniture spacing, in metres.
@@ -410,8 +414,10 @@ func furnish(c *city.City, r *city.Road) []furnishing {
 			if h[0] >= furnShare {
 				continue
 			}
+			on, turn := c.Lay(at)
 			out = append(out, furnishing{
 				kind: furnitureFor(h[1], r.Class), at: at, along: r.Dir, out: away,
+				on: on, turn: turn,
 			})
 		}
 	}
@@ -421,15 +427,20 @@ func furnish(c *city.City, r *city.Road) []furnishing {
 // drawFurniture draws the street furniture near the eye, working out what
 // stands along any road that has appeared since it last looked.
 func (g *Game) drawFurniture(eye mathx.Vec) {
-	c := g.world.City
+	c := g.world.City.Plan()
 	for ; g.furnishedRoads < len(c.Roads); g.furnishedRoads++ {
-		g.furniture = append(g.furniture, furnish(c, c.Roads[g.furnishedRoads])...)
+		for _, f := range furnish(c, c.Roads[g.furnishedRoads]) {
+			f.on, f.turn = g.world.City.Lay(f.at)
+			g.furniture = append(g.furniture, f)
+		}
 	}
 	for _, f := range g.furniture {
-		if f.at.DistTo(eye) > cullProps {
+		if f.on.DistTo(eye) > cullProps {
 			continue
 		}
+		pushStand(f.at, f.on, f.turn)
 		drawFurnishing(f)
+		rl.PopMatrix()
 	}
 }
 
@@ -524,19 +535,19 @@ func onParkPath(b city.Block, p mathx.Vec) bool {
 }
 
 // drawPark lays a park's paths and stands its centrepiece.
-func drawPark(b city.Block) {
+func (g *Game) drawPark(b city.Block) {
 	kind, c, ok := parkFeature(b)
 	if !ok {
 		return
 	}
 	y := city.KerbHeight + 0.012
-	half := pathWidth / 2
 	// The paths stop short of the kerb, whose corners are rounded.
 	const inset = 7
-	groundQuad(mathx.V(b.Min.X+inset, c.Z-half), mathx.V(b.Max.X-inset, c.Z-half),
-		mathx.V(b.Max.X-inset, c.Z+half), mathx.V(b.Min.X+inset, c.Z+half), y, colPath)
-	groundQuad(mathx.V(c.X-half, b.Min.Z+inset), mathx.V(c.X+half, b.Min.Z+inset),
-		mathx.V(c.X+half, b.Max.Z-inset), mathx.V(c.X-half, b.Max.Z-inset), y, colPath)
+	g.strip(mathx.V(b.Min.X+inset, c.Z), mathx.V(b.Max.X-inset, c.Z), pathWidth, y, colPath)
+	g.strip(mathx.V(c.X, b.Min.Z+inset), mathx.V(c.X, b.Max.Z-inset), pathWidth, y, colPath)
+
+	g.stand(c)
+	defer rl.PopMatrix()
 	pillar(c, y, y+0.01, parkCircle, parkCircle, 28, colPath)
 
 	ground := city.KerbHeight
@@ -576,8 +587,13 @@ const bayLine float32 = 0.12
 // them, taking in whatever has been built since it last looked.
 func (g *Game) drawParking(eye mathx.Vec) {
 	c := g.world.City
-	for ; g.bayedRoads < len(c.Roads); g.bayedRoads++ {
-		g.bays = append(g.bays, c.Bays(c.Roads[g.bayedRoads])...)
+	plan := c.Plan()
+	for ; g.bayedRoads < len(plan.Roads); g.bayedRoads++ {
+		for _, b := range plan.Bays(plan.Roads[g.bayedRoads]) {
+			on, _ := c.Lay(b.Start)
+			g.bays = append(g.bays, b)
+			g.bayOn = append(g.bayOn, on)
+		}
 	}
 	for i := len(g.parked); i < len(c.Parked); i++ {
 		p := c.Parked[i]
@@ -589,18 +605,22 @@ func (g *Game) drawParking(eye mathx.Vec) {
 	}
 
 	y := city.KerbHeight + 0.012
-	for _, b := range g.bays {
-		if b.Start.DistTo(eye) > cullMarkings {
+	for i, b := range g.bays {
+		if g.bayOn[i].DistTo(eye) > cullMarkings {
 			continue
 		}
-		length := city.BayLength * city.BaySlots
-		far, in := b.Start.Add(b.Dir.Mul(length)), b.Out.Mul(city.BayDepth)
-		groundQuad(b.Start, far, far.Add(in), b.Start.Add(in), y, as(colAsphalt, matRoad))
-		// A line across each end, and one between the spaces.
-		for i := range city.BaySlots + 1 {
-			a := b.Start.Add(b.Dir.Mul(city.BayLength*float32(i) - bayLine/2))
+		in := b.Out.Mul(city.BayDepth)
+		// A space at a time, so the bay follows the kerb round a bend, with a
+		// line across each end and one between the spaces.
+		for k := range city.BaySlots {
+			a := b.Start.Add(b.Dir.Mul(city.BayLength * float32(k)))
+			q := a.Add(b.Dir.Mul(city.BayLength))
+			g.flat(a, q, q.Add(in), a.Add(in), y, as(colAsphalt, matRoad))
+		}
+		for k := range city.BaySlots + 1 {
+			a := b.Start.Add(b.Dir.Mul(city.BayLength*float32(k) - bayLine/2))
 			q := a.Add(b.Dir.Mul(bayLine))
-			groundQuad(a, q, q.Add(in), a.Add(in), y+0.006, colLinePale)
+			g.flat(a, q, q.Add(in), a.Add(in), y+0.006, colLinePale)
 		}
 	}
 

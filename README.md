@@ -35,7 +35,10 @@ screen, or with `-host` and `-join`.
 
 There are four places to drive, each in its own season. All of them are the
 same generator asked for something different, so none of them runs out: the
-seaside stops at the sea, and nothing stops anywhere else.
+seaside stops at the sea, and nothing stops anywhere else. The city is a
+grid. The other three are planned on one and then laid on ground that
+wanders, so their streets bend: the village winds, the seaside curves, and
+the motorway's dual carriageways sweep.
 
 | Map | Season | | Pack |
 | --- | --- | --- | --- |

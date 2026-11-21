@@ -41,10 +41,19 @@ const growMargin = 2
 // NewGrowing returns a city with nothing in it yet. Call [City.EnsureAround]
 // to bring an area into existence.
 func NewGrowing(p Params) *City {
+	drawn := newDrawn(p)
+	if p.Wind <= 0 {
+		return drawn
+	}
+	return newLaid(drawn)
+}
+
+// newDrawn returns the plan of a city: straight streets on a grid.
+func newDrawn(p Params) *City {
 	return &City{
 		Seed:   p.Seed,
 		params: p,
-		plan:   worldgen.NewPlan(p.Seed, float64(p.MinSpan), float64(p.MaxSpan)),
+		lines:  worldgen.NewPlan(p.Seed, float64(p.MinSpan), float64(p.MaxSpan)),
 		lanes:  spatial.New[int](laneCellSize),
 		lat: worldgen.NewGrowable(p.Seed, worldgen.LatticeConfig{
 			MinSpan: float64(p.MinSpan), MaxSpan: float64(p.MaxSpan),
@@ -58,6 +67,13 @@ func NewGrowing(p Params) *City {
 // leaving what is already there untouched. It is safe and cheap to call every
 // frame with the player's position.
 func (c *City) EnsureAround(at mathx.Vec, radius float32) {
+	if c.drawn != nil {
+		// The plan is grown round the point of it that lies here, and a
+		// little further, since the ground wanders from it.
+		c.drawn.EnsureAround(c.land.unlay(at), radius+c.land.reach())
+		c.adopt()
+		return
+	}
 	here := geom.Vec2{X: float64(at.X), Y: float64(at.Z)}
 
 	// Grow the plan further than the city, so the junctions at the edge of
@@ -80,6 +96,8 @@ func (c *City) EnsureAround(at mathx.Vec, radius float32) {
 	// two cells from a junction that has just changed. Sweeping the whole city
 	// instead would make standing still cost more the further you had driven.
 	work := grown(cells, 2)
+	c.work = work
+	c.epoch++
 
 	c.reachNodes()
 	c.settleNodes(work)

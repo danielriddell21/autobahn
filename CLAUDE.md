@@ -80,9 +80,44 @@ Two things about the existing maps look like mistakes and are not:
 * `ParamsFor(MapCity)` must stay equal to `DefaultParams`. The city grades
   its grid lines lopsidedly, with no collectors below zero, and the gate's
   numbers are measured on that. The other maps set `Balanced`.
-* The motorway town is nearly all traffic lights. A roundabout between two
-  dual carriageways is where the autopilot comes to grief, and a town built
-  of them scored five to nine penalty points against one with lights.
+* The motorway town is nearly all traffic lights, and the village nearly all
+  give ways. A roundabout is where the autopilot comes to grief: a motorway
+  town built of them scored five to nine penalty points against one with
+  lights, and the village with many put the gate's own seeds within a point
+  of its limit.
+
+## The plan and the ground
+
+Every map but the city is laid on the ground differently from the way it was
+planned. `internal/city` still builds a plan of straight streets on a grid,
+exactly as it does for the city; then each junction is moved and turned by a
+smooth field, and each street run between its two junctions as a curve that
+leaves both square. `lay.go` is that mapping and `ground.go` the city that
+comes of it. Three things about it are easy to get wrong:
+
+* A place laid this way is two cities under the same numbers. `City.Plan()` is
+  the plan, where every choice is made and every row of anything is straight;
+  the city itself is the ground, which is what `sim` drives on and collides
+  with. Lanes, junctions, buildings, signs and parked cars are laid for it.
+  Anything that only has to be drawn is worked out on the plan by whoever
+  draws it and put on the ground with `City.Lay`: stood, if it stands up, so
+  it keeps its shape, or laid corner by corner if it lies flat. `laid.go` in
+  `internal/game` has both.
+* A lane is not a straight line. `Fwd` and `Heading` are the way it runs at
+  its far end, which is what a junction wants. Anywhere else ask `DirAt`,
+  `HeadingAt`, `Locate` or `Run`; `p.Sub(l.A).Dot(l.Fwd)` is wrong on a bend.
+* Where a point lies is a function of where it is on the plan and nothing
+  else, so the growth rule still holds: `grow_test.go` compares laid cities
+  too, away from their frontier.
+
+A junction is rigid, and so is everything within its arms. Near a street the
+ground is laid exactly alongside it, which is what keeps a lane its width
+round a bend; out in the middle of a block it is laid between the block's
+corners, less exactly. The land does not wander by the sea.
+
+Over 120 seeds the autopilot scores the same on the curved village as on the
+straight one, about four penalty points. Twenty-four seeds are not enough to
+tell the two apart, in either direction.
 
 ## Seasons
 

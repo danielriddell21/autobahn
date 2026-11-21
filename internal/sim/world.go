@@ -128,7 +128,7 @@ func NewWorld(cfg Config) *World {
 		}
 	}
 	w.spawnPos = start.Point(min(18, start.Length*0.35))
-	w.spawnYaw = start.Heading
+	w.spawnYaw = start.HeadingAt(min(18, start.Length*0.35))
 	w.PlayerBody = cfg.PlayerBody
 	if w.PlayerBody.Spec.Mass == 0 {
 		w.PlayerBody = PlayerBody()
@@ -223,7 +223,7 @@ func (w *World) AssignChaser() *Agent {
 		// something to chase rather than a search.
 		behind := w.Player.Pos.Sub(w.Player.Forward().Mul(34))
 		if p := w.City.Project(behind); p.Valid {
-			a.V.Place(p.Lane.Point(p.S), p.Lane.Heading)
+			a.V.Place(p.Lane.Point(p.S), p.Lane.HeadingAt(p.S))
 		}
 		return a
 	}
@@ -256,7 +256,7 @@ func (w *World) PlaceOnNearestLane() {
 		w.Respawn()
 		return
 	}
-	w.Player.Place(proj.Lane.Point(proj.S), proj.Lane.Heading)
+	w.Player.Place(proj.Lane.Point(proj.S), proj.Lane.HeadingAt(proj.S))
 }
 
 // Update advances the whole simulation by dt seconds, driving the player's car
@@ -318,8 +318,10 @@ func (w *World) indexBuildings() {
 		if i < w.indexed {
 			continue
 		}
-		lo := mathx.V(b.Center.X-b.W/2, b.Center.Z-b.D/2)
-		hi := mathx.V(b.Center.X+b.W/2, b.Center.Z+b.D/2)
+		// Filed by the square it fits in whichever way it is turned.
+		reach := (b.W + b.D) / 2
+		lo := mathx.V(b.Center.X-reach, b.Center.Z-reach)
+		hi := mathx.V(b.Center.X+reach, b.Center.Z+reach)
 		for gx := int(lo.X / w.cellSize); gx <= int(hi.X/w.cellSize); gx++ {
 			for gz := int(lo.Z / w.cellSize); gz <= int(hi.Z/w.cellSize); gz++ {
 				key := [2]int{gx, gz}
@@ -476,8 +478,8 @@ func (w *World) exitBlocked(a *Agent) bool {
 	// waiting in the next lane over is right alongside, and is not in the way.
 	inMouth := func(v *Vehicle) bool {
 		rel := v.Pos.Sub(out.A)
-		along := rel.Dot(out.Fwd)
-		return along > -2 && along < 9 && mathx.Abs(rel.Cross(out.Fwd)) < 1.6 && v.Speed() < 1
+		along := rel.Dot(out.StartDir())
+		return along > -2 && along < 9 && mathx.Abs(rel.Cross(out.StartDir())) < 1.6 && v.Speed() < 1
 	}
 	if inMouth(w.Player) {
 		return true
@@ -747,7 +749,7 @@ func (w *World) separate(a, b *Vehicle, axis mathx.Vec, depth float32) float32 {
 // box with no heading runs its length along X, which is the way a building's
 // width runs.
 func footprint(b city.Building) mathx.OBB {
-	return mathx.OBB{Center: b.Center, HalfL: b.W / 2, HalfW: b.D / 2}
+	return mathx.OBB{Center: b.Center, HalfL: b.W / 2, HalfW: b.D / 2, Heading: b.Heading}
 }
 
 func (w *World) collideBuildings(v *Vehicle, report bool) {
@@ -857,7 +859,7 @@ func (w *World) relocate(a *Agent) {
 		a.dazed, a.waited = 0, 0
 		a.free, a.sidestep, a.sidestepWant, a.stuck, a.passing = false, 0, 0, 0, 0
 		a.clearManoeuvre()
-		a.V.Place(p, lane.Heading)
+		a.V.Place(p, lane.HeadingAt(s))
 		a.chooseNext(w.City)
 		return
 	}

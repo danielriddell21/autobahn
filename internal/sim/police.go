@@ -745,7 +745,7 @@ func (w *World) deployRoadblock() {
 	lane := proj.Lane
 	// The middle of the road, not of the lane the driver happens to be in, so
 	// the block shuts the whole carriageway.
-	across := lane.Fwd.Right()
+	across := lane.DirAt(proj.S).Right()
 	at := lane.Point(proj.S).Add(across.Mul((0.5 + float32(lane.Index)) * city.LaneWidth))
 	if at.DistTo(w.Player.Pos) < 110 {
 		return // too close to be set up without being seen arriving
@@ -771,11 +771,11 @@ func (w *World) deployRoadblock() {
 		u.Blocking = true
 		u.pursuing, u.free = false, false
 		u.dazed = 0
-		u.V.Place(at.Add(across.Mul(off)), lane.Heading+1.35)
+		u.V.Place(at.Add(across.Mul(off)), lane.HeadingAt(proj.S)+1.35)
 	}
 	w.blocked = true
 	w.sinceBlock = 0
-	w.blockPos, w.blockDir, w.blockRun = at, lane.Fwd, false
+	w.blockPos, w.blockDir, w.blockRun = at, lane.DirAt(proj.S), false
 }
 
 func (w *World) spareUnits(n int) []*Agent {
