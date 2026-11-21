@@ -13,16 +13,6 @@ British city with traffic, lights, signs, road rules and police. Part two hands
 the same car to an autopilot that sees the world **only through a camera**, as
 colour-coded detection boxes it has to read back out of the pixels.
 
-Both drivers are scored by the same judge, so the comparison is honest.
-
-Drive badly enough where a unit can see it and the police come after you. A
-pursuit escalates for as long as you stay in sight: patrol cars first, sat
-behind with their lights on, then interceptors that go for your back corner,
-then heavy units and roadblocks. Every second of it earns a bounty, which you
-keep only by getting away — break the line of sight round a corner and stay
-gone until they give up. Get stopped and it is forfeit. Traffic pulls over for
-the sirens, goes round the wrecks, and brakes for the car coming through a red.
-
 | Key | |
 | --- | --- |
 | `W` `A` `S` `D` | drive |
@@ -55,30 +45,11 @@ just drive            # hand the car to the autopilot
 just ci               # lint + test + build + the boundary check + the autopilot gate
 ```
 
-Or without `just`:
+Without `just`, Linux needs `-tags x11`: `go run -tags x11 ./cmd/autobahn`.
 
-```sh
-go run -tags x11 ./cmd/autobahn            # the x11 tag is Linux-only
-go run -tags x11 ./cmd/autobahn -autopilot
-```
-
-raylib needs a windowing backend. On Linux, `-tags x11` builds against X11
-alone, which avoids needing the Wayland development headers; on macOS and
-Windows no tag is required. The `justfile` picks the right one for you.
-
-Everything is generated in code — geometry, layout, materials. There are no
-asset files, nothing is downloaded at runtime, and the whole thing runs offline.
-
-The city has no edge. It is built outward as you drive into it, a junction at a
-time, and everything about a place is decided from where that place is rather
-than from when you got there — so the town behind you is still the town you
-left, and there is always more road ahead.
-
-The engine underneath is [crucible](https://github.com/danielriddell21/crucible),
-shared with the rest of the family: the city's street plan comes from its
-world generator, the menus from its menu model, the two-player session from
-its netplay package, and the recording flags are the same `-record` every
-other app answers to.
+Everything is generated in code, with no asset files, and the city has no edge:
+it is built outward as you drive. The engine underneath is
+[crucible](https://github.com/danielriddell21/crucible).
 
 ## Documentation
 
