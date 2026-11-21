@@ -30,6 +30,7 @@ import (
 	"github.com/danielriddell21/crucible/record"
 
 	"github.com/danielriddell21/autobahn/internal/autopilot"
+	"github.com/danielriddell21/autobahn/internal/city"
 	"github.com/danielriddell21/autobahn/internal/game"
 	"github.com/danielriddell21/autobahn/internal/mathx"
 	"github.com/danielriddell21/autobahn/internal/sim"
@@ -68,6 +69,7 @@ func items() []item {
 		{"junction", "junction.gif", "the autopilot stopping at a red light", clipJunction},
 		{"police", "police.gif", "a pursuit, earned by driving badly", clipPolice},
 		{"city", "city.png", "four seeds from above, showing the layout variety", sheetCity},
+		{"maps", "maps.png", "every map from the driver's seat, each in its season", sheetMaps},
 		{"cameras", "cameras.png", "the three viewpoints on one scene", sheetCameras},
 		{"garage", "garage.png", "every car the garage offers, each in its own paint", sheetGarage},
 	}
@@ -311,6 +313,30 @@ func sheetCity(cfg config) error {
 	})
 }
 
+func sheetMaps(cfg config) error {
+	// One frame of each map from behind the car, which is how a player meets
+	// them: the place, its season and what is on its roads.
+	maps := city.Maps()
+	return game.WithWindow(cfg.opts(cfg.seed), func(first *game.Game) error {
+		cells := make([]image.Image, 0, len(maps))
+		for i, m := range maps {
+			g := first
+			if i > 0 {
+				o := cfg.opts(cfg.seed)
+				o.Map = m
+				g = game.New(o)
+				defer g.Close()
+			}
+			g.SetCameraMode(game.CameraChase)
+			g.ShowHUD(false)
+			settle(g, 260)
+			cells = append(cells, demo.Downscale(g.Snapshot(), cfg.scale))
+		}
+		sheet := demo.Montage(cells, 2, 12, color.RGBA{R: 16, G: 18, B: 22, A: 255})
+		return writePNG(cfg.path("maps.png"), sheet)
+	})
+}
+
 func sheetCameras(cfg config) error {
 	// Shows one scene from each viewpoint.
 	return game.WithWindow(cfg.opts(cfg.seed), func(g *game.Game) error {
@@ -342,7 +368,7 @@ func sheetGarage(cfg config) error {
 			}
 			cells = append(cells, shot)
 		}
-		sheet := demo.Montage(cells, 3, 12, color.RGBA{R: 16, G: 18, B: 22, A: 255})
+		sheet := demo.Montage(cells, 4, 12, color.RGBA{R: 16, G: 18, B: 22, A: 255})
 		return writePNG(cfg.path("garage.png"), sheet)
 	})
 }

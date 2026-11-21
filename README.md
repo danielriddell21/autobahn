@@ -31,6 +31,31 @@ screen, or with `-host` and `-join`.
 
 *The autopilot at the wheel. The panel in the corner is the image it is reading.*
 
+## Maps and packs
+
+There are four places to drive, each in its own season. All of them are the
+same generator asked for something different, so none of them runs out: the
+seaside stops at the sea, and nothing stops anywhere else.
+
+| Map | Season | | Pack |
+| --- | --- | --- | --- |
+| `city` | autumn | where it began: towers, shop fronts, leaves coming down | base |
+| `seaside` | summer | painted terraces, a promenade, a beach and the sea down one side | coast |
+| `village` | spring | stone cottages on long lanes, with hedged fields between them | country |
+| `motorway` | winter | dual carriageways at fifty, under snow, with less grip in a bend | motorway |
+
+![Every map from the driver's seat](docs/media/maps.png)
+
+The city is the base game. The other three come in packs, each with cars of
+its own for the garage, and a pack unlocks once the bounty you have banked
+across every drive reaches its price: £3,000 for the coast, £9,000 for the
+country, £18,000 for the motorway. Bounty is banked by getting away from the
+police, and only counts if you drove the whole pursuit yourself. The title
+screen chooses the map and shows how far along each pack is.
+
+`-map` names the place on the command line. `-unlock-all`, or
+`"unlockAll": true` in the settings file, offers everything without earning it.
+
 ## Install
 
 ### Homebrew (macOS)
@@ -42,13 +67,14 @@ brew install --cask danielriddell21/tap/autobahn
 ```sh
 just run              # drive it yourself
 just drive            # hand the car to the autopilot
+just eval -map all    # score the autopilot on every map
 just ci               # lint + test + build + the boundary check + the autopilot gate
 ```
 
 Without `just`, Linux needs `-tags x11`: `go run -tags x11 ./cmd/autobahn`.
 
-Everything is generated in code, with no asset files, and the city has no edge:
-it is built outward as you drive. The engine underneath is
+Everything is generated in code, with no asset files, and a map is not a
+fixed size: it is built outward as you drive. The engine underneath is
 [crucible](https://github.com/danielriddell21/crucible).
 
 ## Documentation

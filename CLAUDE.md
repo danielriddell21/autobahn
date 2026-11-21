@@ -1,8 +1,9 @@
 # autobahn — Claude Code instructions
 
-autobahn is a 3D driving game in Go: a procedurally generated British city with
-traffic, signals, road rules and police, and an autopilot that sees the world
-only through a camera. It is built on raylib, not Ebiten — the only game in the
+autobahn is a 3D driving game in Go: procedurally generated British places — a
+city, a seaside town, a village and a motorway town — with traffic, signals,
+road rules and police, and an autopilot that sees the world only through a
+camera. It is built on raylib, not Ebiten — the only game in the
 family that is — and on [crucible](https://github.com/danielriddell21/crucible)
 for everything that is engine rather than game.
 
@@ -61,12 +62,63 @@ frontier of unfinished junctions, so anything walking the whole city has to skip
 those that are not `City.Complete`. And `EnsureAround` is called every frame, so
 it must cost nothing when the car has not reached new ground.
 
+## Maps are presets, never generators
+
+There are four maps, and each is `internal/city` asked for something
+different: `city.ParamsFor` is the only place their generation differs. A map
+also has a season, a traffic mix (`mixes` in `internal/sim`) and a look
+(`townFor` and `lookFor` in `internal/game`). Nothing about a map may be a
+special case inside the generator; if a new place needs something the
+generator cannot do, it becomes a parameter, as the coast, the speed limits
+and the spacing of the main roads did.
+
+That is what keeps the growth rule cheap to hold. `grow_test.go` runs its
+comparison for every map, so a new one is held to it the moment it exists.
+
+Two things about the existing maps look like mistakes and are not:
+
+* `ParamsFor(MapCity)` must stay equal to `DefaultParams`. The city grades
+  its grid lines lopsidedly, with no collectors below zero, and the gate's
+  numbers are measured on that. The other maps set `Balanced`.
+* The motorway town is nearly all traffic lights. A roundabout between two
+  dual carriageways is where the autopilot comes to grief, and a town built
+  of them scored five to nine penalty points against one with lights.
+
+## Seasons
+
+A map is driven in one season and keeps it. The season dresses the scene and,
+in winter, takes grip away: `sim` fits every vehicle to the road it is on, and
+traffic drives to it. The autopilot is told nothing, because it could not see
+it. Whatever falls from the sky is stored nowhere: each piece is worked out
+from its number and the clock.
+
+Anything a season or a map draws must keep off the vision system's colours,
+and must never be made brighter than it was defined. A pale colour scaled past
+full wraps round, and came out cyan once; `crownShade` and the season tests
+are there because of it.
+
+## Dressing
+
+Roofs, shop fronts, street furniture, park paths, fields and the beach are
+worked out in `internal/game` from where they stand, the way the trees always
+were, and none of it is annotated. Parked cars are the exception: they are
+solid, so they live in `internal/city` and `sim` collides with them.
+
+## Packs
+
+`internal/pack` groups maps and garage cars into the base game and the packs
+that add to it. A map or a car no pack lists belongs to the base game, so
+nothing is locked by accident. A pack unlocks when the bounty banked over a
+player's career reaches its price, and only a pursuit the player drove all of
+counts: `bountyMeter` marks one the autopilot touched. The menus never offer
+what is locked; `-unlock-all` and the tools bypass it.
+
 ## eval is a gate, not a report
 
 `just eval` drives many cities headlessly and scores the result. `just gate`
-is the same thing with a pass mark, and runs in `just ci` and in the workflow,
-so a change that makes the autopilot worse fails the build. Keep the two pass
-marks the same.
+is the same thing with a pass mark, on every map, and runs in `just ci` and in
+the workflow, so a change that makes the autopilot worse anywhere fails the
+build. Keep the two pass marks the same.
 
 Its numbers are noisy: judge a change over at least twenty seeds, and remember
 that changing city generation changes which cities the seeds produce, so a

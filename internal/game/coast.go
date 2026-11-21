@@ -36,31 +36,6 @@ var (
 // seaReach is how far out the water is drawn, in metres: well past the fog.
 const seaReach float32 = 6000
 
-// townLook is how a map's buildings are finished.
-type townLook struct {
-	// facades are the colours the walls are painted.
-	facades *[6]rl.Color
-	// shops is the share of buildings with a shop on the ground floor; the
-	// rest are houses, with a front door.
-	shops float32
-	// pitched is the share of low buildings with a pitched roof rather than
-	// a flat one.
-	pitched float32
-}
-
-// townFor returns how a map's buildings are finished.
-func townFor(m city.Map) townLook {
-	switch m {
-	case city.MapSeaside:
-		return townLook{facades: &seasideShades, shops: 0.6, pitched: 0.6}
-	case city.MapVillage:
-		return townLook{facades: &villageShades, shops: 0.22, pitched: 0.9}
-	case city.MapMotorway:
-		return townLook{facades: &shedShades, shops: 0.5, pitched: 0.12}
-	}
-	return townLook{facades: &buildingShades, shops: 1, pitched: 0.6}
-}
-
 // Seafront layout, in metres, measured from the kerb of the front.
 const (
 	// promDepth is the paved promenade, with the rail along its far edge.

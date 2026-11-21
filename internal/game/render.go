@@ -19,11 +19,9 @@ import (
 // annotation boxes, so nothing in the scene can be mistaken for a detection.
 var (
 	colSky      = rl.NewColor(139, 174, 206, 255)
-	colGround   = rl.NewColor(92, 112, 76, 255)
 	colAsphalt  = rl.NewColor(62, 62, 68, 255)
 	colSidewalk = rl.NewColor(150, 147, 140, 255)
 	colKerb     = rl.NewColor(176, 172, 164, 255)
-	colPark     = rl.NewColor(84, 124, 70, 255)
 	colLinePale = rl.NewColor(222, 220, 212, 255)
 	// Yellow paint in Britain means a parking restriction at the kerb, never a
 	// lane divider, so it only ever appears as the double lines by the pavement.
@@ -41,13 +39,6 @@ var (
 	colTrunk    = rl.NewColor(92, 74, 58, 255)
 	colSkid     = rl.NewColor(18, 18, 20, 120)
 	colShadow   = rl.NewColor(0, 0, 0, 86)
-
-	leafShades = [4]rl.Color{
-		rl.NewColor(70, 116, 62, 255),
-		rl.NewColor(86, 128, 66, 255),
-		rl.NewColor(62, 104, 70, 255),
-		rl.NewColor(104, 132, 72, 255),
-	}
 
 	buildingShades = [6]rl.Color{
 		rl.NewColor(168, 160, 146, 255),
@@ -627,13 +618,18 @@ func drawBoxes(boxes []annotate.Box, labels bool) {
 // detection boxes are not among them: they are flat, and go in exactly as
 // they are, from [BoxColours].
 func PaletteBases() []color.RGBA {
+	// The media is made in the city, so it is the city's season that the
+	// palette has to carry.
+	lk := lookFor(city.MapCity.Season())
 	key := [...]rl.Color{
-		colSky, colGround, colAsphalt, colSidewalk, colKerb, colPark,
+		colSky, lk.ground, colAsphalt, colSidewalk, colKerb, lk.park,
 		colLinePale, colLineWarm, colPole, colStopFace, colSignFace, colGlass,
 		colTyre, hudPanel, hudText, colPoliceBody, colBeaconBlue, colBeaconRed,
+		colShopLit, colWood, colStone,
 	}
-	out := make([]color.RGBA, 0, len(key)+len(buildingShades)+len(carPaints)+len(leafShades))
-	for _, set := range [][]rl.Color{key[:], buildingShades[:], carPaints[:], leafShades[:]} {
+	sets := [][]rl.Color{key[:], buildingShades[:], carPaints[:], lk.leaves[:], roofShades[:]}
+	var out []color.RGBA
+	for _, set := range sets {
 		for _, c := range set {
 			out = append(out, toRGBAColor(c))
 		}

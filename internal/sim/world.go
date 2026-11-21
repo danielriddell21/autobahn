@@ -670,11 +670,19 @@ func turnAcrossTraffic() city.TurnKind {
 	return city.TurnLeft
 }
 
+// inReach reports whether two vehicles are near enough to be worth testing
+// for a collision. It goes by their lengths rather than a fixed distance: two
+// buses nose to tail have their middles further apart than two cars could
+// ever be while touching.
+func inReach(a, b *Vehicle) bool {
+	return a.Pos.DistTo(b.Pos) <= a.Spec.HalfLength+b.Spec.HalfLength+a.Spec.HalfWidth+b.Spec.HalfWidth
+}
+
 func (w *World) resolveCollisions() {
 	// Player against traffic.
 	pb := w.Player.Box()
 	for _, a := range w.Agents {
-		if w.Player.Pos.DistTo(a.V.Pos) > 8 {
+		if !inReach(w.Player, a.V) {
 			continue
 		}
 		if axis, depth, hit := pb.Penetration(a.V.Box()); hit {
@@ -695,7 +703,7 @@ func (w *World) resolveCollisions() {
 	// Traffic against traffic, so queues do not interpenetrate.
 	for i, a := range w.Agents {
 		for _, b := range w.Agents[i+1:] {
-			if a.V.Pos.DistTo(b.V.Pos) > 8 {
+			if !inReach(a.V, b.V) {
 				continue
 			}
 			if axis, depth, hit := a.V.Box().Penetration(b.V.Box()); hit {
