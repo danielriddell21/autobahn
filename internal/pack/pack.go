@@ -45,13 +45,21 @@ type Pack struct {
 	Bodies []sim.BodyKind
 }
 
-// The prices, in banked bounty. They are set so that a player who keeps
-// getting away reaches the packs after roughly a quarter of an hour, three
-// quarters, and an hour and a half.
+// The prices, in banked bounty. They are set for a player who keeps getting
+// away to reach the packs after roughly a quarter of an hour, three quarters,
+// and an hour and a half.
+//
+// What a player banks is hard to measure without one. A pursuit pays nine
+// points a second for each wanted level while a unit has the car in sight,
+// and more for ramming one or running a roadblock, but only what is carried
+// clear is kept: a driver who never lifts banks about 25 a minute, nearly all
+// of it lost to being stopped, and a single clean escape from a long chase
+// banks 700 or more. The prices take 200 a minute as what somebody driving to
+// get away, and getting away more often than not, comes out with.
 const (
-	priceCoast    = 8000
-	priceCountry  = 25000
-	priceMotorway = 50000
+	priceCoast    = 3000
+	priceCountry  = 9000
+	priceMotorway = 18000
 )
 
 var packs = [numPacks]Pack{
