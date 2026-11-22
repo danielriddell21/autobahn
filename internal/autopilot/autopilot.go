@@ -305,6 +305,8 @@ type Driver struct {
 	// odo is how far the car has gone, and divEnd where a diversion sign said
 	// to take care until.
 	odo, divEnd float32
+	// yield is what is known of ambulances coming up; see yield.go.
+	yield yieldState
 }
 
 // New returns a driver calibrated to the given camera, with mirrors at the
@@ -338,6 +340,8 @@ func (d *Driver) Reset() {
 // and how far to the right.
 type Neighbour struct {
 	Ahead, Right float32
+	// Emergency is set for an ambulance with its lights on.
+	Emergency bool
 }
 
 // Watch takes one look through a mirror. The vehicles in it replace whatever
@@ -356,7 +360,7 @@ func (d *Driver) Watch(m vision.Mirror, dets []vision.Detection) {
 		if !ok {
 			continue
 		}
-		seen = append(seen, Neighbour{Ahead: ahead, Right: right})
+		seen = append(seen, Neighbour{Ahead: ahead, Right: right, Emergency: det.Class == vision.ClassAmbulance})
 	}
 	d.around[m] = seen
 }
@@ -425,6 +429,7 @@ func (d *Driver) Drive(dets []vision.Detection, speed, dt float32) Command {
 	cruise = d.takeCareAtWorks(dets, lane, cruise)
 
 	cruise = d.manoeuvre(dets, raw, cruise, speed, dt, pf)
+	cruise = d.giveWayToEmergency(dets, raw, cruise, speed, dt)
 	d.path = lane
 
 	// Collect everything that constrains speed, then obey the tightest.

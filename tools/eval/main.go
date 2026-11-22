@@ -82,6 +82,7 @@ func main() {
 			"exit non-zero if fewer roadworks than this were passed over the whole run; "+
 				"with -works dense and -max-points set it is 24 unless given")
 	)
+	ambulances := flag.Int("ambulances", 0, "ambulances going about the town, now and then out on a call")
 	flag.Parse()
 
 	if *ghostArg != "" {
@@ -117,7 +118,7 @@ func main() {
 		os.Exit(2)
 	}
 	cfg := runConfig{
-		mode: mode, seconds: float32(*seconds), traffic: *traffic, police: *police,
+		mode: mode, seconds: float32(*seconds), traffic: *traffic, police: *police, ambulances: *ambulances,
 		perception: float32(*hz), width: *width, height: *height,
 		verbose: *verbose, works: level,
 	}
@@ -263,6 +264,7 @@ type runConfig struct {
 	seconds       float32
 	traffic       int
 	police        int
+	ambulances    int
 	perception    float32
 	width, height int
 	verbose       bool
@@ -398,7 +400,7 @@ func (s *session) step() {
 
 func driveOne(seed uint64, cfg runConfig) result {
 	wc := sim.Config{
-		Seed: seed, Map: cfg.world, Traffic: cfg.traffic, Police: cfg.police, Works: cfg.works, Weather: cfg.weather,
+		Seed: seed, Map: cfg.world, Traffic: cfg.traffic, Police: cfg.police, Ambulances: cfg.ambulances, Works: cfg.works, Weather: cfg.weather,
 	}
 	if cfg.spec != nil {
 		// A custom map brings its own sky, as the player's does.

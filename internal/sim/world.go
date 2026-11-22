@@ -43,6 +43,10 @@ type Config struct {
 	// police entirely, which leaves the judge still scoring but nobody
 	// responding.
 	Police int
+	// Ambulances is how many of the emergency pack's ambulances go about the
+	// town, now and then out on a call with their lights on. They are not part
+	// of Traffic, and none is the default.
+	Ambulances int
 	// PlayerBody is the player's car. Left empty, it is the usual one.
 	PlayerBody Body
 	// Works is how much of the town is dug up. The zero value is the normal
@@ -127,6 +131,8 @@ type World struct {
 	// units is scratch space for the police units that could answer a call,
 	// nearest first, and after setPursuit the ones on it lead the slice.
 	units []*Agent
+	// ambulances are the ambulances in Agents.
+	ambulances []*Agent
 	// blockPos and blockDir are where the current roadblock stands and which
 	// way the road runs through it; blockRun is set once it has been passed.
 	blockPos, blockDir mathx.Vec
@@ -217,6 +223,7 @@ func NewWorld(cfg Config) *World {
 		}
 		w.Agents = append(w.Agents, u)
 	}
+	w.spawnAmbulances(cfg, pl)
 	w.watchForOffences()
 	w.Climate.Apply(w)
 	return w
@@ -445,6 +452,9 @@ func (w *World) Update(c Controls, dt float32) {
 	w.recycleAgents()
 	w.Route.Update(w.Player.Pos, w.Player.Forward())
 	w.Judge.Update(w.Player, w.Signals, w.Time, dt)
+	if len(w.ambulances) > 0 {
+		w.Judge.Obstruct(w.Player, w.obstructing(), w.Time, dt)
+	}
 	if w.partner != nil {
 		w.PartnerJudge.Update(w.partner.V, w.Signals, w.Time, dt)
 	}
@@ -1032,9 +1042,15 @@ func (w *World) cellOf(p mathx.Vec) [2]int {
 func (w *World) relocate(a *Agent) {
 	// Drop the car back into the world on a lane at a comfortable distance:
 	// close enough to be part of the scene, far enough not to pop into view.
+	// An ambulance is put down from its own stream, so that going out and
+	// coming back never shifts what the rest of the traffic is dealt.
+	r := w.rng
+	if a.Role == RoleAmbulance {
+		r = a.rng
+	}
 	for range 24 {
-		lane := w.City.RandomLane(w.rng, 30)
-		s := w.rng.Float32() * lane.Length
+		lane := w.City.RandomLane(r, 30)
+		s := r.Float32() * lane.Length
 		if w.laneBarred(lane) {
 			continue
 		}

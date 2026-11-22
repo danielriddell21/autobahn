@@ -361,3 +361,43 @@ func TestMirrorNames(t *testing.T) {
 		}
 	}
 }
+
+// The ambulance's colour is the one held back for it, it is a vehicle, and a
+// box edge blended into any other class (or any of those into it) at a quarter,
+// a half or three quarters stays clear of every class colour. Unlike the test
+// above this holds the older classes too, in both directions.
+func TestAmbulanceColourSurvivesBlending(t *testing.T) {
+	if got := vision.RGBA(vision.ClassAmbulance); got != (color.RGBA{128, 255, 128, 255}) {
+		t.Fatalf("ambulance colour %v", got)
+	}
+	if !vision.IsVehicle(vision.ClassAmbulance) || !vision.IsObstacle(vision.ClassAmbulance) {
+		t.Error("an ambulance is a vehicle and an obstacle")
+	}
+	if vision.ClassAmbulance != vision.ClassDiversion+1 || vision.ClassDiversion != 21 {
+		t.Errorf("class numbering moved: diversion %d, ambulance %d", vision.ClassDiversion, vision.ClassAmbulance)
+	}
+	near := func(a, b color.RGBA) bool {
+		d := func(x, y uint8) float64 { return math.Abs(float64(x) - float64(y)) }
+		return math.Max(d(a.R, b.R), math.Max(d(a.G, b.G), d(a.B, b.B))) <= 1
+	}
+	amb := vision.RGBA(vision.ClassAmbulance)
+	for o := vision.ClassVehicle; o < vision.Class(vision.NumClasses); o++ {
+		if o == vision.ClassAmbulance {
+			continue
+		}
+		oc := vision.RGBA(o)
+		for _, f := range []float64{0.25, 0.5, 0.75} {
+			mix := func(x, y uint8) uint8 { return uint8(math.Round(float64(x)*(1-f) + float64(y)*f)) }
+			for _, m := range []color.RGBA{
+				{mix(amb.R, oc.R), mix(amb.G, oc.G), mix(amb.B, oc.B), 255},
+				{mix(oc.R, amb.R), mix(oc.G, amb.G), mix(oc.B, amb.B), 255},
+			} {
+				for c := vision.ClassVehicle; c < vision.Class(vision.NumClasses); c++ {
+					if near(m, vision.RGBA(c)) {
+						t.Errorf("ambulance mixed %.0f%% with %v is %v, which is %v", f*100, o, m, c)
+					}
+				}
+			}
+		}
+	}
+}

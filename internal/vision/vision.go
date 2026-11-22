@@ -48,8 +48,7 @@ const (
 	// carries traffic the other way.
 	ClassLaneOncoming
 	// The classes of roadworks. They come after every other class so that none
-	// of the numbering above moves. {128, 255, 128} is deliberately unused: it
-	// is held back for an ambulance.
+	// of the numbering above moves.
 
 	// ClassCone is a traffic cone, and ClassBarrier a barrier across a lane.
 	// Both are solid, and both are in the way.
@@ -59,6 +58,9 @@ const (
 	ClassRoadClosed
 	// ClassDiversion is a sign warning of roadworks or a diversion ahead.
 	ClassDiversion
+	// ClassAmbulance is an emergency vehicle with its blue lights on. It is
+	// annotated only while they are, so it means: get out of its way.
+	ClassAmbulance
 	numClasses
 )
 
@@ -89,6 +91,7 @@ var classNames = [numClasses]string{
 	ClassBarrier:       "BARRIER",
 	ClassRoadClosed:    "ROAD CLOSED",
 	ClassDiversion:     "DIVERSION",
+	ClassAmbulance:     "AMBULANCE",
 }
 
 // String returns the class label drawn beside each box.
@@ -149,8 +152,7 @@ var classColors = [numClasses]color.RGBA{
 	ClassBarrier:       {255, 80, 80, 255},
 	ClassRoadClosed:    {176, 0, 255, 255},
 	ClassDiversion:     {255, 255, 80, 255},
-	// {128, 255, 128} is RESERVED for a later ambulance class: do not use it for
-	// anything else. Roadworks used the 80 and 176 levels.
+	ClassAmbulance:     {128, 255, 128, 255},
 }
 
 // RGBA returns the exact colour a class is annotated in.
@@ -159,7 +161,7 @@ func RGBA(c Class) color.RGBA { return classColors[c] }
 // IsVehicle reports whether a class is a car of any kind. A police car is
 // still something to avoid rear-ending, so the autopilot treats both alike
 // when it is deciding what to follow.
-func IsVehicle(c Class) bool { return c == ClassVehicle || c == ClassPolice }
+func IsVehicle(c Class) bool { return c == ClassVehicle || c == ClassPolice || c == ClassAmbulance }
 
 // IsObstacle reports whether a class is something solid in the road that the
 // car must not run into: a vehicle of any kind, or the cones and barriers of

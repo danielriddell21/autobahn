@@ -91,7 +91,7 @@ soak frames="1800":
 # fail if the autopilot has got worse on any map: the gate CI holds a change to
 [group('test')]
 gate:
-    {{go}} run ./tools/eval -map all -seeds 24 -seconds 60 -max-points 12
+    {{go}} run ./tools/eval -map all -seeds 24 -seconds 60 -max-points 12 -ambulances 2
     {{go}} run ./tools/eval -map all -seeds 48 -seconds 60 -max-points 12 -works dense
     {{go}} run ./tools/eval -map all -seeds 24 -seconds 60 -max-points 12 -weather fog,storm
     {{go}} run ./tools/eval -map custom:edge -seeds 24 -seconds 60 -max-points 12

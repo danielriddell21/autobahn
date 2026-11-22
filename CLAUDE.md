@@ -292,6 +292,36 @@ and each pack fills the shared tables from its own files, `internal/sim/body_*.g
 `packs.go`). Each pack owns its own body_/cars_/pack_ files; shared files
 (body.go, cars.go, pack.go, shop prices) are edited only by an integrator.
 
+## Emergency
+
+`internal/emergency` places the hospitals, stations and fire sites the pack's
+call-outs go to, and it follows the growth rule: the lattice is cut into
+super-cells of three by three cells, and a super-cell is decided only once every
+junction round it is `City.Complete`, by hashing its lattice coordinates (cells
+are tried in hash order and the first with a fit block wins), so a site never
+moves and never depends on how the city was reached. It reads `City.Plan()`
+blocks and puts the site on the ground with `City.Lay`; the door a job sends
+the player to is found from the kerb of the block's far side so no two lanes tie.
+The generator is not touched. A call-out is a `job.Type` (ambulance: patient
+then hospital; fire: stop in the scene box and hold twenty seconds, which moving
+cancels; response: attend a station's scene). Pay is earnings through the job
+framework, never bounty; any ending but a pass, a time-out and a police stop
+included, ends the streak (`job.Settler`).
+
+An ambulance in traffic is `sim.RoleAmbulance`, counted by `Config.Ambulances`
+(never in the traffic mix, drawn from its own stream, so none is the world as
+it was). On a run it has `BlueLights`, is boxed as `vision.ClassAmbulance`
+only then, and traffic pulls in for it as for a police car on a call. Staying
+in its way for three seconds within 25 m is `ObstructedEmergency`. The autopilot
+(`yield.go`, vision and mathx only) signals left, takes the kerbside lane if
+there is room and eases to sixty per cent of the limit until the ambulance has
+passed; it never overtakes one and never adds speed or skips a control.
+`eval -ambulances N` drives with them; the gate's first line runs with two. Over 120
+seeds per map two ambulances scored no worse than none (0.9, 1.0, 0.2 and 2.2
+penalty points against 0.8, 1.5, 0.5 and 2.3), but on the gate's own 24 seeds the
+roadtown is the noisy one (6.2 against 2.5), so if it ever fails, look at what
+the autopilot did before touching the mark.
+
 ## eval is a gate, not a report
 
 `just eval` drives many cities headlessly and scores the result. `just gate`

@@ -12,6 +12,9 @@ type Role int
 const (
 	RoleCivilian Role = iota
 	RolePolice
+	// RoleAmbulance is the emergency pack's ambulance, which now and then goes
+	// out on a call with its lights on; see ambulance.go.
+	RoleAmbulance
 )
 
 // UnitKind is the sort of car a police unit drives, which decides how soon it
@@ -539,7 +542,7 @@ func (a *Agent) pursuitTurn(c *city.City, target mathx.Vec) (city.Turn, bool) {
 
 // BluesAndTwos reports whether the unit should be showing its lights, which is
 // whenever it is running to a call.
-func (a *Agent) BluesAndTwos() bool { return a.Role == RolePolice && a.pursuing }
+func (a *Agent) BluesAndTwos() bool { return (a.Role == RolePolice && a.pursuing) || a.BlueLights() }
 
 func (w *World) interceptOf(a *Agent) mathx.Vec {
 	// Aim where the runner will be, not where it is. Out of sight, nobody
@@ -689,7 +692,7 @@ const sirenRange float32 = 55
 // sirenBehind reports whether a unit with its lights on is coming up behind
 // this driver on the same road.
 func (w *World) sirenBehind(a *Agent) bool {
-	if a.Role == RolePolice {
+	if a.Role != RoleCivilian {
 		return false
 	}
 	fwd := a.V.Forward()

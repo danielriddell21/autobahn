@@ -65,6 +65,11 @@ type State struct {
 	Reason   string  `json:"reason,omitempty"`
 	// Assisted is set for good once the autopilot has had a hand in the job.
 	Assisted bool `json:"assisted"`
+	// Held is the moment the car came to rest at a scene, for a type that asks
+	// it to stay put there, or zero while it is not at rest; and Streak is how
+	// many jobs in a row of its kind had been passed when this one began.
+	Held   float32 `json:"held,omitempty"`
+	Streak int     `json:"streak,omitempty"`
 }
 
 // Fault is one rule broken while a job is under way.
@@ -107,6 +112,12 @@ type Type interface {
 	Step(s *State, f Frame)
 	// Reward is the pay for passing, before penalties. It may be zero.
 	Reward(s State) int
+}
+
+// Settler is a type that wants to hear how each of its jobs ended, whatever
+// ended it: a time-out and a police stop never reach Step.
+type Settler interface {
+	Settle(r Result)
 }
 
 var registry = map[string]Type{}
@@ -194,7 +205,13 @@ func (b *Board) finish(st Status, reason string) Result {
 	s := b.active
 	s.Status, s.Reason = st, reason
 	b.active = nil
-	return Result{Type: s.Type, Status: st, Reason: reason, Pay: Payout(*s), Assisted: s.Assisted}
+	r := Result{Type: s.Type, Status: st, Reason: reason, Pay: Payout(*s), Assisted: s.Assisted}
+	if t, ok := Lookup(s.Type); ok {
+		if se, ok := t.(Settler); ok {
+			se.Settle(r)
+		}
+	}
+	return r
 }
 
 // Step advances the active job by a frame. It reports a result on the frame the

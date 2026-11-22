@@ -205,3 +205,35 @@ func TestDropOffStep(t *testing.T) {
 		t.Fatal("did not pass")
 	}
 }
+
+// settling records every result it is told of.
+type settling struct {
+	fake
+	got *[]Result
+}
+
+func (settling) ID() string        { return "settling" }
+func (s settling) Settle(r Result) { *s.got = append(*s.got, r) }
+
+// A type that wants to hear how its jobs ended is told of every ending,
+// including the ones that never reach its Step.
+func TestSettlerHearsEveryEnding(t *testing.T) {
+	var got []Result
+	ty := settling{fake: fake{}, got: &got}
+	Register(ty)
+	for _, end := range []func(*Board){
+		func(b *Board) { b.Step(Frame{Now: 1, Pos: mathx.V(10, 0)}) }, // passed
+		func(b *Board) { b.Step(Frame{Now: 1, PoliceStopped: true}) }, // failed
+		func(b *Board) { b.Step(Frame{Now: 99}) },                     // out of time
+		func(b *Board) { b.Cancel("changed my mind") },                // cancelled
+	} {
+		b := &Board{}
+		if _, err := b.Start(ty, nil, 1, 0, mathx.Vec{}, 0); err != nil {
+			t.Fatal(err)
+		}
+		end(b)
+	}
+	if len(got) != 4 || got[0].Status != Passed || got[1].Status != Failed || got[2].Status != Failed || got[3].Status != Failed {
+		t.Fatalf("settled %+v", got)
+	}
+}

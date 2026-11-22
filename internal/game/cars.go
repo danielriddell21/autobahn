@@ -123,6 +123,9 @@ func (g *Game) drawTraffic(eye mathx.Vec, drawPlayer bool) {
 				look.paint = colPoliceDark
 			}
 		}
+		if a.Role == sim.RoleAmbulance {
+			look.lit, look.paint = a.BlueLights(), colAmbulance
+		}
 		drawCar(a.V, a.Body, look, g.footingOf(a.V.Pos, a.V.Yaw))
 	}
 	if drawPlayer {

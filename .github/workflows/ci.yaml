@@ -68,8 +68,9 @@ jobs:
 
       - uses: danielriddell21/github-actions/.github/actions/setup-raylib@v2
 
+      # With two ambulances out on calls, which the autopilot has to give way to.
       - name: Score the autopilot across 24 cities
-        run: go run ./tools/eval -map all -seeds 24 -seconds 60 -max-points 12
+        run: go run ./tools/eval -map all -seeds 24 -seconds 60 -max-points 12 -ambulances 2
 
       # The same again with the roads dug up all over the place, which also
       # fails if the car drove past fewer than 24 of them: a gate that met no

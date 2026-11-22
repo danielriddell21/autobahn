@@ -26,6 +26,9 @@ const (
 	WrongWay
 	OffRoad
 	CollisionInfraction
+	// ObstructedEmergency is staying in the way of an ambulance with its
+	// lights on.
+	ObstructedEmergency
 )
 
 // String returns a short label for the infraction.
@@ -41,6 +44,8 @@ func (k InfractionKind) String() string {
 		return "WRONG WAY"
 	case OffRoad:
 		return "OFF ROAD"
+	case ObstructedEmergency:
+		return "BLOCKED AN AMBULANCE"
 	default:
 		return "COLLISION"
 	}
@@ -59,6 +64,8 @@ func (k InfractionKind) Penalty() int {
 		return 40
 	case OffRoad:
 		return 10
+	case ObstructedEmergency:
+		return 20
 	default:
 		return 30
 	}
@@ -104,16 +111,18 @@ type Judge struct {
 	signal    SignalState
 	hasSignal bool
 
-	approach    *city.Lane
-	judgedPass  bool
-	stopDone    bool
-	redStop     bool // stood still at this approach while the signal showed red
-	speedTimer  float32
-	wrongTimer  float32
-	offTimer    float32
-	cooldown    map[InfractionKind]float32
-	lastOdo     float32
-	initialised bool
+	approach   *city.Lane
+	judgedPass bool
+	stopDone   bool
+	redStop    bool // stood still at this approach while the signal showed red
+	speedTimer float32
+	wrongTimer float32
+	offTimer   float32
+	// obstructTimer is how long the vehicle has been in an ambulance's way.
+	obstructTimer float32
+	cooldown      map[InfractionKind]float32
+	lastOdo       float32
+	initialised   bool
 }
 
 // Judged state timing, in seconds.
@@ -150,7 +159,7 @@ func (j *Judge) Reset() {
 	j.approach = nil
 	j.judgedPass = false
 	j.stopDone, j.redStop = false, false
-	j.speedTimer, j.wrongTimer, j.offTimer = 0, 0, 0
+	j.speedTimer, j.wrongTimer, j.offTimer, j.obstructTimer = 0, 0, 0, 0
 	clear(j.cooldown)
 	j.initialised = false
 }

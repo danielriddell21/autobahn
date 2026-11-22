@@ -348,8 +348,13 @@ func (lo *layout) vehiclesWithin(w *sim.World, limit float32) {
 			continue
 		}
 		cl := vision.ClassVehicle
-		if a.Role == sim.RolePolice {
+		switch {
+		case a.Role == sim.RolePolice:
 			cl = vision.ClassPolice
+		case a.BlueLights():
+			// Only while its lights are on: it is something to get out of the
+			// way of, and with them off it is a van.
+			cl = vision.ClassAmbulance
 		}
 		s := a.V.Spec
 		b, ok := lo.box(cl, a.V.Pos, s.Height/2, s.HalfWidth, s.Height/2, s.HalfLength, a.V.Yaw)

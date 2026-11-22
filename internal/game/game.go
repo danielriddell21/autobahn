@@ -26,6 +26,7 @@ import (
 	"github.com/danielriddell21/autobahn/internal/autopilot"
 	"github.com/danielriddell21/autobahn/internal/city"
 	"github.com/danielriddell21/autobahn/internal/custom"
+	"github.com/danielriddell21/autobahn/internal/emergency"
 	"github.com/danielriddell21/autobahn/internal/mathx"
 	"github.com/danielriddell21/autobahn/internal/pack"
 	"github.com/danielriddell21/autobahn/internal/scenario"
@@ -211,6 +212,8 @@ type Game struct {
 	career bountyMeter
 	// jobs is the jobs framework's end of the game: see jobs.go.
 	jobs jobs
+	// sites is the emergency pack's hospitals, stations and fire sites.
+	sites *emergency.Index
 	// chal is the challenge being driven, nil in an ordinary game, and
 	// chalDone the outcome of one that has finished and not yet been collected.
 	chal     *challenge
@@ -724,6 +727,17 @@ func (g *Game) updateAudio() {
 	nearest, bearing := float32(1e9), float32(0)
 	for _, u := range g.world.Police() {
 		if !u.Pursuing() {
+			continue
+		}
+		rel := u.V.Pos.Sub(p.Pos)
+		if d := rel.Len(); d < nearest {
+			fwd := p.Forward()
+			nearest = d
+			bearing = mathx.Atan2(rel.Dot(fwd.Right()), rel.Dot(fwd))
+		}
+	}
+	for _, u := range g.world.Ambulances() {
+		if !u.BlueLights() {
 			continue
 		}
 		rel := u.V.Pos.Sub(p.Pos)

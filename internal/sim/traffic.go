@@ -147,6 +147,11 @@ type Agent struct {
 	surface float32
 	// works is the roadworks, which no turn chosen may run into.
 	works *works.Index
+	// blue is how much longer an ambulance is out on a run, with its lights
+	// on, and rest how long until it next goes out; see ambulance.go.
+	blue, rest float32
+	// easing is set while the driver is pulling in for an ambulance.
+	easing bool
 }
 
 // Pursuing reports whether this unit is currently on a blue-light run.
@@ -467,6 +472,7 @@ func (a *Agent) advanceRoute(c *city.City, chase mathx.Vec, dt float32) {
 
 func (a *Agent) drive(w *World, dt float32) {
 	c := w.City
+	a.runClock(dt)
 	if a.idle(c, dt) || (a.pursuing && a.engage(w, dt)) {
 		return
 	}
@@ -485,6 +491,9 @@ func (a *Agent) drive(w *World, dt float32) {
 
 	gap, lead, ahead, limit := a.lookAhead(w, st, speed, limit, dt)
 	accel := idmFree(st, speed, limit)
+	if a.easing {
+		accel = max(accel, -st.Decel) // pulling in gently, not stood on the brakes
+	}
 
 	// Slow for the turn before reaching it, not half-way round.
 	if !a.inTurn && a.hasNext {
@@ -580,7 +589,7 @@ func (a *Agent) goRound(ahead *Vehicle, gap, lead, speed, dt float32) {
 		// Committed: hold the line out until the obstruction is behind.
 		a.passing -= dt
 		a.sidestepWant = a.passSide * passWidth
-	case ahead != nil && a.pursuing && gap < 30 && lead < max(speed-2, 3):
+	case ahead != nil && a.onCall() && gap < 30 && lead < max(speed-2, 3):
 		a.sidestepWant = overtakeWidth
 	case ahead != nil && !a.inTurn && !a.yielding && lead < 0.3 && speed < 0.5 && gap < 9:
 		a.waitBehind(ahead, dt)
@@ -657,10 +666,16 @@ func (a *Agent) cruise(w *World, st Style) float32 {
 		// A unit on a call is not held to the posted limit.
 		limit = min(st.TargetSpeed(mathx.MPH(52)), a.V.Spec.MaxSpeed)
 	}
-	a.sidestepWant = 0
+	if a.BlueLights() {
+		limit = min(max(limit, st.TargetSpeed(runSpeed)), a.V.Spec.MaxSpeed)
+	}
+	a.sidestepWant, a.easing = 0, false
 	if w.sirenBehind(a) {
 		// Lights in the mirror: pull in to the kerb and stop.
 		limit, a.sidestepWant = 0, -1.7
+	} else if a.Role == RoleCivilian && w.ambulanceBehind(a.V.Pos, a.V.Forward()) {
+		// An ambulance on a run: pull in and ease, but not to a standstill.
+		limit, a.sidestepWant, a.easing = min(limit, crawlSpeed), -1.7, true
 	}
 	if c.Roads[a.lane.Road].Ring {
 		limit = min(limit, ringSpeed(c.Nodes[a.lane.ToNode], st))

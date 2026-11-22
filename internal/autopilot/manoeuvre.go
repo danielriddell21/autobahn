@@ -327,7 +327,7 @@ func (d *Driver) manoeuvre(dets []vision.Detection, raw []lanePoint, cruise, spe
 		return d.carryOnPassing(dets, raw, cruise, pf)
 	}
 
-	if len(raw) == 0 || pf.overtake <= 0 || d.tooSlowToMove(speed) || !d.straightAhead(raw) {
+	if len(raw) == 0 || pf.overtake <= 0 || d.tooSlowToMove(speed) || !d.straightAhead(raw) || d.noPass() {
 		return cruise
 	}
 	d.chooseLane(dets, raw, sides, held, cruise, dt, pf)
@@ -539,6 +539,8 @@ func (d *Driver) indicator() Indicator {
 	switch {
 	case d.move == moveNone && abs(d.shift) > 0.8:
 		side = -d.shift // pulling back in
+	case d.move == moveNone && d.yield.active:
+		return IndicateLeft // pulling in for an ambulance
 	case d.move == moveNone, d.move == moveAbort:
 		return IndicateOff
 	}
