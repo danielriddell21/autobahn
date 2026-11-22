@@ -29,6 +29,7 @@ import (
 	"github.com/danielriddell21/autobahn/internal/emergency"
 	"github.com/danielriddell21/autobahn/internal/mathx"
 	"github.com/danielriddell21/autobahn/internal/pack"
+	"github.com/danielriddell21/autobahn/internal/race"
 	"github.com/danielriddell21/autobahn/internal/scenario"
 	"github.com/danielriddell21/autobahn/internal/sim"
 	"github.com/danielriddell21/autobahn/internal/vision"
@@ -71,6 +72,9 @@ type Options struct {
 	Challenge *scenario.Scenario
 	// UnlockAll offers every pack whatever the player has banked.
 	UnlockAll bool
+	// Access is what the player holds, which decides the jobs J offers. The zero
+	// value holds only the base game; UnlockAll is added to it.
+	Access    pack.Access
 	Traffic   int
 	Police    int // marked units patrolling; zero disables the police
 	Width     int
@@ -214,6 +218,10 @@ type Game struct {
 	jobs jobs
 	// sites is the emergency pack's hospitals, stations and fire sites.
 	sites *emergency.Index
+	// taxi is the taxi pack's state for this game: see pack_taxi.go.
+	taxi taxiState
+	// jobMenu is the menu J opens, nil when it is shut: see jobmenu.go.
+	jobMenu *jobMenu
 	// chal is the challenge being driven, nil in an ordinary game, and
 	// chalDone the outcome of one that has finished and not yet been collected.
 	chal     *challenge
@@ -588,7 +596,11 @@ func (g *Game) Step(dt float32) {
 	}
 
 	g.world.Update(controls, dt)
+	// A drift event scores the slip of the car, which job.Frame does not carry.
+	p := g.world.Player
+	race.Feed(g.jobs.board.Active(), race.Sample{Now: g.world.Time, Pos: p.Pos, Vel: p.Vel, Yaw: p.Yaw, Step: dt})
 	g.stepJobs()
+	g.taxiStep()
 	g.stepChallenge(dt)
 	g.updateEffects(dt)
 	g.watchPursuit(dt)
@@ -800,6 +812,10 @@ func (g *Game) stepChase(dt float32) {
 }
 
 func (g *Game) handleInput() {
+	if g.jobMenu != nil {
+		g.stepJobMenu()
+		return
+	}
 	g.handleIndicatorKeys()
 	switch {
 	case rl.IsKeyPressed(rl.KeyTab):
@@ -1045,6 +1061,7 @@ func Run(opts Options) error {
 		set := LoadSettings()
 		c := loadCareerFor(set)
 		held := pack.Access{Banked: c.Banked, Bypass: opts.UnlockAll || set.UnlockAll}
+		opts.Access = held
 		if err := opts.coopValid(); err != nil {
 			return err
 		}

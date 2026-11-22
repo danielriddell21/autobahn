@@ -322,6 +322,13 @@ penalty points against 0.8, 1.5, 0.5 and 2.3), but on the gate's own 24 seeds th
 roadtown is the noisy one (6.2 against 2.5), so if it ever fails, look at what
 the autopilot did before touching the mark.
 
+The J key opens the in-game job menu (`jobmenu.go`). `jobsOf` lists each pack's
+jobs and `jobEntries` filters them by `Game.access()`, which is `Options.Access`
+(set by the shell and by headless `Run`) plus `-unlock-all`, so a locked pack's
+jobs are never offered. With a job under way the menu offers only cancelling it.
+A new pack's jobs go in `jobsOf`; the key is ignored in co-op, and job pay is
+still thrown away where `banks()` is false.
+
 ## eval is a gate, not a report
 
 `just eval` drives many cities headlessly and scores the result. `just gate`

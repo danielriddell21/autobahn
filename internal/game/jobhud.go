@@ -7,6 +7,7 @@ import (
 
 	"github.com/danielriddell21/autobahn/internal/job"
 	"github.com/danielriddell21/autobahn/internal/mathx"
+	"github.com/danielriddell21/autobahn/internal/race"
 )
 
 // The goal marker's colours. Neither has a channel at 255 and neither is one
@@ -39,7 +40,11 @@ func (g *Game) drawJob() {
 		col = hudBad
 	}
 	x, y := int32(12), int32(60)
-	panel(x, y, 232, 66)
+	pw, hh := int32(232), int32(66)
+	if g.taxiLine() != "" || raceLine(s) != "" {
+		pw, hh = 320, 88
+	}
+	panel(x, y, pw, hh)
 	rl.DrawText(name, x+12, y+6, 14, hudAccent)
 	rl.DrawText(fmt.Sprintf("%d:%02d", int(left)/60, int(left)%60), x+12, y+22, 28, col)
 	rl.DrawText(pay, x+12, y+50, 12, hudDim)
@@ -47,6 +52,30 @@ func (g *Game) drawJob() {
 		rl.DrawText(fmt.Sprintf("%.0f m", g.world.Player.Pos.DistTo(s.Goals[s.Next].Pos)),
 			x+140, y+30, 20, hudDim)
 	}
+	if line := g.taxiLine(); line != "" {
+		rl.DrawText(line, x+12, y+70, 12, hudText)
+	} else if line := raceLine(s); line != "" {
+		rl.DrawText(line, x+12, y+70, 12, hudText)
+	}
+}
+
+// raceLine is the readout under a racing job's name: the lap, the time that
+// earns gold and the rivals of a race, or the score and medal targets of a drift
+// event. It is empty for any other job.
+func raceLine(s *job.State) string {
+	switch s.Type {
+	case race.TrialID, race.CircuitID, race.SprintID:
+		lap, of := race.Laps(*s)
+		line := fmt.Sprintf("lap %d/%d, gold %d:%02d", lap, of, int(race.Ghost(*s))/60, int(race.Ghost(*s))%60)
+		if n := len(race.Rivals(*s)); n > 0 {
+			line += fmt.Sprintf(", %d rivals", n)
+		}
+		return line
+	case race.DriftID:
+		b, sv, gd := race.Targets(s.Seed, s.Serial)
+		return fmt.Sprintf("score %.0f (%.0f / %.0f / %.0f)", race.Score(s), b, sv, gd)
+	}
+	return ""
 }
 
 // drawJobMarker raises a beam over the goal, through the shader like the rest

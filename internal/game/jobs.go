@@ -50,13 +50,6 @@ func (g *Game) StartJob(t job.Type) error {
 	return nil
 }
 
-// offerJob is the J key: a drop-off job, if none is under way.
-func (g *Game) offerJob() {
-	if err := g.StartJob(job.DropOff{}); err != nil {
-		g.notices.Post("No job: "+err.Error(), 150, crucihud.Notice)
-	}
-}
-
 // ActiveJob returns the job in progress, or nil.
 func (g *Game) ActiveJob() *job.State { return g.jobs.board.Active() }
 

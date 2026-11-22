@@ -236,8 +236,11 @@ func (s *Shell) stepPlaying(dt float32) {
 			s.endGame()
 			return
 		}
-		s.showPause()
-		return
+		// Escape shuts the job menu, if it is open, before it pauses: Step does it.
+		if s.game.jobMenu == nil {
+			s.showPause()
+			return
+		}
 	}
 	if s.game.chal != nil && rl.IsKeyPressed(rl.KeyF5) {
 		s.retryChallenge()
@@ -654,6 +657,7 @@ func (s *Shell) startGame(autopilot bool) {
 		s.showTitle()
 		return
 	}
+	o.Access = s.access()
 	if err := o.lockedFor(s.holdings()); err != nil {
 		// Only a command line can ask for what the player does not hold or
 		// own; the menus never offer it.

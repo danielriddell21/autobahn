@@ -48,6 +48,7 @@ func (g *Game) drawHUD() {
 	g.drawWanted()
 	g.drawCarState()
 	g.drawJob()
+	g.drawJobMenu()
 	g.drawChallenge()
 	g.drawMinimap(int32(g.opts.Width)/2-72, 8, 144)
 	g.drawNotice()
