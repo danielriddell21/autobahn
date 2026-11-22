@@ -181,6 +181,8 @@ func TestStoredIdentifiersAreStable(t *testing.T) {
 	pinned := map[sim.BodyKind]int{
 		sim.Hatchback: 0, sim.Saloon: 1, sim.Estate: 2, sim.Van: 3, sim.Taxi: 4, sim.HotHatch: 5,
 		sim.Convertible: 8, sim.CityCar: 9, sim.FourByFour: 12, sim.SUV: 13, sim.Minibus: 15, sim.GrandTourer: 16,
+		sim.Gritter: 17, sim.BlackCab: 18, sim.CourierVan: 19, sim.Ambulance: 20, sim.FireEngine: 21,
+		sim.ResponseCar: 22, sim.RaceCoupe: 23, sim.RaceRoadster: 24, sim.RaceProto: 25,
 	}
 	for k, n := range pinned {
 		if int(k) != n {

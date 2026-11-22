@@ -42,8 +42,37 @@ type carLook struct {
 	parked bool
 }
 
+// cabinStyle is how a pack's car builds its cabin. The packs fill [cabins]
+// from init in their own cars_ files; the base game's shapes are in
+// [bootShare] and [drawCabin].
+type cabinStyle struct {
+	// Boot is how much of the car's length is boot behind the cabin.
+	Boot float32
+	// Draw, when set, builds the cabin itself and returns true; when nil, or
+	// when it returns false, the usual glasshouse is drawn.
+	Draw func(s sim.Spec, body sim.Body, look carLook, waist float32, paint, dark rl.Color) bool
+}
+
+// cabins and fittings are the lookup tables the packs' cars are registered in.
+// fittings are extras drawn on a car after its cabin and lamps: a light bar, a
+// livery, a sign on the roof.
+var (
+	cabins   = map[sim.BodyKind]cabinStyle{}
+	fittings = map[sim.BodyKind]func(s sim.Spec, body sim.Body, look carLook, waist float32){}
+	// blurbs are the garage's line for each pack car, filled the same way.
+	blurbs = map[sim.BodyKind]string{}
+)
+
 // bootShare is how much of a car's length is boot behind the cabin, by shape.
 func bootShare(k sim.BodyKind) float32 {
+	if c, ok := cabins[k]; ok {
+		return c.Boot
+	}
+	return baseBoot(k)
+}
+
+// baseBoot is [bootShare] for the base game's shapes.
+func baseBoot(k sim.BodyKind) float32 {
 	switch k {
 	case sim.Saloon:
 		return 0.19
@@ -150,6 +179,9 @@ func drawCar(v *sim.Vehicle, body sim.Body, look carLook, on footing) {
 
 	drawCabin(s, body, look, waist, paint, dark)
 	drawLamps(v, look, waist)
+	if fit := fittings[body.Kind]; fit != nil {
+		fit(s, body, look, waist)
+	}
 	if look.police {
 		drawPoliceFittings(s, body, look, waist)
 	}
@@ -162,6 +194,15 @@ func drawCar(v *sim.Vehicle, body sim.Body, look carLook, on footing) {
 }
 
 func drawCabin(s sim.Spec, body sim.Body, look carLook, waist float32, paint, dark rl.Color) {
+	if c, ok := cabins[body.Kind]; ok && c.Draw != nil && c.Draw(s, body, look, waist, paint, dark) {
+		return
+	}
+	drawBaseCabin(s, body, look, waist, paint, dark)
+}
+
+// drawBaseCabin builds the cabin of the base game's shapes, and the usual
+// glasshouse for any other.
+func drawBaseCabin(s sim.Spec, body sim.Body, look carLook, waist float32, paint, dark rl.Color) {
 	length := s.HalfLength * 2
 	cabin := length * body.RoofFrac
 	rear := -s.HalfLength + length*bootShare(body.Kind)

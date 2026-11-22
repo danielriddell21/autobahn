@@ -28,6 +28,12 @@ const (
 	Coast
 	Country
 	Motorway
+	// Emergency, Taxi, Racing and Night are the later packs. Night adds no
+	// map and no car.
+	Emergency
+	Taxi
+	Racing
+	Night
 	numPacks
 )
 
@@ -57,9 +63,13 @@ type Pack struct {
 // banks 700 or more. The prices take 200 a minute as what somebody driving to
 // get away, and getting away more often than not, comes out with.
 const (
-	priceCoast    = 3000
-	priceCountry  = 9000
-	priceMotorway = 18000
+	priceCoast     = 3000
+	priceCountry   = 9000
+	priceMotorway  = 18000
+	priceEmergency = 24000
+	priceTaxi      = 30000
+	priceRacing    = 38000
+	priceNight     = 48000
 )
 
 var packs = [numPacks]Pack{
@@ -85,6 +95,25 @@ var packs = [numPacks]Pack{
 		Blurb:  "a motorway town in winter",
 		Maps:   []city.Map{city.MapMotorway},
 		Bodies: []sim.BodyKind{sim.Minibus, sim.GrandTourer},
+	},
+	Emergency: {
+		ID: Emergency, Name: "emergency services", Price: priceEmergency,
+		Blurb:  "the blue-light cars",
+		Bodies: []sim.BodyKind{sim.Ambulance, sim.FireEngine, sim.ResponseCar},
+	},
+	Taxi: {
+		ID: Taxi, Name: "taxi rank", Price: priceTaxi,
+		Blurb:  "cabs and couriers for hire",
+		Bodies: []sim.BodyKind{sim.BlackCab, sim.CourierVan},
+	},
+	Racing: {
+		ID: Racing, Name: "racing legends", Price: priceRacing,
+		Blurb:  "cars built for speed",
+		Bodies: []sim.BodyKind{sim.RaceCoupe, sim.RaceRoadster, sim.RaceProto},
+	},
+	Night: {
+		ID: Night, Name: "night events", Price: priceNight,
+		Blurb: "after-dark events, with no new map or car",
 	},
 }
 

@@ -111,3 +111,16 @@ func TestForSaleHoldsOnlyUnownedItems(t *testing.T) {
 		}
 	}
 }
+
+// PROVISIONAL prices, pinned so a change is deliberate.
+func TestPackCarPricesAreProvisionallySet(t *testing.T) {
+	want := map[sim.BodyKind]int{
+		sim.BlackCab: 5000, sim.CourierVan: 4500, sim.Ambulance: 12000, sim.FireEngine: 18000,
+		sim.ResponseCar: 10000, sim.RaceCoupe: 14000, sim.RaceRoadster: 20000, sim.RaceProto: 30000,
+	}
+	for k, p := range want {
+		if got := CarPrice(k); got != p {
+			t.Errorf("the %s costs %d, want %d", k.Name(), got, p)
+		}
+	}
+}

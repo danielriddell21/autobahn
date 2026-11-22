@@ -406,6 +406,7 @@ func New(opts Options) *Game {
 	}
 	g.camPos = g.world.Player.Pos
 	g.updateCameras(0)
+	applyPacks(g)
 	return g
 }
 

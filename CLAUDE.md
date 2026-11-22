@@ -283,6 +283,15 @@ what the team earned, unless either autopilot had a hand, and the joiner's
 judge does not run, so it only gets what the snapshot carries. A snapshot also
 carries the custom map's share code; bump `Proto` when a field changes meaning.
 
+
+The later packs (emergency, taxi, racing, night) have their slots made in
+advance: new `sim.BodyKind` values go on the end (they are saved as integers),
+and each pack fills the shared tables from its own files, `internal/sim/body_*.go`
+(shapes), `internal/game/cars_*.go` (`cabins`, `fittings`) and
+`internal/game/pack_*.go` (its job types, dressing and audio, listed once in
+`packs.go`). Each pack owns its own body_/cars_/pack_ files; shared files
+(body.go, cars.go, pack.go, shop prices) are edited only by an integrator.
+
 ## eval is a gate, not a report
 
 `just eval` drives many cities headlessly and scores the result. `just gate`

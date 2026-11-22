@@ -141,3 +141,51 @@ func TestOfAnUnknownPackIsTheBaseGame(t *testing.T) {
 		t.Errorf("Of(77) = %s, want the base game", got.Name)
 	}
 }
+
+func TestLaterPacksPricesAndContents(t *testing.T) {
+	want := []struct {
+		id     pack.ID
+		price  int
+		bodies []sim.BodyKind
+	}{
+		{pack.Emergency, 24000, []sim.BodyKind{sim.Ambulance, sim.FireEngine, sim.ResponseCar}},
+		{pack.Taxi, 30000, []sim.BodyKind{sim.BlackCab, sim.CourierVan}},
+		{pack.Racing, 38000, []sim.BodyKind{sim.RaceCoupe, sim.RaceRoadster, sim.RaceProto}},
+		{pack.Night, 48000, nil},
+	}
+	for _, w := range want {
+		p := pack.Of(w.id)
+		if p.ID != w.id || p.Price != w.price || !slices.Equal(p.Bodies, w.bodies) || len(p.Maps) != 0 {
+			t.Errorf("pack %d is %+v", w.id, p)
+		}
+		for _, k := range w.bodies {
+			if pack.ForBody(k).ID != w.id {
+				t.Errorf("the %s is not in pack %d", k.Name(), w.id)
+			}
+		}
+	}
+}
+
+func TestLockedPackCarsAreNeverOffered(t *testing.T) {
+	late := []sim.BodyKind{
+		sim.Ambulance, sim.FireEngine, sim.ResponseCar, sim.BlackCab,
+		sim.CourierVan, sim.RaceCoupe, sim.RaceRoadster, sim.RaceProto,
+	}
+	short := pack.Access{Banked: pack.Of(pack.Emergency).Price - 1}
+	for _, k := range late {
+		if short.HasBody(k) || slices.Contains(short.Bodies(), k) {
+			t.Errorf("the %s is offered a point short of the first late pack", k.Name())
+		}
+	}
+	rich := pack.Access{Banked: pack.Of(pack.Night).Price}
+	for _, k := range late {
+		if !slices.Contains(rich.Bodies(), k) {
+			t.Errorf("the %s is not offered with every pack held", k.Name())
+		}
+	}
+	// Money for the emergency pack opens only its own cars.
+	e := pack.Access{Banked: pack.Of(pack.Emergency).Price}
+	if !e.HasBody(sim.Ambulance) || e.HasBody(sim.BlackCab) || e.HasBody(sim.RaceCoupe) {
+		t.Error("the emergency price should open the emergency cars and nothing later")
+	}
+}

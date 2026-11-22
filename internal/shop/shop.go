@@ -35,6 +35,19 @@ const (
 	priceGT          = 15000
 )
 
+// PROVISIONAL prices for the taxi, emergency and racing packs' cars, to be
+// retuned once what the jobs pay is known.
+const (
+	priceBlackCab     = 5000
+	priceCourierVan   = 4500
+	priceAmbulance    = 12000
+	priceFireEngine   = 18000
+	priceResponseCar  = 10000
+	priceRaceCoupe    = 14000
+	priceRaceRoadster = 20000
+	priceRaceProto    = 30000
+)
+
 // Paint prices.
 const (
 	pricePlain  = 300
@@ -55,6 +68,15 @@ var carPrices = map[sim.BodyKind]int{
 	sim.SUV:         priceSUV,
 	sim.Minibus:     priceMinibus,
 	sim.GrandTourer: priceGT,
+	// PROVISIONAL: see the constants above.
+	sim.BlackCab:     priceBlackCab,
+	sim.CourierVan:   priceCourierVan,
+	sim.Ambulance:    priceAmbulance,
+	sim.FireEngine:   priceFireEngine,
+	sim.ResponseCar:  priceResponseCar,
+	sim.RaceCoupe:    priceRaceCoupe,
+	sim.RaceRoadster: priceRaceRoadster,
+	sim.RaceProto:    priceRaceProto,
 }
 
 // paintPrices is indexed by the garage's paint list: rosso, racing blue,

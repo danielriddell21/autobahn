@@ -42,29 +42,48 @@ const (
 	Minibus
 	GrandTourer
 	Gritter
+	// The cars of the taxi, emergency and racing packs. Stored as integers by
+	// the settings and the career, so they stay at the end: never insert above.
+	// Each pack's placeholder shape lives in its own body_ file.
+	BlackCab
+	CourierVan
+	Ambulance
+	FireEngine
+	ResponseCar
+	RaceCoupe
+	RaceRoadster
+	RaceProto
 	numBodies
 )
 
 // bodyNames are what each shape is called.
 var bodyNames = [numBodies]string{
-	Hatchback:   "hatchback",
-	Saloon:      "saloon",
-	Estate:      "estate",
-	Van:         "van",
-	Taxi:        "taxi",
-	HotHatch:    "hot hatch",
-	Bus:         "bus",
-	Lorry:       "lorry",
-	Convertible: "convertible",
-	CityCar:     "city car",
-	IceCreamVan: "ice cream van",
-	Camper:      "camper",
-	FourByFour:  "4x4",
-	SUV:         "suv",
-	Tractor:     "tractor",
-	Minibus:     "minibus",
-	GrandTourer: "grand tourer",
-	Gritter:     "gritter",
+	Hatchback:    "hatchback",
+	Saloon:       "saloon",
+	Estate:       "estate",
+	Van:          "van",
+	Taxi:         "taxi",
+	HotHatch:     "hot hatch",
+	Bus:          "bus",
+	Lorry:        "lorry",
+	Convertible:  "convertible",
+	CityCar:      "city car",
+	IceCreamVan:  "ice cream van",
+	Camper:       "camper",
+	FourByFour:   "4x4",
+	SUV:          "suv",
+	Tractor:      "tractor",
+	Minibus:      "minibus",
+	GrandTourer:  "grand tourer",
+	Gritter:      "gritter",
+	BlackCab:     "black cab",
+	CourierVan:   "courier van",
+	Ambulance:    "ambulance",
+	FireEngine:   "fire engine",
+	ResponseCar:  "response car",
+	RaceCoupe:    "race coupe",
+	RaceRoadster: "race roadster",
+	RaceProto:    "race proto",
 }
 
 // Name returns the shape's name.
@@ -112,7 +131,8 @@ func Bodies() []BodyKind {
 
 // shapes is what turns the ordinary traffic car into each shape: its size,
 // its weight and what it has to pull it, and the proportions the renderer
-// builds it to.
+// builds it to. The base game's are here; each pack's are filled from init in
+// its own body_ file.
 var shapes = [numBodies]func(b *Body){
 	Saloon: func(b *Body) {
 		b.Spec.HalfLength, b.Spec.HalfWidth, b.Spec.Height = 2.42, 0.95, 1.44
@@ -389,6 +409,9 @@ func PlayerBody() Body { return PlayerBodyOf(HotHatch) }
 var playerBodies = []BodyKind{
 	HotHatch, Hatchback, Saloon, Estate, Taxi, Van,
 	Convertible, CityCar, FourByFour, SUV, Minibus, GrandTourer,
+	// The packs' cars. Each pack owns its own shape in its body_ file.
+	BlackCab, CourierVan, Ambulance, FireEngine, ResponseCar,
+	RaceCoupe, RaceRoadster, RaceProto,
 }
 
 // PlayerBodies returns the shapes the player may choose from.

@@ -149,6 +149,8 @@ var classColors = [numClasses]color.RGBA{
 	ClassBarrier:       {255, 80, 80, 255},
 	ClassRoadClosed:    {176, 0, 255, 255},
 	ClassDiversion:     {255, 255, 80, 255},
+	// {128, 255, 128} is RESERVED for a later ambulance class: do not use it for
+	// anything else. Roadworks used the 80 and 176 levels.
 }
 
 // RGBA returns the exact colour a class is annotated in.

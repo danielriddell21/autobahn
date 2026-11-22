@@ -199,6 +199,9 @@ func turntable(radius float32, sides int, col rl.Color) {
 
 // carBlurb is the line under the preview saying how a shape drives.
 func carBlurb(k sim.BodyKind) string {
+	if b, ok := blurbs[k]; ok {
+		return b
+	}
 	switch k {
 	case sim.Hatchback:
 		return "light and easy, a little down on power"
