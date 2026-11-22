@@ -2,7 +2,9 @@ package game
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"slices"
 
@@ -45,6 +47,10 @@ type Career struct {
 	Feats feats.Feats `json:"feats,omitempty"`
 	// Challenges is the player's best on each challenge, by scenario id.
 	Challenges scenario.Bests `json:"challenges,omitempty"`
+
+	// keep is set when the file on disk could not be used and is not ours to
+	// replace; see readCareer. Save refuses while it is set.
+	keep bool
 }
 
 // careerMigrations[i] brings a career from version i to i+1. They run in
@@ -77,16 +83,38 @@ func careerPath() (string, error) {
 func LoadCareer() Career { return loadCareerFor(LoadSettings()) }
 
 func loadCareerFor(set Settings) Career {
-	c := Career{Version: careerVersion}
-	if path, err := careerPath(); err == nil {
-		if data, err := os.ReadFile(path); err == nil {
-			var read Career
-			if json.Unmarshal(data, &read) == nil {
-				c = read
-			}
+	c, _ := readCareer(set)
+	return c
+}
+
+// readCareer is loadCareerFor, also saying whether the file as found is worth
+// writing back: true only when it was read and migrated from an older version.
+//
+// A file that exists but cannot be used (locked, truncated, or written by a
+// newer version) gives the starter career in memory, marked so that Save never
+// replaces it: the player's bounty, earnings and cars are still in it.
+func readCareer(set Settings) (c Career, migrated bool) {
+	c = Career{Version: careerVersion}
+	path, err := careerPath()
+	if err != nil {
+		return migrate(c, set), false
+	}
+	data, err := os.ReadFile(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		// A first run: there is nothing to lose.
+	case err != nil:
+		c.keep = true
+	default:
+		var read Career
+		if json.Unmarshal(data, &read) != nil || read.Version > careerVersion {
+			c.keep = true
+		} else {
+			c = read
+			migrated = read.Version < careerVersion
 		}
 	}
-	return migrate(c, set)
+	return migrate(c, set), migrated
 }
 
 // migrate brings a career read from disk to the current version and cleans it.
@@ -128,6 +156,9 @@ func cleanIDs(ids []int, valid func(int) bool) []int {
 // Save writes the career back, reporting a failure so the player is told
 // when what they earned will not be kept.
 func (c Career) Save() error {
+	if c.keep {
+		return errors.New("the career file could not be read, so it is left as it is and this session is not saved")
+	}
 	path, err := careerPath()
 	if err != nil {
 		return err
@@ -221,15 +252,23 @@ func (m *bountyMeter) take() int {
 // locked reports why a session cannot be played with the packs the player
 // holds, or nil when it can. It knows nothing of ownership; see lockedFor.
 func (o Options) locked(a pack.Access) error {
-	if o.Custom != nil {
-		if err := o.Custom.Locked(a); err != nil {
-			return err
-		}
-	} else if m := o.placeMap(); !a.Has(pack.ForMap(m).ID) {
-		return lockedErr(pack.ForMap(m), a, m.Name())
+	if err := o.lockedMap(a); err != nil {
+		return err
 	}
 	if p := pack.ForBody(o.Car); !a.Has(p.ID) {
 		return lockedErr(p, a, "the "+o.Car.Name())
+	}
+	return nil
+}
+
+// lockedMap is the part of locked that is about the place: its map, or the
+// map a custom one is built on.
+func (o Options) lockedMap(a pack.Access) error {
+	if o.Custom != nil {
+		return o.Custom.Locked(a)
+	}
+	if m := o.placeMap(); !a.Has(pack.ForMap(m).ID) {
+		return lockedErr(pack.ForMap(m), a, m.Name())
 	}
 	return nil
 }

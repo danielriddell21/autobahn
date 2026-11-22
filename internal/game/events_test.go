@@ -78,3 +78,26 @@ func TestDayClockCountsMidnights(t *testing.T) {
 		t.Errorf("the clock reads day %d hour %.2f after passing midnight", c.day, c.hour)
 	}
 }
+
+// A game with another player in it has no evening events, whichever way the
+// session was started: the command line names a host or a join, the lobby sets
+// Networked, and the two ends would otherwise each decide from their own packs.
+func TestNoEveningEventsInANetworkedGame(t *testing.T) {
+	held := pack.Access{Bypass: true}
+	for _, tc := range []struct {
+		name string
+		opts Options
+		want bool
+	}{
+		{"alone", Options{Access: held}, true},
+		{"hosting from the command line", Options{Access: held, Host: ":0"}, false},
+		{"joining from the command line", Options{Access: held, Join: "127.0.0.1:1"}, false},
+		{"from the lobby", Options{Access: held, Networked: true}, false},
+		{"a pack not held", Options{}, false},
+	} {
+		g := &Game{opts: tc.opts}
+		if got := g.nightEvents(); got != tc.want {
+			t.Errorf("%s: nightEvents %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

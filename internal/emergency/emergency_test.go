@@ -287,3 +287,23 @@ func TestFailedCallOutPaysNothingAndEndsTheStreak(t *testing.T) {
 		t.Errorf("worth %d with a thousand points", w)
 	}
 }
+
+// A call-out the autopilot had a hand in counts for nothing, either way: it
+// neither extends the streak nor ends it.
+func TestAssistedCallOutLeavesTheStreakAlone(t *testing.T) {
+	emergency.Run.Reset()
+	defer emergency.Run.Reset()
+	for _, status := range []job.Status{job.Passed, job.Failed} {
+		emergency.Run.Reset()
+		emergency.Ambulance.Settle(job.Result{Status: job.Passed})
+		emergency.Ambulance.Settle(job.Result{Status: job.Passed})
+		emergency.Ambulance.Settle(job.Result{Status: status, Assisted: true})
+		if n := emergency.Run.N(); n != 2 {
+			t.Errorf("an assisted %v call-out moved a streak of 2 to %d", status, n)
+		}
+	}
+	emergency.Ambulance.Settle(job.Result{Status: job.Passed})
+	if n := emergency.Run.N(); n != 3 {
+		t.Errorf("the streak is %d after an unassisted pass, want 3", n)
+	}
+}

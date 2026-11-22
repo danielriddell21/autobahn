@@ -247,3 +247,46 @@ func TestItNeverOvertakesAnAmbulanceAhead(t *testing.T) {
 		t.Error("began to overtake an ambulance")
 	}
 }
+
+// Stopped at a cone with an ambulance coming up behind, the car still has to
+// move over: standing there is the one thing that holds the ambulance up.
+func TestStoppedAtConesItMovesOverForAnAmbulanceBehind(t *testing.T) {
+	d := driver()
+	d.SeenLimit = 13.4
+	lane := twoLanes(d.cam)
+	scene := append(append([]vision.Detection{}, lane...), at(d.cam, vision.ClassCone, 14, 0, 0.4, 10))
+	// The ambulance is sat right behind, so the car is giving way before the
+	// cones come into view.
+	watch := func(s []vision.Detection, seconds float32) {
+		for range int(seconds / 0.2) {
+			d.Watch(vision.MirrorRear, []vision.Detection{rearBox(d, vision.ClassAmbulance, -8, 0)})
+			run(d, s, 0, 0.2)
+		}
+	}
+	watch(lane, 1)
+	if !d.yield.active || d.move != moveNone {
+		t.Fatalf("setup: active %v, move %d", d.yield.active, d.move)
+	}
+	watch(scene, 4)
+	if d.move == moveNone {
+		t.Errorf("stood at a cone with an ambulance behind and not moving over (state %v, %s)", d.State, d.Reason)
+	}
+	if d.shiftWant <= 0 && d.move != moveSignal {
+		t.Errorf("moving the wrong way: want %.1f", d.shiftWant)
+	}
+}
+
+// A car stopped behind a vehicle, not a cone, still stays put for an ambulance:
+// the lane alongside is no better a place to be at a crawl.
+func TestStoppedBehindACarItStaysPutForAnAmbulance(t *testing.T) {
+	d := driver()
+	d.SeenLimit = 13.4
+	scene := append(twoLanes(d.cam), at(d.cam, vision.ClassVehicle, 14, 0, 1, 12))
+	for range 20 {
+		d.Watch(vision.MirrorRear, []vision.Detection{rearBox(d, vision.ClassAmbulance, -8, 0)})
+		run(d, scene, 0, 0.2)
+	}
+	if !d.yield.active || d.move != moveNone {
+		t.Errorf("active %v, move %d: want giving way and staying put behind a car", d.yield.active, d.move)
+	}
+}

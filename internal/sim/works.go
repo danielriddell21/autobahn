@@ -66,6 +66,11 @@ const (
 	barrierStubHalf float32 = 1.2
 )
 
+// SyncWorks brings the roadworks, and the evening events that shut streets, to
+// the world's clock. Update does it every step; a world whose clock is set from
+// outside, as a joiner's is from the host's, calls it after setting Time.
+func (w *World) SyncWorks() { w.syncWorks() }
+
 // syncWorks brings the roadworks to the clock: what is closed, what is solid,
 // and the stopped stand-ins at the start of each stretch of cones and at each
 // barrier.
@@ -73,6 +78,17 @@ func (w *World) syncWorks() {
 	if w.Works == nil {
 		return
 	}
+	// Only the ground the cars are on is looked at, so a frame costs the same
+	// however much of the town has been driven through since. Before the player
+	// is placed there is no ground yet, and all of it is looked at.
+	w.focus = w.focus[:0]
+	if w.Player != nil {
+		w.focus = append(w.focus, w.Player.Pos)
+	}
+	if w.partner != nil {
+		w.focus = append(w.focus, w.partner.V.Pos)
+	}
+	w.Works.Focus(GrowRadius, w.focus...)
 	w.Works.Update(w.Time)
 	w.solid = w.Works.Solid(w.solid[:0])
 	if w.Night != nil {
@@ -80,6 +96,11 @@ func (w *World) syncWorks() {
 	}
 	w.stubs = w.stubs[:0]
 	for _, cl := range w.Works.Active() {
+		// Nothing is in the road until the closure is solid, and nobody queues
+		// behind what the camera cannot see either.
+		if cl.Phase != works.PhaseSolid {
+			continue
+		}
 		if len(cl.Cones) > 0 {
 			w.stubs = append(w.stubs, w.stub(len(w.stubs), cl.Cones[0], coneStubHalf))
 		}

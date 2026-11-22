@@ -7,3 +7,6 @@
 /*.png
 /*.gif
 /*.mp4
+
+# Windows builds of the tools, wherever they land at the root.
+/*.exe

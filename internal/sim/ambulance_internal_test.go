@@ -221,3 +221,119 @@ func TestAVehicleHeldAtARedIsNotObstructing(t *testing.T) {
 		t.Fatalf("%d faults for a car sitting at a green light in the way, want 1", n)
 	}
 }
+
+// A player who is stopped because something is stopped in front of them cannot
+// make way, and is not blamed for it.
+func TestObstructingIsExcusedWhenQueuedBehindSomethingStopped(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		build func(w *World)
+		want  bool
+	}{
+		{"nothing in front", func(*World) {}, true},
+		{"a stopped car just ahead", func(w *World) {
+			p := w.Player
+			car := NewVehicle(CarSpec(), p.Pos.Add(p.Forward().Mul(5)), p.Yaw)
+			w.Agents = append(w.Agents, &Agent{V: car})
+		}, false},
+		{"a cone just ahead", func(w *World) {
+			p := w.Player
+			w.stubs = append(w.stubs, w.stub(0, mathx.OBB{Center: p.Pos.Add(p.Forward().Mul(4)), Heading: p.Yaw}, coneStubHalf))
+		}, false},
+		{"a car ahead that is moving", func(w *World) {
+			p := w.Player
+			car := NewVehicle(CarSpec(), p.Pos.Add(p.Forward().Mul(5)), p.Yaw)
+			car.Vel = p.Forward().Mul(8)
+			w.Agents = append(w.Agents, &Agent{V: car})
+		}, true},
+		{"a stopped car in the next lane", func(w *World) {
+			p := w.Player
+			car := NewVehicle(CarSpec(), p.Pos.Add(p.Forward().Mul(5)).Add(p.Forward().Right().Mul(3.5)), p.Yaw)
+			w.Agents = append(w.Agents, &Agent{V: car})
+		}, true},
+		{"a stopped car a long way ahead", func(w *World) {
+			p := w.Player
+			car := NewVehicle(CarSpec(), p.Pos.Add(p.Forward().Mul(20)), p.Yaw)
+			w.Agents = append(w.Agents, &Agent{V: car})
+		}, true},
+	} {
+		w := inLine(t, 12, 0, 0, 0, true)
+		tc.build(w)
+		if got := w.obstructing(); got != tc.want {
+			t.Errorf("%s: obstructing %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// faultsFor runs a judge for six seconds of blocking and counts the faults.
+func faultsFor(w *World, j *Judge) int {
+	n := 0
+	j.Events.Subscribe(judgeWatcher(func(Infraction) { n++ }))
+	for i := range 60 * 6 {
+		j.Obstruct(w.Player, true, float32(i)/60, 1.0/60)
+	}
+	return n
+}
+
+func TestAVehicleThatCannotMoveIsNotObstructing(t *testing.T) {
+	w := NewWorld(Config{Seed: 5})
+
+	// Control: a judge with nothing holding the vehicle faults it.
+	if n := faultsFor(w, NewJudge(w.City)); n != 1 {
+		t.Fatalf("%d faults for a free vehicle in the way, want 1", n)
+	}
+
+	t.Run("inside a junction box", func(t *testing.T) {
+		j := NewJudge(w.City)
+		j.inBox = true
+		if n := faultsFor(w, j); n != 0 {
+			t.Errorf("%d faults inside a junction", n)
+		}
+	})
+
+	for _, k := range []city.ControlKind{city.ControlStop, city.ControlGiveWay} {
+		var line *city.Lane
+		for _, l := range w.City.Lanes {
+			if l.Control == k && l.Length > 20 {
+				line = l
+				break
+			}
+		}
+		if line == nil {
+			continue
+		}
+		t.Run("at a line", func(t *testing.T) {
+			pos := line.B.Sub(line.Fwd.Mul(3))
+			w.Player.Place(pos, line.Heading)
+			j := NewJudge(w.City)
+			j.lane = line
+			if n := faultsFor(w, j); n != 0 {
+				t.Errorf("%d faults for a vehicle held at a line of control %v", n, k)
+			}
+			// Well back from the line it is a free vehicle again.
+			w.Player.Place(line.Point(line.Length/2), line.Heading)
+			j = NewJudge(w.City)
+			j.lane = line
+			if n := faultsFor(w, j); n != 1 {
+				t.Errorf("%d faults for a vehicle mid-road on a signed lane, want 1", n)
+			}
+		})
+	}
+
+	t.Run("at a roundabout's entry", func(t *testing.T) {
+		for _, l := range w.City.Lanes {
+			n := w.City.Nodes[l.ToNode]
+			if !n.Roundabout || l.Length < 30 {
+				continue
+			}
+			w.Player.Place(l.B.Sub(l.Fwd.Mul(4)), l.Heading)
+			j := NewJudge(w.City)
+			j.lane = l
+			if got := faultsFor(w, j); got != 0 {
+				t.Errorf("%d faults for a vehicle waiting to enter a roundabout", got)
+			}
+			return
+		}
+		t.Skip("no roundabout in this city")
+	})
+}

@@ -7,6 +7,8 @@ import (
 	crucihud "github.com/danielriddell21/crucible/hud"
 	"github.com/danielriddell21/crucible/netplay"
 
+	"github.com/danielriddell21/autobahn/internal/city"
+	"github.com/danielriddell21/autobahn/internal/pack"
 	"github.com/danielriddell21/autobahn/internal/sim"
 )
 
@@ -256,5 +258,53 @@ func TestBothPlayersBankATeamPursuitUnlessAnAutopilotHelped(t *testing.T) {
 	}
 	if got := chase(true); got != 0 {
 		t.Errorf("a team pursuit the other player's autopilot helped with banked %d, want 0", got)
+	}
+}
+
+// A joiner in a shared car drives the host's car in the host's paint, so what
+// the joiner owns says nothing about whether they can join. The place's pack
+// still does.
+func TestAJoinerNeedNotOwnTheHostsSharedCar(t *testing.T) {
+	hs, js := connect(t)
+	career := migrate(Career{}, DefaultSettings())
+	o := DefaultOptions()
+	o.Play, o.Car, o.Paint, o.Map = ModeCoopCar, sim.Van, 3, city.MapCity
+
+	join := &Shell{settings: DefaultSettings(), career: career, net: js}
+	if err := join.lockedFor(o); err != nil {
+		t.Errorf("a joiner without the host's car was refused: %v", err)
+	}
+	host := &Shell{settings: DefaultSettings(), career: career, net: hs}
+	if err := host.lockedFor(o); err == nil {
+		t.Error("a host was allowed to drive a car it does not own")
+	}
+
+	o.Map = city.MapMotorway
+	if pack.ForMap(o.Map).ID == pack.Base {
+		t.Skip("the motorway is in the base game")
+	}
+	if err := join.lockedFor(o); err == nil {
+		t.Error("a joiner was allowed onto a map whose pack they do not hold")
+	}
+}
+
+// The team banks what it earns, but a co-op drive is nobody's achievement.
+func TestCoopDrivesAreNotFedToAchievements(t *testing.T) {
+	hs, _ := connect(t)
+	for _, mode := range []NetMode{ModeCoopCars, ModeCoopCar} {
+		g := coopGame(t, mode, hs)
+		if !g.Coop() {
+			t.Fatalf("%v is not co-op", mode)
+		}
+		if g.helped() {
+			t.Errorf("%v: a clean co-op drive does not bank its bounty", mode)
+		}
+		if !g.featCounters().Helped {
+			t.Errorf("%v: a co-op drive is fed to the achievements", mode)
+		}
+	}
+	solo := bareGame(Options{})
+	if solo.featCounters().Helped {
+		t.Error("a solo drive is not fed to the achievements")
 	}
 }

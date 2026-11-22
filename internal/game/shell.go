@@ -95,17 +95,23 @@ type Shell struct {
 // settings.
 func NewShell(opts Options) *Shell {
 	set := LoadSettings()
+	career, migrated := readCareer(set)
 	s := &Shell{
 		opts:     opts,
 		settings: set,
-		career:   loadCareerFor(set),
+		career:   career,
 		net:      &netplay.Session[Snapshot, Input]{},
 		joinAddr: "127.0.0.1",
 		hostMode: set.HostMode,
 	}
-	// A migrated file is written back once. Under bypass nothing about
-	// ownership is ever written, so the file is left as it was found.
-	if !s.access().Bypass {
+	// A migrated file is written back once, and nothing else is: a file that
+	// was already current is left alone, and one that could not be read is never
+	// replaced. Under bypass nothing about ownership is ever written, so the
+	// file is left as it was found.
+	switch {
+	case career.keep:
+		s.notice = "the career file could not be read: playing without saving it"
+	case migrated && !s.access().Bypass:
 		if err := s.career.Save(); err != nil {
 			s.notice = err.Error()
 		}
@@ -650,6 +656,9 @@ func (s *Shell) startGame(autopilot bool) {
 		o.Challenge = s.challenge
 	}
 	o.Autopilot = autopilot && !o.Play.SharedCar()
+	// Known here and not in New, which builds the game before the session is
+	// attached to it.
+	o.Networked = s.net.Online()
 	if err := o.coopValid(); err != nil {
 		s.net.Leave()
 		s.game = nil
@@ -658,7 +667,7 @@ func (s *Shell) startGame(autopilot bool) {
 		return
 	}
 	o.Access = s.access()
-	if err := o.lockedFor(s.holdings()); err != nil {
+	if err := s.lockedFor(o); err != nil {
 		// Only a command line can ask for what the player does not hold or
 		// own; the menus never offer it.
 		s.net.Leave()
@@ -683,6 +692,16 @@ func (s *Shell) startGame(autopilot bool) {
 	}
 	rl.SetMasterVolume(masterVolume(s.settings))
 	s.screen = screenPlaying
+}
+
+// lockedFor is why the session cannot be started with what the player holds, or
+// nil. A joiner in a shared car drives the host's car and wears the host's
+// paint, which are the host's to own: it needs only the place's pack.
+func (s *Shell) lockedFor(o Options) error {
+	if s.net.Role() == netplay.Joining && o.Play.SharedCar() {
+		return o.lockedMap(s.access())
+	}
+	return o.lockedFor(s.holdings())
 }
 
 // protoErr is why a joiner cannot play against the host it has reached, or nil.

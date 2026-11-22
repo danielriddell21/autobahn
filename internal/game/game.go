@@ -105,6 +105,9 @@ type Options struct {
 	// another person, listening on the given address. Join connects to one.
 	Host string
 	Join string
+	// Networked says the game has another player in it, however the session was
+	// started: the command line sets Host or Join, and the lobby sets this.
+	Networked bool
 	// Play is what the two players of a hosted game are doing: a chase, or one
 	// of the co-op games. A joiner takes it from the host, so only the host's
 	// is read. It means nothing without a host.

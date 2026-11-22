@@ -96,8 +96,14 @@ func (c callout) Name() string { return c.name }
 func (callout) Rules() job.Rules { return job.Rules{CostPerPoint: 10} }
 
 // Settle ends or extends the streak: a passed call-out adds to it, and any
-// other ending, a time-out or a police stop included, ends it.
-func (callout) Settle(r job.Result) { Run.settle(r.Status == job.Passed) }
+// other ending, a time-out or a police stop included, ends it. A call-out the
+// autopilot had a hand in counts for nothing either way, as a fare does.
+func (callout) Settle(r job.Result) {
+	if r.Assisted {
+		return
+	}
+	Run.settle(r.Status == job.Passed)
+}
 
 // Reward is the base pay, more the longer the call allowed, and more again for
 // every call in a row before it.

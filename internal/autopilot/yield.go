@@ -48,7 +48,8 @@ type yieldState struct {
 }
 
 // noPass reports whether the car must not start passing or changing lane for
-// its own sake: while giving way, and with an ambulance in front.
+// its own sake: while giving way, and with an ambulance in front. Cones are the
+// exception, which the car has to get round whoever is watching (see manoeuvre).
 func (d *Driver) noPass() bool { return d.yield.active || d.yield.ahead }
 
 // watchEmergency reads the mirrors and the camera for ambulances, and keeps the

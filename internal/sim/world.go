@@ -53,8 +53,9 @@ type Config struct {
 	// Works is how much of the town is dug up. The zero value is the normal
 	// amount, so roadworks are part of the world unless somebody turns them off.
 	Works works.Level
-	// Weather is how the sky is chosen. The zero value drifts through the spells
-	// the seed gives it; hold it at weather.Clear for the dry runs the gate scores.
+	// Weather is how the sky is chosen. The zero value is held clear, which is
+	// the dry world a test or the gate scores; ask for weather.Drift to let it
+	// move through the spells the seed gives it.
 	Weather weather.Setting
 
 	// The rest are for a custom map, and every one left at its zero value is
@@ -113,6 +114,8 @@ type World struct {
 	solid    []mathx.OBB
 	stubs    []*Vehicle
 	stubPool []*Vehicle
+	// focus is where the roadworks are looked at: the player, and a partner.
+	focus []mathx.Vec
 	// shows are the show cars of the street meets in force.
 	shows []mathx.OBB
 

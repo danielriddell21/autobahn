@@ -327,7 +327,7 @@ func (d *Driver) manoeuvre(dets []vision.Detection, raw []lanePoint, cruise, spe
 		return d.carryOnPassing(dets, raw, cruise, pf)
 	}
 
-	if len(raw) == 0 || pf.overtake <= 0 || d.tooSlowToMove(speed) || !d.straightAhead(raw) || d.noPass() {
+	if len(raw) == 0 || pf.overtake <= 0 || d.tooSlowToMove(speed) || !d.straightAhead(raw) || (d.noPass() && !d.coned) {
 		return cruise
 	}
 	d.chooseLane(dets, raw, sides, held, cruise, dt, pf)

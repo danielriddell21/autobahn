@@ -42,8 +42,13 @@ func nightContent() packContent {
 // the pack, and the game is one they can be fair in.
 func (g *Game) nightEvents() bool {
 	o := g.opts
-	return g.access().Has(pack.Night) && o.Challenge == nil && o.Host == "" && o.Join == ""
+	return g.access().Has(pack.Night) && o.Challenge == nil && !o.networked()
 }
+
+// networked reports whether the game has another player in it: started with
+// -host or -join, or from the lobby, which is not known from Host and Join.
+// It cannot ask the session, which is attached after the game is built.
+func (o Options) networked() bool { return o.Networked || o.Host != "" || o.Join != "" }
 
 // launchEvery is how often a fair lets a firework off, in seconds.
 const launchEvery = float32(burstEvery) / burstCount

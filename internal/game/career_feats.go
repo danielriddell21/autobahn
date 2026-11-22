@@ -93,7 +93,9 @@ func featPack(m city.Map) int { return int(pack.ForMap(m).ID) }
 
 // featCounters reads the totals the achievements are fed off the game's world.
 // Anything but the player driving, in a game that counts, marks the stretch
-// helped, as it does for the bounty.
+// helped, as it does for the bounty. Co-op is the exception: the team banks its
+// bounty, but a drive with another player at the wheel is not counted toward
+// the achievements.
 func (g *Game) featCounters() featCounters {
 	w := g.world
 	return featCounters{
@@ -102,6 +104,6 @@ func (g *Game) featCounters() featCounters {
 		Escapes: w.Wanted.Escapes, Roadblocks: w.Wanted.Roadblocks, Level: w.Wanted.Level,
 		Map: int(g.opts.Map), Car: int(g.opts.Car), Season: int(g.season()),
 		Cond: int(w.Weather().Cond), Pack: featPack(g.opts.Map),
-		Helped: g.helped() || g.career.assisted, Custom: g.opts.Custom != nil,
+		Helped: g.helped() || g.Coop() || g.career.assisted, Custom: g.opts.Custom != nil,
 	}
 }

@@ -188,3 +188,68 @@ func TestTrafficQueuesBehindTheFirstCone(t *testing.T) {
 	}
 	t.Skip("no coned lane long enough at this moment")
 }
+
+// A frame's roadworks are the ground round the cars: driving on, with the town
+// left behind growing without end, must not make the set any bigger. This is
+// what the stubs, the solids and every agent's scan of them cost.
+func TestRoadworksInViewDoNotGrowWithTheDrive(t *testing.T) {
+	w := NewWorld(Config{Seed: 3, Map: city.MapMotorway, Traffic: 10, Works: works.Dense})
+	var early, late int
+	for i := range 30 {
+		w.Player.Place(mathx.V(float32(i)*450, 0), 0)
+		w.Time = 1000 // the same moment everywhere, so only the place differs
+		w.Update(Controls{}, 1.0/60)
+		n := len(w.stubs) + len(w.solid)
+		if i >= 3 && i < 9 {
+			early = max(early, n)
+		}
+		if i >= 24 {
+			late = max(late, n)
+		}
+	}
+	if early == 0 {
+		t.Fatal("no roadworks in view early in the drive: the test is not holding anything")
+	}
+	if late > 3*early+10 {
+		t.Errorf("%d stubs and solids in view after a long drive against at most %d early on", late, early)
+	}
+
+	// The same town with every closure looked at, which is what a frame cost.
+	w.Works.Focus(0)
+	w.Works.Update(w.Time)
+	if all := len(w.Works.Solid(nil)); all < 3*late {
+		t.Errorf("%d solid in the whole town against %d in view: nothing was cut", all, late)
+	}
+}
+
+// Nothing is in the road until a closure is solid, and traffic does not queue
+// behind what is not there.
+func TestNoStubsBeforeAClosureIsSolid(t *testing.T) {
+	w := solidWorld(t, city.MapMotorway, 5, 0)
+	// Find a moment with a signed closure and no solid one near the player.
+	signed := false
+	for at := float32(0); at < 20000 && !signed; at += 7 {
+		w.Time = at
+		w.syncWorks()
+		solid := 0
+		for _, cl := range w.Works.Active() {
+			switch cl.Phase {
+			case works.PhaseSolid:
+				solid += len(cl.Barriers)
+				if len(cl.Cones) > 0 {
+					solid++
+				}
+			case works.PhaseSigned:
+				signed = true
+			}
+		}
+		if signed {
+			if len(w.stubs) != solid {
+				t.Fatalf("t=%.0f: %d stubs for %d solid closure parts: a signed closure has stubs", at, len(w.stubs), solid)
+			}
+		}
+	}
+	if !signed {
+		t.Skip("no closure was in its signed phase at any moment tried")
+	}
+}

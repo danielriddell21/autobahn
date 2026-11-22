@@ -17,6 +17,7 @@ package works
 import (
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 
 	"github.com/danielriddell21/autobahn/internal/city"
@@ -189,6 +190,12 @@ type Closure struct {
 	// whatever the phase: until Solid they are not there.
 	Cones, Barriers []mathx.OBB
 	Signs           []Sign
+	// Centre and Reach are a circle holding everything the closure puts in the
+	// world: its cones, barriers, signs and the ends of its lanes. It is what lets
+	// an index look only at the closures near somebody. A Reach of zero is a
+	// closure that does not say, and is never left out.
+	Centre mathx.Vec
+	Reach  float32
 }
 
 // Barred reports whether traffic is told not to enter lane id, which is so from
@@ -213,6 +220,16 @@ type Source interface {
 	Closures(t float32, dst []Closure) []Closure
 }
 
+// NearSource is a source that can find the closures near somebody without
+// looking at all the rest, which is what keeps an index's cost to the ground
+// around the cars however much of the town has been driven through.
+type NearSource interface {
+	Source
+	// Near is Closures for those within r metres of any of the points, in the
+	// order Closures gives them.
+	Near(t float32, r float32, at []mathx.Vec, dst []Closure) []Closure
+}
+
 // Index is everything closed now. It is brought up to the time every step, and
 // as the city grows it picks up the new streets without looking at the old.
 type Index struct {
@@ -222,6 +239,11 @@ type Index struct {
 	// rather than by every driver asking.
 	barred map[int]bool
 	now    float32
+
+	// focus and radius, once set, limit what an update looks at: only closures
+	// within radius of one of the points.
+	focus  []mathx.Vec
+	radius float32
 }
 
 // NewIndex returns the index of a city's roadworks, at the level asked for. A
@@ -239,6 +261,20 @@ func NewIndex(c *city.City, seed uint64, level Level, extra ...Source) *Index {
 // Add puts another source of closures on the index.
 func (ix *Index) Add(s Source) { ix.sources = append(ix.sources, s) }
 
+// Focus limits what the next updates look at to the closures within radius
+// metres of the given points: the ground the cars are on. Everything inside it
+// is as it would be without, and nothing outside it is anybody's business, so
+// an index costs the same on the thousandth street as on the first. With no
+// points, or a radius of nothing, it looks at everything.
+func (ix *Index) Focus(radius float32, at ...mathx.Vec) {
+	if ix == nil {
+		return
+	}
+	ix.focus, ix.radius = append(ix.focus[:0], at...), radius
+}
+
+func (ix *Index) focused() bool { return ix.radius > 0 && len(ix.focus) > 0 }
+
 // Update brings the index to time t.
 func (ix *Index) Update(t float32) {
 	if ix == nil {
@@ -247,7 +283,23 @@ func (ix *Index) Update(t float32) {
 	ix.now = t
 	ix.active = ix.active[:0]
 	for _, s := range ix.sources {
+		if !ix.focused() {
+			ix.active = s.Closures(t, ix.active)
+			continue
+		}
+		if n, ok := s.(NearSource); ok {
+			ix.active = n.Near(t, ix.radius, ix.focus, ix.active)
+			continue
+		}
+		from := len(ix.active)
 		ix.active = s.Closures(t, ix.active)
+		kept := ix.active[:from]
+		for _, c := range ix.active[from:] {
+			if ix.near(c) {
+				kept = append(kept, c)
+			}
+		}
+		ix.active = kept
 	}
 	clear(ix.barred)
 	for i := range ix.active {
@@ -257,6 +309,20 @@ func (ix *Index) Update(t float32) {
 			}
 		}
 	}
+}
+
+// near reports whether any part of a closure may be within the focus. One that
+// does not say where it is always may.
+func (ix *Index) near(c Closure) bool {
+	if c.Reach <= 0 {
+		return true
+	}
+	for _, p := range ix.focus {
+		if p.DistTo(c.Centre) <= ix.radius+c.Reach {
+			return true
+		}
+	}
+	return false
 }
 
 // Active returns the closures in force, in any phase but clear. The slice is
@@ -320,19 +386,33 @@ type Scheduled struct {
 	seen    int
 	pending []int
 	sites   []*site
+
+	// grid files the sites by the cell their closure is centred in, so a query
+	// near somebody looks at the sites around them and not at every one found.
+	// maxReach is the widest closure in it, which says how far out to look.
+	grid     map[[2]int][]*site
+	maxReach float32
+	stamp    uint64
+	hits     []*site
 }
+
+// siteCell is the side of a square of the grid, in metres.
+const siteCell = 256
 
 // site is a street that can be dug up, with its geometry fixed once and for all.
 type site struct {
 	edge    Edge
 	offset  float32
 	closure Closure
+	// seq is the order the site was found in, and mark the query that last took it.
+	seq  int
+	mark uint64
 }
 
 // NewScheduled returns the timetable for a city, closing the given share of its
 // closable streets at any moment.
 func NewScheduled(c *city.City, seed uint64, share float32) *Scheduled {
-	return &Scheduled{c: c, seed: seed, share: share}
+	return &Scheduled{c: c, seed: seed, share: share, grid: map[[2]int][]*site{}}
 }
 
 // Sites returns how many streets are known to be closable so far.
@@ -390,17 +470,61 @@ func PhaseAt(start, end, t float32) Phase {
 func (s *Scheduled) Closures(t float32, dst []Closure) []Closure {
 	s.sync()
 	for _, st := range s.sites {
-		start, end, on := Window(s.seed, st.edge, s.share, t)
-		if !on {
-			continue
-		}
-		cl := st.closure
-		cl.Start, cl.Solid, cl.End = start, start+SolidAfter, end
-		if cl.Phase = PhaseAt(start, end, t); cl.Phase != PhaseClear {
-			dst = append(dst, cl)
-		}
+		dst = s.appendAt(st, t, dst)
 	}
 	return dst
+}
+
+// appendAt adds a site's closure to dst if it is in force at time t.
+func (s *Scheduled) appendAt(st *site, t float32, dst []Closure) []Closure {
+	start, end, on := Window(s.seed, st.edge, s.share, t)
+	if !on {
+		return dst
+	}
+	cl := st.closure
+	cl.Start, cl.Solid, cl.End = start, start+SolidAfter, end
+	if cl.Phase = PhaseAt(start, end, t); cl.Phase != PhaseClear {
+		dst = append(dst, cl)
+	}
+	return dst
+}
+
+// Near implements NearSource. Only the sites whose closures reach to within r of
+// one of the points are looked at, so the cost is that of the ground around
+// them, and what it finds is what Closures finds there, in the same order.
+func (s *Scheduled) Near(t float32, r float32, at []mathx.Vec, dst []Closure) []Closure {
+	s.sync()
+	s.stamp++
+	s.hits = s.hits[:0]
+	reach := r + s.maxReach
+	cell := func(v float32) int { return int(math.Floor(float64(v / siteCell))) }
+	for _, p := range at {
+		for gx := cell(p.X - reach); gx <= cell(p.X+reach); gx++ {
+			for gz := cell(p.Z - reach); gz <= cell(p.Z+reach); gz++ {
+				for _, st := range s.grid[[2]int{gx, gz}] {
+					if st.mark != s.stamp && p.DistTo(st.closure.Centre) <= r+st.closure.Reach {
+						st.mark = s.stamp
+						s.hits = append(s.hits, st)
+					}
+				}
+			}
+		}
+	}
+	slices.SortFunc(s.hits, func(a, b *site) int { return a.seq - b.seq })
+	for _, st := range s.hits {
+		dst = s.appendAt(st, t, dst)
+	}
+	return dst
+}
+
+// file puts a site on the list and in the grid.
+func (s *Scheduled) file(st *site) {
+	st.seq = len(s.sites)
+	s.sites = append(s.sites, st)
+	cl := &st.closure
+	key := [2]int{int(math.Floor(float64(cl.Centre.X / siteCell))), int(math.Floor(float64(cl.Centre.Z / siteCell)))}
+	s.grid[key] = append(s.grid[key], st)
+	s.maxReach = max(s.maxReach, cl.Reach)
 }
 
 // sync looks at the roads built since it last ran, and at the candidates still
@@ -423,7 +547,7 @@ func (s *Scheduled) sync() {
 			continue
 		}
 		if st, ok := s.build(r); ok {
-			s.sites = append(s.sites, st)
+			s.file(st)
 		}
 	}
 	s.pending = kept
@@ -445,10 +569,51 @@ func (s *Scheduled) build(r *city.Road) (*site, bool) {
 		},
 	}
 	cl := &st.closure
+	ok := false
 	if r.Class == city.Arterial {
-		return st, s.cone(r, cl)
+		ok = s.cone(r, cl)
+	} else {
+		ok = s.shut(r, cl)
 	}
-	return st, s.shut(r, cl)
+	if ok {
+		s.bound(cl)
+	}
+	return st, ok
+}
+
+// boundMargin is room left round a closure's circle for the size of what stands
+// at its edge.
+const boundMargin float32 = 4
+
+// bound works out the circle round everything a closure puts in the world: the
+// middle of the box of its parts, and as far out as the furthest.
+func (s *Scheduled) bound(cl *Closure) {
+	pts := make([]mathx.Vec, 0, len(cl.Cones)+len(cl.Barriers)+len(cl.Signs)+2*len(cl.Lanes))
+	for _, c := range cl.Cones {
+		pts = append(pts, c.Center)
+	}
+	for _, b := range cl.Barriers {
+		pts = append(pts, b.Center)
+	}
+	for _, sg := range cl.Signs {
+		pts = append(pts, sg.Pos)
+	}
+	for _, id := range cl.Lanes {
+		l := s.c.Lanes[id]
+		pts = append(pts, l.Point(0), l.Point(l.Length))
+	}
+	if len(pts) == 0 {
+		return
+	}
+	lo, hi := pts[0], pts[0]
+	for _, p := range pts {
+		lo, hi = mathx.V(min(lo.X, p.X), min(lo.Z, p.Z)), mathx.V(max(hi.X, p.X), max(hi.Z, p.Z))
+	}
+	cl.Centre = mathx.V((lo.X+hi.X)/2, (lo.Z+hi.Z)/2)
+	for _, p := range pts {
+		cl.Reach = max(cl.Reach, p.DistTo(cl.Centre))
+	}
+	cl.Reach += boundMargin
 }
 
 // shut closes a street to anyone entering it: a barrier across the start of

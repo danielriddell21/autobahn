@@ -163,18 +163,76 @@ func (w *World) obstructing() bool {
 		// gained on: an ambulance coming up fast is about to be past.
 		slow := p.ForwardSpeed() < runSpeed*0.9
 		if slow && (p.ForwardSpeed() < haltSpeed || u.V.ForwardSpeed() <= p.ForwardSpeed()+1) {
+			return !w.queued(p)
+		}
+	}
+	return false
+}
+
+// queueGap is how close behind a stopped thing, bumper to bumper in metres, a
+// vehicle is in a queue it cannot leave.
+const queueGap float32 = 6
+
+// queued reports whether a vehicle has a stopped vehicle, cone or barrier
+// directly in front of it: it cannot make way for anybody, only wait.
+func (w *World) queued(p *Vehicle) bool {
+	fwd := p.Forward()
+	behind := func(o *Vehicle) bool {
+		rel := o.Pos.Sub(p.Pos)
+		ahead := rel.Dot(fwd)
+		if ahead <= 0 || o.Speed() >= haltSpeed {
+			return false
+		}
+		gap := ahead - p.Spec.HalfLength - o.Spec.HalfLength
+		return gap < queueGap && mathx.Abs(rel.Cross(fwd)) < p.Spec.HalfWidth+o.Spec.HalfWidth+0.3
+	}
+	for _, a := range w.Agents {
+		if behind(a.V) {
+			return true
+		}
+	}
+	for _, s := range w.stubs {
+		if behind(s) {
 			return true
 		}
 	}
 	return false
 }
 
+// heldByTheRoad reports whether the judged vehicle is somewhere it cannot
+// simply move away from: held at a signal that is not green, standing at a stop
+// or give-way line, inside a junction or at a roundabout's entry.
+func (j *Judge) heldByTheRoad(v *Vehicle) bool {
+	if j.hasSignal && j.signal != SignalGreen {
+		return true
+	}
+	if j.inBox || onRoundabout(j.city, v.Pos) {
+		return true
+	}
+	l := j.lane
+	if l == nil {
+		return false
+	}
+	if l.Control == city.ControlStop || l.Control == city.ControlGiveWay {
+		beyond := v.Pos.Sub(l.B).Dot(l.Fwd)
+		return beyond > -lineHold && beyond < 2
+	}
+	// A roundabout's approach carries no control of its own: it is the island
+	// that is the junction.
+	n := j.city.Nodes[l.ToNode]
+	return n.Roundabout && v.Pos.DistTo(n.Pos) < n.RingOuter()+lineHold
+}
+
+// lineHold is how far short of a stop line, or of a roundabout, a vehicle is
+// held by it, in metres.
+const lineHold float32 = 8
+
 // Obstruct is told each step whether the judged vehicle is in the way of an
 // ambulance, and records the fault once it has been for long enough. A vehicle
-// stopped at a signal that is not green is excused: it cannot make way.
+// that cannot make way is excused: see [Judge.heldByTheRoad], and
+// [World.obstructing] for one queued behind something stopped.
 func (j *Judge) Obstruct(v *Vehicle, blocking bool, now, dt float32) {
-	// Held at a signal that is not green is held by the law, not by choice.
-	if held := j.hasSignal && j.signal != SignalGreen; !blocking || held {
+	if !blocking || j.heldByTheRoad(v) {
 		j.obstructTimer = 0
 		return
 	}

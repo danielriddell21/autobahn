@@ -115,7 +115,7 @@ var all = []Feat{
 	{ID: "all-seasons", Group: Collection, Name: "all seasons", Note: "drive in every season", Paint: NoPaint},
 	{ID: "all-weather", Group: Collection, Name: "come rain or shine", Note: "drive in every kind of weather", Paint: NoPaint},
 	{ID: "all-cars", Group: Collection, Name: "the full garage", Note: "drive every car", Paint: NoPaint},
-	{ID: "all-packs", Group: Collection, Name: "all the packs", Note: "drive in every pack", Paint: NoPaint},
+	{ID: "all-packs", Group: Collection, Name: "all the packs", Note: "drive on a map from every pack", Paint: NoPaint},
 	{ID: "all-maps", Group: Collection, Name: "grand tour", Note: "drive every place", Hidden: true, Paint: RacingGreen},
 }
 
@@ -155,7 +155,7 @@ type Fact struct {
 	WantedPeak int
 
 	// Map and Car are city.Map and sim.BodyKind as ints, Season a city.Season
-	// and Weather a weather.Cond. Pack is the pack the map belongs to.
+	// and Weather a weather.Cond. Pack is the pack the map belongs to; only a pack that owns a map can be set.
 	Map, Car, Season, Weather int
 	Pack                      int
 
@@ -215,7 +215,20 @@ func carMask() uint32 {
 func mapMask() uint32     { return full(len(city.Maps())) }
 func seasonMask() uint32  { return full(len(city.Seasons())) }
 func weatherMask() uint32 { return full(len(weather.Conds())) }
-func packMask() uint32    { return full(len(pack.All())) }
+func packMask() uint32    { return mapPacks() }
+
+// mapPacks is the set of packs that own a map. A drive is in a pack by the map
+// it is on, which is all a Fact says of it, so the packs that add only cars or
+// events cannot be driven in and are not part of the collection.
+func mapPacks() uint32 {
+	var m uint32
+	for _, p := range pack.All() {
+		if len(p.Maps) > 0 {
+			m |= bit(int(p.ID))
+		}
+	}
+	return m
+}
 
 // Sanitise brings a stored Feats back into range: no unknown or duplicate
 // ids, nothing negative, no bits for things that do not exist. It never

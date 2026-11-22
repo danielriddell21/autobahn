@@ -77,6 +77,16 @@ func collect(n int, set func(*Fact, int)) []Fact {
 	return out
 }
 
+// mapPackIDs are the packs a drive can be in: those that own a map.
+var mapPackIDs = func() (ids []int) {
+	for _, p := range pack.All() {
+		if len(p.Maps) > 0 {
+			ids = append(ids, int(p.ID))
+		}
+	}
+	return
+}()
+
 func TestCollections(t *testing.T) {
 	cars := sim.PlayerBodies()
 	tests := []struct {
@@ -86,7 +96,7 @@ func TestCollections(t *testing.T) {
 		{"all-maps", collect(len(city.Maps()), func(x *Fact, i int) { x.Map = i })},
 		{"all-seasons", collect(len(city.Seasons()), func(x *Fact, i int) { x.Season = i })},
 		{"all-weather", collect(len(weather.Conds()), func(x *Fact, i int) { x.Weather = i })},
-		{"all-packs", collect(len(pack.All()), func(x *Fact, i int) { x.Pack = i })},
+		{"all-packs", collect(len(mapPackIDs), func(x *Fact, i int) { x.Pack = mapPackIDs[i] })},
 		{"all-cars", collect(len(cars), func(x *Fact, i int) { x.Car = int(cars[i]) })},
 	}
 	for _, tt := range tests {
@@ -233,4 +243,20 @@ func mustJSON(t *testing.T, v any) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+// A drive is in a pack by its map, so driving every map must be enough to earn
+// all-packs: nothing in a Fact can name a pack that owns no map.
+func TestAllPacksIsEarnedByDrivingEveryMap(t *testing.T) {
+	var facts []Fact
+	for _, m := range city.Maps() {
+		facts = append(facts, Fact{Distance: 100, Map: int(m), Pack: int(pack.ForMap(m).ID)})
+	}
+	tr, _ := run(facts...)
+	if !tr.F.Has("all-packs") {
+		t.Errorf("driving every map did not earn all-packs: packs %b", tr.F.Packs)
+	}
+	if have, of := tr.F.Progress("all-packs"); have != of || of != len(mapPackIDs) {
+		t.Errorf("progress %d of %d, want %d of %d", have, of, len(mapPackIDs), len(mapPackIDs))
+	}
 }
