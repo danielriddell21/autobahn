@@ -302,9 +302,7 @@ func (s *Shell) showTitle() {
 			{Label: text("Drive"), Action: func() { s.startGame(false) }},
 			{Label: text("Autopilot"), Action: func() { s.startGame(true) }},
 			{
-				Label: func() string {
-					return fmt.Sprintf("Map: %s in %s", s.settings.Map.Name(), s.settings.Map.Season().Name())
-				},
+				Label:  func() string { return "Map: " + s.settings.Map.Name() },
 				Adjust: s.chooseMap,
 				Action: func() { s.chooseMap(1) },
 			},
