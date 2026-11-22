@@ -14,6 +14,7 @@ import (
 
 	"github.com/danielriddell21/autobahn/internal/autopilot"
 	"github.com/danielriddell21/autobahn/internal/city"
+	"github.com/danielriddell21/autobahn/internal/custom"
 	"github.com/danielriddell21/autobahn/internal/game"
 	"github.com/danielriddell21/autobahn/internal/weather"
 )
@@ -49,6 +50,8 @@ func parse(name string, args []string, out io.Writer) (opts game.Options, done b
 	fs := flag.NewFlagSet(name, flag.ExitOnError)
 	seed := fs.Uint64("seed", opts.Seed, "city generation seed")
 	mapName := fs.String("map", "city", "the place to drive: "+strings.Join(game.MapNames(), ", "))
+	customCode := fs.String("custom", "", "drive the custom map with this share code, instead of -map and -seed; nothing is banked on it")
+	play := fs.String("play", "chase", "what a hosted game is: chase, coop (two cars) or coop-car (one car, two players)")
 	unlockAll := fs.Bool("unlock-all", false, "offer every pack, car and paint without it being earned or bought")
 	traffic := fs.Int("traffic", opts.Traffic, "number of ambient traffic cars")
 	police := fs.Int("police", opts.Police, "number of patrolling police units; 0 disables them")
@@ -101,6 +104,9 @@ func parse(name string, args []string, out io.Writer) (opts game.Options, done b
 		return opts, false, fmt.Errorf("unknown map %q; try %s", *mapName, strings.Join(game.MapNames(), ", "))
 	}
 	opts.Map = m
+	if err := parseSession(&opts, *customCode, *play); err != nil {
+		return opts, false, err
+	}
 	opts.Traffic = *traffic
 	opts.Police = *police
 	opts.Width, opts.Height = *width, *height
@@ -147,6 +153,24 @@ func parse(name string, args []string, out io.Writer) (opts game.Options, done b
 	opts.DebugVision = *dbg
 
 	return opts, false, nil
+}
+
+// parseSession reads -custom and -play, which say what is driven and what a
+// hosted game is.
+func parseSession(opts *game.Options, code, play string) error {
+	if code != "" {
+		spec, err := custom.Decode(code)
+		if err != nil {
+			return fmt.Errorf("the -custom code: %w", err)
+		}
+		opts.Custom = &spec
+	}
+	mode, ok := game.ParseNetMode(play)
+	if !ok {
+		return fmt.Errorf("unknown play mode %q; try chase, coop or coop-car", play)
+	}
+	opts.Play = mode
+	return nil
 }
 
 // parseTime reads a time of day as -time names it.

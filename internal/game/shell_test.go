@@ -2,6 +2,7 @@ package game
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -124,6 +125,62 @@ func TestAFailedJoinReturnsToTheTitleWithAReason(t *testing.T) {
 	}
 	if sh.net.Online() {
 		t.Error("a failed join left a session running")
+	}
+}
+
+// hostRow finds the title screen's host row.
+func hostRow(t *testing.T, sh *Shell) (label func() string, adjust func(int)) {
+	t.Helper()
+	for _, it := range sh.menu.Items {
+		if strings.HasPrefix(it.Label(), "Host") {
+			return it.Label, it.Adjust
+		}
+	}
+	t.Fatal("the title screen has no host row")
+	return nil, nil
+}
+
+func TestTheHostRowCyclesTheModes(t *testing.T) {
+	inTempConfig(t)
+	o := DefaultOptions()
+	o.Mute = true
+	sh := NewShell(o)
+	label, adjust := hostRow(t, sh)
+
+	want := []string{"Host: Chase", "Host: Co-op: two cars", "Host: Co-op: one car", "Host: Chase"}
+	for i, w := range want {
+		if got := label(); got != w {
+			t.Fatalf("after %d steps the row reads %q, want %q", i, got, w)
+		}
+		adjust(1)
+	}
+	adjust(-1) // back to the first mode
+	adjust(-1)
+	if sh.hostMode != ModeCoopCar {
+		t.Errorf("stepping back from the first mode gave %v, want the last", sh.hostMode)
+	}
+
+	// The row survives the title being rebuilt, as it is on coming back from
+	// another screen.
+	sh.showTitle()
+	if got, _ := hostRow(t, sh); got() != "Host: Co-op: one car" {
+		t.Errorf("the title forgot the mode: %q", got())
+	}
+}
+
+func TestTheTitleStillHasEveryRowItHad(t *testing.T) {
+	inTempConfig(t)
+	o := DefaultOptions()
+	o.Mute = true
+	sh := NewShell(o)
+	seen := map[string]bool{}
+	for _, it := range sh.menu.Items {
+		seen[strings.SplitN(it.Label(), ":", 2)[0]] = true
+	}
+	for _, row := range []string{"Drive", "Autopilot", "Map", "Host", "Join a chase", "Garage", "Packs", "Settings", "Quit"} {
+		if !seen[row] {
+			t.Errorf("the title lost its %q row", row)
+		}
 	}
 }
 

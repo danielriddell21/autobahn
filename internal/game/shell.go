@@ -12,8 +12,12 @@ import (
 	"github.com/danielriddell21/crucible/netplay"
 
 	"github.com/danielriddell21/autobahn/internal/autopilot"
+	"github.com/danielriddell21/autobahn/internal/city"
+	"github.com/danielriddell21/autobahn/internal/custom"
 	"github.com/danielriddell21/autobahn/internal/job"
 	"github.com/danielriddell21/autobahn/internal/pack"
+	"github.com/danielriddell21/autobahn/internal/scenario"
+	"github.com/danielriddell21/autobahn/internal/sim"
 	"github.com/danielriddell21/autobahn/internal/weather"
 )
 
@@ -41,6 +45,10 @@ const (
 	screenPacks
 	// screenShop lists what earnings can buy.
 	screenShop
+	// screenChallenges lists the scenarios to drive against the autopilot's ghost.
+	screenChallenges
+	// screenCustom edits the custom map.
+	screenCustom
 )
 
 // Shell is the menu layer around a session: the title screen a run opens on,
@@ -57,13 +65,26 @@ type Shell struct {
 	// what the packs are unlocked with.
 	career Career
 
-	net    *netplay.Session[Snapshot, Input]
-	screen screen
-	prev   screen // where the settings screen returns to
-	menu   *menu.Menu
-	game   *Game
+	net *netplay.Session[Snapshot, Input]
+	// hostMode is what the host row on the title screen will start.
+	hostMode NetMode
+	screen   screen
+	prev     screen // where the settings screen returns to
+	menu     *menu.Menu
+	game     *Game
 	// showroom is the garage's turntable.
 	showroom showroom
+
+	// feedFeats turns the running drive's totals into what the achievements are
+	// fed, and is renewed with each session.
+	feedFeats featFeed
+	// customPlay says the next game is on the custom map in the settings, and
+	// challenge that it is that scenario; both are cleared on the title screen.
+	customPlay bool
+	challenge  *scenario.Scenario
+	// customEd is the custom map screen's editor, and customNote its last message.
+	customEd   *customScreen
+	customNote string
 
 	joinAddr string // the address being typed on screenJoin
 	notice   string // the last thing that went wrong, shown under the title
@@ -80,6 +101,7 @@ func NewShell(opts Options) *Shell {
 		career:   loadCareerFor(set),
 		net:      &netplay.Session[Snapshot, Input]{},
 		joinAddr: "127.0.0.1",
+		hostMode: set.HostMode,
 	}
 	// A migrated file is written back once. Under bypass nothing about
 	// ownership is ever written, so the file is left as it was found.
@@ -138,29 +160,71 @@ func (s *Shell) payJobs(rs []job.Result) bool {
 // collect moves the bounty the player has just banked into their career,
 // and announces any pack it unlocked.
 func (s *Shell) collect() {
-	// Job pay is earnings, which the shop spends. Bounty is not earnings: it
-	// only ever opens packs.
-	if s.payJobs(s.game.TakeJobResults()) {
-		if err := s.career.Save(); err != nil {
-			s.notice = err.Error()
+	g := s.game
+	if out, ok := g.TakeChallenge(); ok && g.chal != nil {
+		if s.career.Challenges == nil {
+			s.career.Challenges = scenario.Bests{}
+		}
+		if s.career.Challenges.Record(g.chal.run.Scenario().ID, out) {
+			s.saveCareer()
 		}
 	}
-	earned := s.game.TakeEarned()
+	jobs, earned := g.TakeJobResults(), g.TakeEarned()
+	if !g.banks() {
+		// A custom map or a challenge pays nothing and counts for nothing: what
+		// was collected is thrown away, and the achievements never see the drive.
+		return
+	}
+	// Job pay is earnings, which the shop spends. Bounty is not earnings: it
+	// only ever opens packs.
+	if s.payJobs(jobs) {
+		s.saveCareer()
+	}
+	s.collectFeats(earned)
 	if earned == 0 {
 		return
 	}
 	before := s.access()
 	unlocked := s.career.Bank(earned)
-	if err := s.career.Save(); err != nil {
-		s.notice = err.Error()
-	}
+	s.saveCareer()
 	for _, p := range unlocked {
 		// A pack the player already had by bypass is not news.
 		if !before.Has(p.ID) {
-			s.game.Announce(strings.ToUpper(p.Name)+" PACK UNLOCKED", p.Blurb)
+			g.Announce(strings.ToUpper(p.Name)+" PACK UNLOCKED", p.Blurb)
 		}
 	}
 }
+
+// saveCareer writes the career, telling the player when it will not stick.
+func (s *Shell) saveCareer() {
+	if err := s.career.Save(); err != nil {
+		s.notice = err.Error()
+	}
+}
+
+// collectFeats gives the achievements the stretch of drive since they last
+// looked, and announces what it unlocked.
+func (s *Shell) collectFeats(earned int) {
+	x, ok := s.feedFeats.fact(s.game.featCounters(), earned)
+	if !ok {
+		return
+	}
+	got := s.career.RecordFeats(x)
+	if len(got) == 0 {
+		return
+	}
+	s.saveCareer()
+	names := make([]string, len(got))
+	for i, a := range got {
+		names[i] = a.Name
+	}
+	s.game.Announce("ACHIEVEMENT", strings.Join(names, ", "))
+}
+
+// banks reports whether this game counts toward the career: bounty, earnings
+// and achievements. A custom map never does, and nor does a challenge, which
+// is a score and not a drive.
+func (g *Game) banks() bool { return custom.Banks(g.opts.Custom) && g.chal == nil }
 
 func (s *Shell) stepPlaying(dt float32) {
 	if rl.IsKeyPressed(rl.KeyEscape) {
@@ -173,6 +237,10 @@ func (s *Shell) stepPlaying(dt float32) {
 			return
 		}
 		s.showPause()
+		return
+	}
+	if s.game.chal != nil && rl.IsKeyPressed(rl.KeyF5) {
+		s.retryChallenge()
 		return
 	}
 	s.game.Step(dt)
@@ -217,6 +285,7 @@ func pollMenu() menu.Input {
 
 func (s *Shell) showTitle() {
 	s.screen = screenTitle
+	s.customPlay, s.challenge = false, nil
 	s.menu = &menu.Menu{
 		Title:    "AUTOBAHN",
 		Subtitle: s.titleSubtitle(),
@@ -230,10 +299,17 @@ func (s *Shell) showTitle() {
 				Adjust: s.chooseMap,
 				Action: func() { s.chooseMap(1) },
 			},
-			{Label: text("Host a chase"), Action: s.hostChase},
+			{
+				Label:  func() string { return "Host: " + s.hostMode.String() },
+				Adjust: func(d int) { s.hostMode = cycleNetMode(s.hostMode, d) },
+				Action: s.hostChase,
+			},
 			{Label: text("Join a chase"), Action: s.showJoin},
+			{Label: text("Challenges"), Action: s.showChallenges},
+			{Label: text("Custom map"), Action: s.showCustom},
 			{Label: text("Garage"), Action: func() { s.showGarage(screenTitle) }},
 			{Label: text("Packs"), Action: s.showPacks},
+			{Label: text("Achievements"), Action: s.showFeats},
 			{Label: text("Settings"), Action: func() { s.showSettings(screenTitle) }},
 			{Label: text("Quit"), Action: func() { s.quit = true }},
 		}),
@@ -533,7 +609,15 @@ func (s *Shell) watchLobby() {
 		return
 	}
 	if s.net.Peered() {
-		s.startGame(s.net.Role() == netplay.Hosting)
+		if err := s.protoErr(); err != nil {
+			s.notice = err.Error()
+			s.net.Leave()
+			s.showTitle()
+			return
+		}
+		// The host's own car is the autopilot's only in a chase; in co-op both
+		// players are at their keyboards.
+		s.startGame(s.net.Role() == netplay.Hosting && s.hostMode == ModeChase)
 	}
 }
 
@@ -544,15 +628,32 @@ func (s *Shell) startGame(autopilot bool) {
 		s.game.Close()
 	}
 	o := s.opts
-	if s.net.Online() {
-		// The lobby starts the session, so the options never mention it; the
-		// world still needs a police car for the other player to drive. The
-		// stored world size is deliberately left out — see applyViewTo.
-		o = s.settings.applyViewTo(o).chaseReady()
-	} else {
+	switch {
+	case s.net.Role() == netplay.Joining:
+		// The joiner builds what the host built, whatever its own settings say:
+		// the snapshot names the world, and the lobby has already seen one.
+		o = s.joinerOptions(o)
+	case s.net.Online():
+		// The host chooses the world and the mode, and the joiner is told them.
+		o = s.settings.applyTo(o).chaseReady()
+		if !o.Given["play"] {
+			o.Play = s.hostMode
+		}
+	default:
 		o = s.settings.applyTo(o)
+		if s.customPlay {
+			o.Custom = customOf(s.settings.Custom)
+		}
+		o.Challenge = s.challenge
 	}
-	o.Autopilot = autopilot
+	o.Autopilot = autopilot && !o.Play.SharedCar()
+	if err := o.coopValid(); err != nil {
+		s.net.Leave()
+		s.game = nil
+		s.notice = err.Error()
+		s.showTitle()
+		return
+	}
 	if err := o.lockedFor(s.holdings()); err != nil {
 		// Only a command line can ask for what the player does not hold or
 		// own; the menus never offer it.
@@ -564,18 +665,53 @@ func (s *Shell) startGame(autopilot bool) {
 	}
 	// The map is chosen on the title screen, and starting a drive is the only
 	// way off it that should remember the choice.
+	s.settings.HostMode = s.hostMode
 	if err := s.settings.Save(); err != nil {
 		s.notice = err.Error()
 	}
 
+	s.feedFeats = featFeed{}
 	s.game = New(o)
 	s.game.net = s.net
 	s.game.showLabels = s.settings.ShowLabels
 	if s.game.Networked() {
-		s.game.chaser = s.game.world.AssignChaser()
+		s.game.seat()
 	}
 	rl.SetMasterVolume(masterVolume(s.settings))
 	s.screen = screenPlaying
+}
+
+// protoErr is why a joiner cannot play against the host it has reached, or nil.
+// The two builds have to agree on what a snapshot means.
+func (s *Shell) protoErr() error {
+	if s.net.Role() != netplay.Joining {
+		return nil
+	}
+	snap, ok := s.net.Snapshot()
+	if ok && snap.Proto != Proto {
+		return fmt.Errorf("the host is running a different version of the game (protocol %d, this is %d)",
+			snap.Proto, Proto)
+	}
+	return nil
+}
+
+// joinerOptions is what a joining player builds a game from: the host's world
+// and mode, in the joiner's own view of it.
+func (s *Shell) joinerOptions(o Options) Options {
+	o = s.settings.applyViewTo(o).chaseReady()
+	snap, ok := s.net.Snapshot()
+	if !ok {
+		return o
+	}
+	o.Seed, o.Map = snap.Seed, city.Map(snap.Map)
+	o.Traffic, o.Police = snap.Traffic, max(snap.Police, 1)
+	o.Weather = weather.Setting(snap.Weather)
+	o.Play = snap.Mode
+	o.Custom = customOf(snap.Custom)
+	if snap.Mode.SharedCar() {
+		o.Car, o.Paint = sim.BodyKind(snap.Car), snap.Paint
+	}
+	return o
 }
 
 func (s *Shell) resume() { s.screen = screenPlaying }

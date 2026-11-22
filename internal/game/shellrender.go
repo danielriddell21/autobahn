@@ -1,6 +1,8 @@
 package game
 
 import (
+	"strings"
+
 	rl "github.com/gen2brain/raylib-go/raylib"
 
 	"github.com/danielriddell21/crucible/keymap"
@@ -51,6 +53,8 @@ func (s *Shell) drawScreen(dt float32) {
 		s.drawPacks()
 	case screenShop:
 		s.drawShop()
+	case screenCustom:
+		s.drawCompactMenu(s.menu)
 	default:
 		s.drawMenu(s.menu)
 	}
@@ -86,6 +90,27 @@ func (s *Shell) drawMenuAt(m *menu.Menu, titleY, top int32) {
 			rl.DrawText(">", w/2-caret, y, menuItemSize, menuSelected)
 		}
 		centred(label, w, y, menuItemSize, col)
+	}
+}
+
+// drawCompactMenu draws a menu with more rows than the usual spacing would fit,
+// as the custom map's editor has: a smaller face and tighter rows.
+func (s *Shell) drawCompactMenu(m *menu.Menu) {
+	const titleSize, itemSize, rowHeight = 34, 16, 22
+	w := int32(s.opts.Width)
+	centred(m.Title, w, 12, titleSize, rl.RayWhite)
+	for i, line := range m.Subtitle {
+		centred(line, w, 12+titleSize+4+int32(i)*18, menuSubSize, hudDim)
+	}
+	top := int32(12 + titleSize + 4 + 20*len(m.Subtitle) + 6)
+	for i, item := range m.Items {
+		y := top + int32(i)*rowHeight
+		label, col := item.Label(), hudText
+		if i == m.Sel {
+			col = menuSelected
+			rl.DrawText(">", w/2-rl.MeasureText(label, itemSize)/2-18, y, itemSize, menuSelected)
+		}
+		centred(label, w, y, itemSize, col)
 	}
 }
 
@@ -139,7 +164,11 @@ func (s *Shell) drawLobby() {
 	if addr := s.net.Addr(); addr != "" {
 		centred("they join with the address of this machine", w, h/2+10, menuSubSize, hudDim)
 	}
-	centred("the chase begins the moment they arrive", w, h/2+64, menuSubSize, hudDim)
+	line := "the game begins the moment the host's world arrives"
+	if s.hostingLobby() {
+		line = strings.ToLower(s.hostMode.String()) + " begins the moment they arrive"
+	}
+	centred(line, w, h/2+64, menuSubSize, hudDim)
 }
 
 func (s *Shell) hostingLobby() bool { return s.net.Addr() != "" }
@@ -157,7 +186,7 @@ func (s *Shell) drawMenuHints() {
 		}
 	case screenLobby:
 		hints = []keymap.Binding{{Key: "esc", Action: "cancel"}}
-	case screenSettings, screenGarage:
+	case screenSettings, screenGarage, screenCustom:
 		hints = []keymap.Binding{
 			{Key: "up/down", Action: "choose"},
 			{Key: "left/right", Action: "adjust"},

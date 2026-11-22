@@ -8,7 +8,10 @@ import (
 
 	"github.com/danielriddell21/crucible/store"
 
+	"github.com/danielriddell21/autobahn/internal/city"
+	"github.com/danielriddell21/autobahn/internal/feats"
 	"github.com/danielriddell21/autobahn/internal/pack"
+	"github.com/danielriddell21/autobahn/internal/scenario"
 	"github.com/danielriddell21/autobahn/internal/shop"
 	"github.com/danielriddell21/autobahn/internal/sim"
 )
@@ -38,6 +41,10 @@ type Career struct {
 	// Cars and Paints are what the player owns.
 	Cars   []int `json:"cars"`
 	Paints []int `json:"paints"`
+	// Feats is the achievements, kept beside the bounty (see career_feats.go).
+	Feats feats.Feats `json:"feats,omitempty"`
+	// Challenges is the player's best on each challenge, by scenario id.
+	Challenges scenario.Bests `json:"challenges,omitempty"`
 }
 
 // careerMigrations[i] brings a career from version i to i+1. They run in
@@ -101,6 +108,7 @@ func (c *Career) sanitise() {
 		func(i int) bool { return sim.IsPlayerBody(sim.BodyKind(i)) })
 	c.Paints = cleanIDs(append([]int{0}, c.Paints...),
 		func(i int) bool { return i >= 0 && i < len(playerPaints) })
+	c.Challenges = c.Challenges.Sanitise()
 	for _, f := range careerSanitisers {
 		f(c)
 	}
@@ -213,13 +221,25 @@ func (m *bountyMeter) take() int {
 // locked reports why a session cannot be played with the packs the player
 // holds, or nil when it can. It knows nothing of ownership; see lockedFor.
 func (o Options) locked(a pack.Access) error {
-	if p := pack.ForMap(o.Map); !a.Has(p.ID) {
-		return lockedErr(p, a, o.Map.Name())
+	if o.Custom != nil {
+		if err := o.Custom.Locked(a); err != nil {
+			return err
+		}
+	} else if m := o.placeMap(); !a.Has(pack.ForMap(m).ID) {
+		return lockedErr(pack.ForMap(m), a, m.Name())
 	}
 	if p := pack.ForBody(o.Car); !a.Has(p.ID) {
 		return lockedErr(p, a, "the "+o.Car.Name())
 	}
 	return nil
+}
+
+// placeMap is the preset map the session is on: the scenario's, in a challenge.
+func (o Options) placeMap() city.Map {
+	if o.Challenge != nil {
+		return o.Challenge.CityMap()
+	}
+	return o.Map
 }
 
 // lockedFor is locked and more: a car or paint the player has not bought is

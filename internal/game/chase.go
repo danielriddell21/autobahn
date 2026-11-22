@@ -7,7 +7,6 @@ import (
 
 	"github.com/danielriddell21/autobahn/internal/mathx"
 	"github.com/danielriddell21/autobahn/internal/sim"
-	"github.com/danielriddell21/autobahn/internal/weather"
 )
 
 // EscapeTime is how long the runner must stay free to win, in seconds.
@@ -80,72 +79,6 @@ func (g *Game) judgeChase() {
 	}
 }
 
-func (g *Game) publish() {
-	// Snapshots go out on their own clock, well below the frame rate: the
-	// chase does not need sixty updates a second to read correctly.
-	g.sinceSnapshot += g.lastDT
-	if g.sinceSnapshot < 1.0/SnapshotRate {
-		return
-	}
-	g.sinceSnapshot = 0
-
-	s := Snapshot{
-		Clock:   g.world.Time,
-		Hour:    g.clock.hour,
-		Weather: uint8(g.world.Climate.Setting),
-		Runner:  poseOf(g.world.Player, false),
-		Agents:  make([]Pose, 0, len(g.world.Agents)),
-		Chaser:  -1,
-
-		WantedLevel: g.world.Wanted.Level,
-		WantedState: int(g.world.Wanted.State),
-		Elapsed:     g.chase.Elapsed,
-		Over:        g.chase.Over,
-		Winner:      g.chase.Winner,
-	}
-	for i, a := range g.world.Agents {
-		s.Agents = append(s.Agents, poseOf(a.V, a.Pursuing()))
-		if a == g.chaser {
-			s.Chaser = i
-		}
-	}
-	g.net.Send(s)
-}
-
-func ease(v *sim.Vehicle, p Pose, dt float32) {
-	// Snapshots arrive twenty times a second and frames are drawn sixty, so
-	// snapping to each one makes every remote car judder. Sliding toward the
-	// host's pose instead costs a few centimetres of accuracy and looks like
-	// driving. A car that has moved a long way — a respawn, or the first
-	// snapshot — is placed outright rather than sliding across the city.
-	const rate = 16
-	target := mathx.V(p.X, p.Z)
-	if dt <= 0 || v.Pos.DistTo(target) > 25 {
-		sim.ApplyPose(v, p.X, p.Z, p.Yaw, p.Speed)
-		return
-	}
-	eased := mathx.V(
-		mathx.Approach(v.Pos.X, target.X, rate, dt),
-		mathx.Approach(v.Pos.Z, target.Z, rate, dt),
-	)
-	// Yaw is eased the short way round, so a car crossing north does not spin.
-	yaw := v.Yaw + mathx.AngleDiff(p.Yaw, v.Yaw)*mathx.Clamp(rate*dt, 0, 1)
-	sim.ApplyPose(v, eased.X, eased.Z, yaw, p.Speed)
-}
-
-func poseOf(v *sim.Vehicle, pursuing bool) Pose {
-	var flags uint8
-	if pursuing {
-		flags |= FlagPursuing
-	}
-	if v.Brake > 0.05 {
-		flags |= FlagBraking
-	}
-	return Pose{
-		X: v.Pos.X, Z: v.Pos.Z, Yaw: v.Yaw, Speed: v.Speed(), Flags: flags,
-	}
-}
-
 func (g *Game) joinChase(dt float32) {
 	// Sends this player's controls and adopts the world the host sends
 	// back. Nothing is simulated here beyond the cameras.
@@ -161,33 +94,6 @@ func (g *Game) joinChase(dt float32) {
 	// Nothing here runs the simulation, so this is the only thing that extends
 	// the city as the chase drives off the ground it started on.
 	g.world.EnsureBuilt(g.chaseSubject().Pos)
-}
-
-func (g *Game) adopt(s Snapshot, dt float32) {
-	// The city is identical at both ends because it came from the same seed, so
-	// only the moving parts are taken from the host.
-	g.world.Signals.SetClock(s.Clock)
-	g.world.Time = s.Clock
-	g.world.Climate.Setting = weather.Setting(s.Weather)
-	g.clock.hour, g.clock.glide = wrapHour(s.Hour), 0
-	g.relight()
-	ease(g.world.Player, s.Runner, dt)
-
-	for i, p := range s.Agents {
-		if i >= len(g.world.Agents) {
-			break
-		}
-		a := g.world.Agents[i]
-		ease(a.V, p, dt)
-		a.SetPursuing(p.Flags&FlagPursuing != 0)
-	}
-	if s.Chaser >= 0 && s.Chaser < len(g.world.Agents) {
-		g.chaser = g.world.Agents[s.Chaser]
-	}
-
-	g.world.Wanted.Level = s.WantedLevel
-	g.world.Wanted.State = sim.PursuitState(s.WantedState)
-	g.chase.Elapsed, g.chase.Over, g.chase.Winner = s.Elapsed, s.Over, s.Winner
 }
 
 func (g *Game) chaserControls() sim.Controls {

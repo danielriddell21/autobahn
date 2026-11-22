@@ -25,8 +25,10 @@ import (
 	"github.com/danielriddell21/autobahn/internal/audio"
 	"github.com/danielriddell21/autobahn/internal/autopilot"
 	"github.com/danielriddell21/autobahn/internal/city"
+	"github.com/danielriddell21/autobahn/internal/custom"
 	"github.com/danielriddell21/autobahn/internal/mathx"
 	"github.com/danielriddell21/autobahn/internal/pack"
+	"github.com/danielriddell21/autobahn/internal/scenario"
 	"github.com/danielriddell21/autobahn/internal/sim"
 	"github.com/danielriddell21/autobahn/internal/vision"
 	"github.com/danielriddell21/autobahn/internal/weather"
@@ -60,6 +62,12 @@ type Options struct {
 	Seed uint64
 	// Map is which place to drive. The zero value is the city.
 	Map city.Map
+	// Custom, when set, is the custom map to drive: it replaces Map and Seed and
+	// shapes the world (see custom.Spec.Apply). Nothing driven on it is banked.
+	Custom *custom.Spec
+	// Challenge, when set, is the scenario being driven against the autopilot's
+	// ghost. It fixes the world and the rules; see challenge.go.
+	Challenge *scenario.Scenario
 	// UnlockAll offers every pack whatever the player has banked.
 	UnlockAll bool
 	Traffic   int
@@ -90,8 +98,12 @@ type Options struct {
 	Chase bool
 	// Host makes this machine the authority for a two-player chase against
 	// another person, listening on the given address. Join connects to one.
-	Host   string
-	Join   string
+	Host string
+	Join string
+	// Play is what the two players of a hosted game are doing: a chase, or one
+	// of the co-op games. A joiner takes it from the host, so only the host's
+	// is read. It means nothing without a host.
+	Play   NetMode
 	Camera CameraMode
 	// Mode is how the autopilot drives.
 	Mode autopilot.Mode
@@ -199,6 +211,10 @@ type Game struct {
 	career bountyMeter
 	// jobs is the jobs framework's end of the game: see jobs.go.
 	jobs jobs
+	// chal is the challenge being driven, nil in an ordinary game, and
+	// chalDone the outcome of one that has finished and not yet been collected.
+	chal     *challenge
+	chalDone *scenario.Outcome
 
 	camMode CameraMode
 	// overheadHeight is how much ground the overhead camera shows either side
@@ -230,6 +246,14 @@ type Game struct {
 	net    *netplay.Session[Snapshot, Input]
 	chase  Chase
 	chaser *sim.Agent
+	// mode is what the two players are doing; see coop.go.
+	mode NetMode
+	// indicator is the turn signal this car is showing when nobody's autopilot
+	// is, and myIndicator the one a joining player has asked the host for.
+	indicator, myIndicator sim.Indicator
+	// remoteAuto is whether the other player's autopilot is driving, as the
+	// host hears it, and assisted whether either is, as the joiner is told.
+	remoteAuto, assisted bool
 
 	sinceSnapshot float32
 	lastDT        float32
@@ -308,12 +332,29 @@ func New(opts Options) *Game {
 	if opts.Chase || opts.Host != "" || opts.Join != "" {
 		opts = opts.chaseReady()
 	}
+	if opts.Play.SharedCar() {
+		opts.Autopilot = false // nobody can take the wheel of a shared car
+	}
+	cfg := sim.Config{
+		Seed: opts.Seed, Map: opts.Map, Traffic: opts.Traffic, Police: opts.Police,
+		PlayerBody: sim.PlayerBodyOf(opts.Car), Weather: opts.Weather,
+	}
+	switch {
+	case opts.Challenge != nil:
+		// The scenario names the place and the rules; only the car is the player's.
+		cfg = challengeConfig(*opts.Challenge)
+		cfg.PlayerBody = sim.PlayerBodyOf(opts.Car)
+		opts.Map, opts.Seed, opts.Custom = opts.Challenge.CityMap(), opts.Challenge.Seed, nil
+		opts.Autopilot, opts.Chase = false, false
+	case opts.Custom != nil:
+		// The map is the preset the custom one starts from, so it is dressed as that
+		// preset is; the rest of the world is the spec's.
+		cfg = opts.Custom.Apply(cfg)
+		opts.Map, opts.Seed = opts.Custom.Base, opts.Custom.Seed
+	}
 	g := &Game{
-		opts: opts,
-		world: sim.NewWorld(sim.Config{
-			Seed: opts.Seed, Map: opts.Map, Traffic: opts.Traffic, Police: opts.Police,
-			PlayerBody: sim.PlayerBodyOf(opts.Car), Weather: opts.Weather,
-		}),
+		opts: opts, mode: opts.Play,
+		world: sim.NewWorld(cfg),
 		// In a chase against the machine the runner is always the autopilot;
 		// that is what makes it a chase against the machine.
 		auto: opts.Autopilot || opts.Chase, showPanel: opts.ShowPanel,
@@ -341,7 +382,7 @@ func New(opts Options) *Game {
 	if g.world.City.Hilly() {
 		g.land = g.world.City.Height
 	}
-	g.look = lookFor(opts.Map.Season())
+	g.look = lookFor(g.season())
 	g.town = townFor(opts.Map)
 	g.clock.minutes = opts.DayLength
 	g.SetTime(opts.Time)
@@ -353,10 +394,15 @@ func New(opts Options) *Game {
 		Projection: rl.CameraPerspective,
 	}
 	g.camMode = opts.Camera % numCameraModes
-	if opts.Chase || opts.Host != "" || opts.Join != "" {
-		// Both ends need the police unit the joining player drives, and it must
-		// be the same one, which it is because the world came from one seed.
+	if opts.Challenge != nil {
+		g.chal = newChallenge(*opts.Challenge)
+	}
+	if opts.Chase {
 		g.chaser = g.world.AssignChaser()
+	} else if opts.Host != "" || opts.Join != "" {
+		// Both ends need the car the joining player drives, and it must be the
+		// same one, which it is because the world came from one seed.
+		g.seat()
 	}
 	g.camPos = g.world.Player.Pos
 	g.updateCameras(0)
@@ -404,6 +450,15 @@ func (g *Game) Close() {
 	}
 }
 
+// season is the time of year the map is driven in: a custom map may choose its
+// own, as a preset keeps the one it was given.
+func (g *Game) season() city.Season {
+	if g.opts.Custom != nil {
+		return g.opts.Custom.Season()
+	}
+	return g.opts.Map.Season()
+}
+
 // Time returns the time of day the city is nearest to being shown at.
 func (g *Game) Time() TimeOfDay { return g.clock.stage() }
 
@@ -428,7 +483,7 @@ func (g *Game) advanceDay(dt float32) {
 
 // relight sets the light for the hour on the clock, in the map's season.
 func (g *Game) relight() {
-	g.light = relight(lightingAt(g.clock.hour), g.opts.Map.Season())
+	g.light = relight(lightingAt(g.clock.hour), g.season())
 	if g.world == nil {
 		return
 	}
@@ -463,7 +518,7 @@ func (g *Game) Autopilot() bool { return g.auto }
 
 // SetAutopilot switches between manual and AI driving.
 func (g *Game) SetAutopilot(on bool) {
-	if on == g.auto {
+	if on == g.auto || (on && g.autoBlocked()) {
 		return
 	}
 	g.auto = on
@@ -488,14 +543,18 @@ func (g *Game) hosting() bool { return g.net.Role() == netplay.Hosting }
 func (g *Game) Session() *netplay.Session[Snapshot, Input] { return g.net }
 
 // Chasing reports whether the player is driving a police car, whoever or
-// whatever is running from them.
-func (g *Game) Chasing() bool { return g.opts.Chase || g.Networked() }
+// whatever is running from them. Two players on a team are not.
+func (g *Game) Chasing() bool { return g.opts.Chase || (g.Networked() && !g.mode.Coop()) }
 
 // Step advances the game by one frame: perception, control, simulation, then
 // rendering. dt is the frame duration in seconds.
 func (g *Game) Step(dt float32) {
 	g.frame++
 	g.lastDT = dt
+	if g.Coop() {
+		g.stepCoop(dt)
+		return
+	}
 	if g.Chasing() {
 		g.stepChase(dt)
 		return
@@ -526,6 +585,7 @@ func (g *Game) Step(dt float32) {
 
 	g.world.Update(controls, dt)
 	g.stepJobs()
+	g.stepChallenge(dt)
 	g.updateEffects(dt)
 	g.watchPursuit(dt)
 	g.updateCameras(dt)
@@ -725,9 +785,10 @@ func (g *Game) stepChase(dt float32) {
 }
 
 func (g *Game) handleInput() {
+	g.handleIndicatorKeys()
 	switch {
 	case rl.IsKeyPressed(rl.KeyTab):
-		g.SetAutopilot(!g.auto)
+		g.toggleAutopilot()
 	case rl.IsKeyPressed(rl.KeyC):
 		g.camMode = (g.camMode + 1) % numCameraModes
 	case rl.IsKeyPressed(rl.KeyV):
@@ -737,7 +798,7 @@ func (g *Game) handleInput() {
 	case rl.IsKeyPressed(rl.KeyR):
 		g.world.Respawn()
 	case rl.IsKeyPressed(rl.KeyJ):
-		g.offerJob()
+		g.offerJobUnlessCoop()
 	case rl.IsKeyPressed(rl.KeyN):
 		g.world.PlaceOnNearestLane()
 	case rl.IsKeyPressed(rl.KeyH):
@@ -949,7 +1010,7 @@ func WithWindow(opts Options, fn func(*Game) error) error {
 	g := New(opts)
 	g.net = session
 	if g.Networked() {
-		g.chaser = g.world.AssignChaser()
+		g.seat()
 	}
 	defer g.Close()
 	return fn(g)
@@ -969,6 +1030,9 @@ func Run(opts Options) error {
 		set := LoadSettings()
 		c := loadCareerFor(set)
 		held := pack.Access{Banked: c.Banked, Bypass: opts.UnlockAll || set.UnlockAll}
+		if err := opts.coopValid(); err != nil {
+			return err
+		}
 		if err := opts.lockedFor(c.holdings(held)); err != nil {
 			return err
 		}

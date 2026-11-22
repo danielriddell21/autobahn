@@ -48,6 +48,7 @@ func (g *Game) drawHUD() {
 	g.drawWanted()
 	g.drawCarState()
 	g.drawJob()
+	g.drawChallenge()
 	g.drawMinimap(int32(g.opts.Width)/2-72, 8, 144)
 	g.drawNotice()
 	g.drawBanner()
@@ -65,6 +66,22 @@ func (g *Game) drawStatusBar() {
 	panel(12, 8, 232, 44)
 	rl.DrawText("AUTOBAHN", 24, 14, 12, hudDim)
 	rl.DrawText(mode, 24, 28, 20, col)
+	if g.opts.Custom != nil && g.opts.Custom.Flagged() {
+		// A map pushed past what has been measured is not one the game vouches for.
+		rl.DrawText("UNSUPPORTED", 130, 28, 12, hudWarn)
+	}
+}
+
+// drawChallenge shows how a challenge is going, under the status bar.
+func (g *Game) drawChallenge() {
+	if g.chal == nil {
+		return
+	}
+	lines := g.chal.readout()
+	panel(12, 58, 232, int32(14*len(lines))+14)
+	for i, l := range lines {
+		rl.DrawText(l, 22, 65+int32(i)*14, 12, hudText)
+	}
 }
 
 func (g *Game) drawSpeedo() { g.drawSpeedoFor(g.world.Player) }
@@ -73,7 +90,7 @@ func (g *Game) drawSpeedoFor(p *sim.Vehicle) {
 	// The limit and the signal ahead belong to the judged car, so a viewer
 	// watching a police unit gets a speedometer and nothing more.
 	j := g.world.Judge
-	judged := p == g.world.Player
+	judged := p == g.world.Player && !g.joining()
 	speed := mathx.ToMPH(p.Speed())
 	limit := mathx.ToMPH(j.SpeedLimit())
 
@@ -182,7 +199,11 @@ func (g *Game) drawWanted() {
 	case sim.PursuitStopped:
 		col = hudAccent
 	}
-	rl.DrawText(wa.State.String(), x+14, y+8, 20, col)
+	label := wa.State.String()
+	if g.Coop() {
+		label = "TEAM " + label // one record for both cars
+	}
+	rl.DrawText(label, x+14, y+8, 20, col)
 
 	// One lamp per wanted level, lit up to the current one.
 	for i := range sim.MaxWanted {
@@ -271,6 +292,9 @@ func (g *Game) watchPursuit(dt float32) {
 	switch {
 	case wa.Stops > g.seenStops:
 		g.banner, g.bannerCol, g.bannerNote = "BUSTED", hudBad, "bounty forfeited"
+		if g.Coop() {
+			g.bannerNote = "the team is stopped, bounty forfeited"
+		}
 		g.bannerFor = 3.2
 	case wa.Escapes > g.seenEscapes:
 		g.banner, g.bannerCol = "ESCAPED", hudGood
@@ -285,6 +309,11 @@ func (g *Game) watchPursuit(dt float32) {
 // helped reports whether anything but the player is driving, or the session
 // is a chase: bounty banked then does not go toward the packs.
 func (g *Game) helped() bool {
+	if g.Coop() {
+		// Both players bank what the team earned, unless either's autopilot
+		// had a hand in it.
+		return g.opts.Reckless || g.teamAssisted()
+	}
 	return g.auto || g.opts.Reckless || g.opts.Chase || g.Networked()
 }
 

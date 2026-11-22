@@ -86,6 +86,33 @@ Two things about the existing maps look like mistakes and are not:
   lights, and the village with many put the gate's own seeds within a point
   of its limit.
 
+## Custom maps are presets too
+
+A custom map (`internal/custom`) is one of the four presets plus slider
+positions, never a generator of its own. `custom.Spec.Params` starts from
+`city.ParamsFor(Base)`, writes each slider over the `Params` field it names and
+hands the result to `city.Clamp`; `Params.Map` stays the base, so place hashing
+is unchanged and `grow_test.go` holds it (`TestRandomCustomGrowsTheSame`).
+Nothing in `grow.go` or `lay.go` knows a custom map exists. What lies outside
+generation (traffic mix, season, grip scale, weather) goes in `sim.Config`,
+where nil or zero is the map's own.
+
+* Each range in `city.Clamp` runs from the lowest to the highest value any
+  preset uses, which is ground the gate has measured, plus one combined rule:
+  hills may be no steeper than the village's 8 m over 850 m. A value past a
+  range is only kept on a map that has asked to be `Unsupported`, and then it is
+  flagged: the code carries the flag and the HUD says so.
+* `internal/city/testdata/ranges.json` is the same table and a test holds the
+  two equal, so widening a range means editing that file where it is seen.
+* `just gate` drives `custom:edge`, every slider at its hardest bound at once,
+  at the same 24 seeds and the same pass mark as everything else. If it fails,
+  narrow the ranges. Never raise the mark.
+* A share code (`AB1-` and Crockford base32) is a frozen binary layout. Later
+  versions only append fields before the checksum; `code_test.go` holds a golden
+  code that must keep decoding.
+* A custom game banks no bounty, earnings or achievements (`custom.Banks`), and
+  offers only the base map and traffic the player has unlocked.
+
 ## The plan and the ground
 
 Every map but the city is laid on the ground differently from the way it was
@@ -245,6 +272,16 @@ car, and some paints are never for sale. What is owned lives in `career.json`
 Cars and paints are stored as integers, so `sim.BodyKind` and `playerPaints`
 may only grow at the end; a test pins them. `-unlock-all` skips ownership too
 and never writes it.
+
+Achievements (`internal/feats`) and challenges (`internal/scenario`) are
+counted beside the bounty and follow its rule: `Shell.collect` is the only
+place either is fed, and a drive the autopilot touched (`helped()` or the
+bounty meter's `assisted`), a custom map, or a challenge earns nothing and is
+not counted (`Game.banks`). A challenge is a score against the autopilot's
+checked-in ghost, `tools/eval -ghost` regenerates `ghosts.json`. Co-op banks
+what the team earned, unless either autopilot had a hand, and the joiner's
+judge does not run, so it only gets what the snapshot carries. A snapshot also
+carries the custom map's share code; bump `Proto` when a field changes meaning.
 
 ## eval is a gate, not a report
 

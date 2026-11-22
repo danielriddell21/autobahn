@@ -342,6 +342,13 @@ var mixes = map[city.Map]mix{
 	},
 }
 
+// Mix is the share of each shape among a map's traffic. A custom map may
+// bring its own; see [Config.Mix].
+type Mix = mix
+
+// MixFor returns the traffic mix of a map.
+func MixFor(m city.Map) Mix { return mixFor(m) }
+
 // mixFor returns the traffic mix of a map.
 func mixFor(m city.Map) mix {
 	if w, ok := mixes[m]; ok {
@@ -351,15 +358,23 @@ func mixFor(m city.Map) mix {
 }
 
 // RandomBody draws a shape from the mix that fills a map's streets.
-func RandomBody(rng *rand.Rand, m city.Map) Body {
-	weights := mixFor(m)
+func RandomBody(rng *rand.Rand, m city.Map) Body { return randomBody(rng, mixFor(m)) }
+
+// randomBody draws a shape from a mix. One with nothing in it is the city's.
+func randomBody(rng *rand.Rand, weights mix) Body {
 	total := 0
 	for _, w := range weights {
-		total += w
+		total += max(w, 0)
+	}
+	if total == 0 {
+		weights = mixes[city.MapCity]
+		for _, w := range weights {
+			total += w
+		}
 	}
 	pick := rng.IntN(total)
 	for k, w := range weights {
-		if pick -= w; pick < 0 {
+		if pick -= max(w, 0); pick < 0 {
 			return BodyOf(BodyKind(k))
 		}
 	}

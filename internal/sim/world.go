@@ -51,6 +51,18 @@ type Config struct {
 	// Weather is how the sky is chosen. The zero value drifts through the spells
 	// the seed gives it; hold it at weather.Clear for the dry runs the gate scores.
 	Weather weather.Setting
+
+	// The rest are for a custom map, and every one left at its zero value is
+	// the map's own. Params replaces the generation parameters ParamsFor gives
+	// Map; keep Map the preset they were taken from, since the place's hash
+	// and its season come from it.
+	Params *city.Params
+	// Mix is the traffic on the road. Nil is the map's mix.
+	Mix *Mix
+	// Season is the time of year the road is driven in. Nil is the map's.
+	Season *city.Season
+	// GripScale multiplies the grip the season gives. Zero is one.
+	GripScale float32
 }
 
 // DefaultConfig returns a populated city configuration.
@@ -78,6 +90,10 @@ type World struct {
 	// Climate is the weather the world is driven in, applied every step.
 	Climate Climate
 
+	// PartnerJudge watches the second player's car in a two-car co-op game, and
+	// is nil otherwise. Both judges feed the one Wanted record.
+	PartnerJudge *Judge
+
 	// Time is the elapsed simulation time in seconds.
 	Time float32
 	// Damage is how battered the player's car is, from 0 to 1. Every hard
@@ -89,6 +105,12 @@ type World struct {
 	solid    []mathx.OBB
 	stubs    []*Vehicle
 	stubPool []*Vehicle
+
+	// partner is the second player's car, and offender the car that broke a
+	// rule last, which the police go after; see Suspect.
+	partner  *Agent
+	offender *Vehicle
+	cars     [2]*Vehicle
 
 	rng       *rand.Rand
 	buildings map[[2]int][]int
@@ -123,15 +145,25 @@ type World struct {
 // NewWorld generates a city and populates it with traffic.
 func NewWorld(cfg Config) *World {
 	traffic := rng.Stream(cfg.Seed, streamTraffic)
-	c := city.Generate(city.ParamsFor(cfg.Map, cfg.Seed))
+	params := city.ParamsFor(cfg.Map, cfg.Seed)
+	if cfg.Params != nil {
+		params = *cfg.Params
+		params.Seed = cfg.Seed
+	}
+	c := city.Generate(params)
+	pl := placeFor(cfg)
 
 	w := &World{
 		City: c, Signals: NewSignals(c, cfg.Seed),
 		Judge: NewJudge(c),
 		rng:   traffic, buildings: map[[2]int][]int{}, cellSize: 48,
 		parked:  map[[2]int][]int{},
-		Climate: NewClimate(cfg.Seed, cfg.Map, cfg.Weather),
+		Climate: NewClimate(cfg.Seed, c.Map(), cfg.Weather),
 	}
+	if cfg.Season != nil {
+		w.Climate.Season = *cfg.Season
+	}
+	w.Climate.scale = cfg.GripScale
 	w.indexBuildings()
 	w.Works = works.NewIndex(c, cfg.Seed, cfg.Works)
 	w.syncWorks()
@@ -154,7 +186,7 @@ func NewWorld(cfg Config) *World {
 	if w.PlayerBody.Spec.Mass == 0 {
 		w.PlayerBody = PlayerBody()
 	}
-	w.Player = NewVehicle(seasoned(w.PlayerBody.Spec, c), w.spawnPos, w.spawnYaw)
+	w.Player = NewVehicle(w.PlayerBody.Spec.OnSurface(pl.grip), w.spawnPos, w.spawnYaw)
 	w.Player.Nitro = 1
 	w.Route = NewRoute(c, rng.Stream(cfg.Seed, streamRoute))
 	w.Route.works = w.Works
@@ -162,7 +194,7 @@ func NewWorld(cfg Config) *World {
 
 	for i := range cfg.Traffic {
 		lane := c.RandomLane(traffic, 30)
-		a := NewAgent(i, c, lane, traffic.Float32()*lane.Length, traffic)
+		a := newAgent(i, c, lane, traffic.Float32()*lane.Length, traffic, pl)
 		if w.tooClose(a.V.Pos, 9) || w.Works.Barred(lane.ID) {
 			continue
 		}
@@ -174,7 +206,7 @@ func NewWorld(cfg Config) *World {
 	}
 	for i := range cfg.Police {
 		lane := c.RandomLane(traffic, 30)
-		u := NewPoliceUnit(cfg.Traffic+i, c, lane, traffic.Float32()*lane.Length, traffic)
+		u := newPoliceUnit(cfg.Traffic+i, c, lane, traffic.Float32()*lane.Length, traffic, pl)
 		u.SetUnit(unitRoster[i%len(unitRoster)])
 		if w.tooClose(u.V.Pos, 9) || w.Works.Barred(lane.ID) {
 			continue
@@ -193,18 +225,22 @@ func NewWorld(cfg Config) *World {
 func (w *World) watchForOffences() {
 	// Subscribes the police to the judge. An offence a unit saw draws attention
 	// at once; one nobody saw is remembered, and enough of them get called in.
-	w.Judge.Events.Subscribe(judgeWatcher(func(in Infraction) {
-		// Seen or phoned in, an offence says where the car was when it was
-		// committed, which is where anybody sent after it starts looking.
-		if w.Wanted.State != PursuitActive {
-			w.Wanted.LastSeen = in.Pos
-		}
-		if w.witnessed() {
-			w.Wanted.witness(in.Points)
-			return
-		}
-		w.Wanted.report(in.Points)
-	}))
+	w.Judge.Events.Subscribe(judgeWatcher(func(in Infraction) { w.offended(in, w.Player) }))
+}
+
+// offended is what the police make of an offence by one of the team's cars.
+func (w *World) offended(in Infraction, by *Vehicle) {
+	w.offender = by
+	// Seen or phoned in, an offence says where the car was when it was
+	// committed, which is where anybody sent after it starts looking.
+	if w.Wanted.State != PursuitActive {
+		w.Wanted.LastSeen = in.Pos
+	}
+	if w.witnessed() {
+		w.Wanted.witness(in.Points)
+		return
+	}
+	w.Wanted.report(in.Points)
 }
 
 // judgeWatcher adapts a function to the telemetry subscriber interface.
@@ -228,11 +264,96 @@ func (w *World) Police() []*Agent {
 // assigned.
 func (w *World) Chaser() *Agent {
 	for _, a := range w.Agents {
-		if a.Manual {
+		if a.Manual && a != w.partner {
 			return a
 		}
 	}
 	return nil
+}
+
+// AssignPartner hands a civilian car to the second player of a two-car co-op
+// game and returns it, set down on the road behind the first. Calling it again
+// returns the car already assigned. The same seed gives the same car at both
+// ends, which is how the machines agree on which one it is.
+func (w *World) AssignPartner() *Agent {
+	if w.partner != nil {
+		return w.partner
+	}
+	for _, a := range w.Agents {
+		if a.Role == RolePolice || a.Manual || a.Blocking {
+			continue
+		}
+		a.Manual, w.partner = true, a
+		a.V.Nitro = 1
+		behind := w.Player.Pos.Sub(w.Player.Forward().Mul(14))
+		if p := w.City.Project(behind); p.Valid {
+			a.V.Place(p.Lane.Point(p.S), p.Lane.HeadingAt(p.S))
+		}
+		w.PartnerJudge = NewJudge(w.City)
+		w.PartnerJudge.Events.Subscribe(judgeWatcher(func(in Infraction) { w.offended(in, a.V) }))
+		return a
+	}
+	return nil
+}
+
+// Partner returns the second player's car, or nil outside two-car co-op.
+func (w *World) Partner() *Agent { return w.partner }
+
+// team is the cars the police are after: the player's, and the partner's when
+// there is one.
+func (w *World) team() []*Vehicle {
+	w.cars[0] = w.Player
+	if w.partner == nil {
+		return w.cars[:1]
+	}
+	w.cars[1] = w.partner.V
+	return w.cars[:2]
+}
+
+// Suspect is the car the police pursue: the player's, unless the partner
+// offended last.
+func (w *World) Suspect() *Vehicle {
+	if w.partner != nil && w.offender == w.partner.V {
+		return w.partner.V
+	}
+	return w.Player
+}
+
+// seenCar is the car the police can see, preferring the suspect.
+func (w *World) seenCar() *Vehicle {
+	s := w.Suspect()
+	if w.partner == nil || w.sees(s) {
+		return s
+	}
+	if s == w.Player {
+		return w.partner.V
+	}
+	return w.Player
+}
+
+// partnerHit tells the partner's judge about a knock between two agents, when
+// one of them is the partner.
+func (w *World) partnerHit(a, b *Agent, impact float32) {
+	if w.partner != nil && (a == w.partner || b == w.partner) {
+		w.PartnerJudge.ReportCollision(w.partner.V, "hit a vehicle", impact, w.Time)
+	}
+}
+
+// judgeFor is the judge watching a car.
+func (w *World) judgeFor(v *Vehicle) *Judge {
+	if w.partner != nil && v == w.partner.V {
+		return w.PartnerJudge
+	}
+	return w.Judge
+}
+
+// teamDist is how far a point is from the nearest car of the team.
+func (w *World) teamDist(p mathx.Vec) float32 {
+	d := w.Player.Pos.DistTo(p)
+	if w.partner != nil {
+		d = min(d, w.partner.V.Pos.DistTo(p))
+	}
+	return d
 }
 
 // AssignChaser hands a police unit to a human and returns it, placing it on the
@@ -268,7 +389,12 @@ func (w *World) Caught() bool {
 	if c == nil {
 		return false
 	}
-	return c.V.Pos.DistTo(w.Player.Pos) < stopRange && w.Player.Speed() < 2.5
+	for _, v := range w.team() {
+		if c.V.Pos.DistTo(v.Pos) < stopRange && v.Speed() < 2.5 {
+			return true
+		}
+	}
+	return false
 }
 
 // Respawn returns the player to the starting pose, in a car that has been
@@ -319,6 +445,9 @@ func (w *World) Update(c Controls, dt float32) {
 	w.recycleAgents()
 	w.Route.Update(w.Player.Pos, w.Player.Forward())
 	w.Judge.Update(w.Player, w.Signals, w.Time, dt)
+	if w.partner != nil {
+		w.PartnerJudge.Update(w.partner.V, w.Signals, w.Time, dt)
+	}
 }
 
 // tilt tells every car how steeply the road climbs under it. A car is driven
@@ -344,7 +473,12 @@ const GrowRadius float32 = 700
 // grow extends the city around the player. Everything already there is left
 // alone, so this costs nothing once the surroundings exist and only does work
 // when the car reaches somewhere new.
-func (w *World) grow() { w.EnsureBuilt(w.Player.Pos) }
+func (w *World) grow() {
+	w.EnsureBuilt(w.Player.Pos)
+	if w.partner != nil {
+		w.EnsureBuilt(w.partner.V.Pos)
+	}
+}
 
 // EnsureBuilt extends the city around a point, whoever is standing there.
 //
@@ -764,17 +898,18 @@ func (w *World) resolveCollisions() {
 				impact := w.separate(a.V, b.V, axis, depth)
 				a.knock(impact)
 				b.knock(impact)
+				w.partnerHit(a, b, impact)
 			}
 		}
 	}
 
 	w.collideBuildings(w.Player, true)
 	for _, a := range w.Agents {
-		w.collideBuildings(a.V, false)
+		w.collideBuildings(a.V, a == w.partner)
 	}
 	w.collideWorks(w.Player, true)
 	for _, a := range w.Agents {
-		w.collideWorks(a.V, false)
+		w.collideWorks(a.V, a == w.partner)
 	}
 }
 
@@ -838,8 +973,10 @@ func (w *World) collideSolid(v *Vehicle, solid mathx.OBB, what string, report bo
 	if closing > 0 {
 		v.Vel = v.Vel.Sub(axis.Mul(closing * (1 + restitution)))
 		if report {
-			w.Judge.ReportCollision(v, what, closing, w.Time)
-			w.batter(closing)
+			w.judgeFor(v).ReportCollision(v, what, closing, w.Time)
+			if v == w.Player {
+				w.batter(closing)
+			}
 		}
 	}
 }
@@ -856,7 +993,7 @@ func (w *World) recycleAgents() {
 			// them in, so there is somebody to send when it escalates.
 			keep = backupRadius
 		}
-		if a.V.Pos.DistTo(w.Player.Pos) < keep && !stranded {
+		if w.teamDist(a.V.Pos) < keep && !stranded {
 			continue
 		}
 		if (a.pursuing || a.Blocking) && !stranded {
@@ -948,6 +1085,10 @@ func ApplyPose(v *Vehicle, x, z, yaw, speed float32) {
 // SetPursuing marks a unit as running to a call, for a joining machine that is
 // told rather than deciding.
 func (a *Agent) SetPursuing(on bool) { a.pursuing = on }
+
+// SetIndicator sets the turn signal an agent shows, in place of the one its
+// route implies. It is for a car a person is driving, here or across the wire.
+func (a *Agent) SetIndicator(i Indicator) { a.signal, a.signalSet = i, true }
 
 // SetInput supplies a human-driven agent's controls.
 func (a *Agent) SetInput(c Controls) { a.Input = c }

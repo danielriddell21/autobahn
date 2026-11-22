@@ -81,3 +81,9 @@ jobs:
       # and the autopilot has to slow to what it can see.
       - name: Score the autopilot in fog and storm
         run: go run ./tools/eval -map all -seeds 24 -seconds 60 -max-points 12 -weather fog,storm
+
+      # And the custom map editor's hardest corner: every range at its limit at
+      # once. The ranges are only as wide as this passes the same mark, so if it
+      # fails, narrow the ranges rather than raising the mark.
+      - name: Score the autopilot on the custom edge profile
+        run: go run ./tools/eval -map custom:edge -seeds 24 -seconds 60 -max-points 12

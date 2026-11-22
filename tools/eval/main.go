@@ -27,7 +27,9 @@ import (
 	"github.com/danielriddell21/autobahn/internal/annotate"
 	"github.com/danielriddell21/autobahn/internal/autopilot"
 	"github.com/danielriddell21/autobahn/internal/city"
+	"github.com/danielriddell21/autobahn/internal/custom"
 	"github.com/danielriddell21/autobahn/internal/mathx"
+	"github.com/danielriddell21/autobahn/internal/scenario"
 	"github.com/danielriddell21/autobahn/internal/sim"
 	"github.com/danielriddell21/autobahn/internal/vision"
 	"github.com/danielriddell21/autobahn/internal/weather"
@@ -55,29 +57,42 @@ type result struct {
 
 func main() {
 	var (
-		seeds      = flag.Int("seeds", 12, "how many cities to drive")
-		from       = flag.Uint64("from", 1, "first seed")
-		seconds    = flag.Float64("seconds", 90, "simulated seconds per city")
-		traffic    = flag.Int("traffic", 70, "ambient traffic cars")
-		police     = flag.Int("police", 7, "patrolling police units")
-		hz         = flag.Float64("perception", 20, "perception updates per second")
-		width      = flag.Int("camwidth", 420, "camera width in pixels")
-		height     = flag.Int("camheight", 236, "camera height in pixels")
-		workers    = flag.Int("workers", runtime.NumCPU(), "cities to drive in parallel")
-		modeName   = flag.String("mode", "normal", "autopilot style: cautious, normal, brisk, aggressive or getaway")
-		verbose    = flag.Bool("verbose", false, "report the circumstances of every fault")
-		failOver   = flag.Int("max-points", -1, "exit non-zero if mean penalty exceeds this")
-		mapName    = flag.String("map", "city", "the map to drive, or all for every one in turn")
+		seeds    = flag.Int("seeds", 12, "how many cities to drive")
+		from     = flag.Uint64("from", 1, "first seed")
+		seconds  = flag.Float64("seconds", 90, "simulated seconds per city")
+		traffic  = flag.Int("traffic", 70, "ambient traffic cars")
+		police   = flag.Int("police", 7, "patrolling police units")
+		hz       = flag.Float64("perception", 20, "perception updates per second")
+		width    = flag.Int("camwidth", 420, "camera width in pixels")
+		height   = flag.Int("camheight", 236, "camera height in pixels")
+		workers  = flag.Int("workers", runtime.NumCPU(), "cities to drive in parallel")
+		modeName = flag.String("mode", "normal", "autopilot style: cautious, normal, brisk, aggressive or getaway")
+		verbose  = flag.Bool("verbose", false, "report the circumstances of every fault")
+		failOver = flag.Int("max-points", -1, "exit non-zero if mean penalty exceeds this")
+		mapName  = flag.String("map", "city",
+			"the map to drive: a name, all for every one in turn, custom:edge for every custom range at its "+
+				"hardest bound, or a comma-separated list of them")
+		customArg  = flag.String("custom", "", "drive the custom map with this share code, from its own seed")
 		worksArg   = flag.String("works", "normal", "how much of the town is dug up: off, normal or dense")
 		weatherArg = flag.String("weather", "clear",
 			"the weather to drive in: clear, rain, fog, storm or drift, or a comma-separated list of them")
+		ghostArg = flag.String("ghost", "",
+			"drive every challenge with the autopilot and write its scores to this file (the checked-in ghosts.json), then exit")
 		minSites = flag.Int("min-sites", -1,
 			"exit non-zero if fewer roadworks than this were passed over the whole run; "+
 				"with -works dense and -max-points set it is 24 unless given")
 	)
 	flag.Parse()
 
-	maps, err := mapsNamed(*mapName)
+	if *ghostArg != "" {
+		if err := writeGhosts(*ghostArg, ghostsFor(scenario.All(), max(*workers, 1))); err != nil {
+			fmt.Fprintln(os.Stderr, "eval:", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	maps, err := targetsNamed(*mapName, *customArg, *from)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "eval:", err)
 		os.Exit(2)
@@ -127,7 +142,7 @@ func weathersNamed(arg string) ([]weather.Setting, error) {
 
 // scoreIn drives every map in each of the weathers, and reports whether every
 // one passed. Every weather is driven before any verdict.
-func scoreIn(skies []weather.Setting, maps []city.Map, cfg runConfig, seeds int, from uint64, workers, failOver, minSites int) bool {
+func scoreIn(skies []weather.Setting, maps []target, cfg runConfig, seeds int, from uint64, workers, failOver, minSites int) bool {
 	ok := true
 	for _, set := range skies {
 		cfg.weather = set
@@ -145,13 +160,13 @@ func scoreIn(skies []weather.Setting, maps []city.Map, cfg runConfig, seeds int,
 //
 // Every map is held to the same mark, and every one is driven before any
 // verdict, so a run that fails says everything that failed.
-func score(maps []city.Map, cfg runConfig, seeds int, from uint64, workers, failOver, minSites int) bool {
+func score(maps []target, cfg runConfig, seeds int, from uint64, workers, failOver, minSites int) bool {
 	ok := true
 	passed := 0
 	for _, m := range maps {
-		cfg.world = m
+		cfg.world, cfg.spec, cfg.seedShift = m.world, m.spec, m.shift
 		if len(maps) > 1 {
-			fmt.Printf("\n== %s, in %s ==\n", m.Name(), m.Season().Name())
+			fmt.Printf("\n== %s, in %s ==\n", m.name, m.season.Name())
 		}
 		results := drive(seeds, from, cfg, workers)
 		for _, r := range results {
@@ -160,7 +175,7 @@ func score(maps []city.Map, cfg runConfig, seeds int, from uint64, workers, fail
 		mean := report(results)
 		if failOver >= 0 && mean > float64(failOver) {
 			fmt.Fprintf(os.Stderr,
-				"\neval: %s: mean penalty %.1f exceeds the %d allowed\n", m.Name(), mean, failOver)
+				"\neval: %s: mean penalty %.1f exceeds the %d allowed\n", m.name, mean, failOver)
 			ok = false
 		}
 	}
@@ -176,7 +191,56 @@ func score(maps []city.Map, cfg runConfig, seeds int, from uint64, workers, fail
 	return ok
 }
 
-// mapsNamed reads -map: one map by name, or all of them.
+// target is one thing to drive: a preset map, or a custom one.
+type target struct {
+	name   string
+	season city.Season
+	world  city.Map
+	spec   *custom.Spec
+	// shift is added to a run's seed to make the custom map's own.
+	shift uint64
+}
+
+// edgeName is the profile the gate drives to hold the custom ranges to what the
+// autopilot copes with: every slider at its hardest bound.
+const edgeName = "custom:edge"
+
+// targetsNamed reads -map and -custom. -map is a comma-separated list of preset
+// maps by name, all of them, or custom:edge; -custom is a share code, driven
+// from the code's own seed for as many seeds as -seeds asks for.
+func targetsNamed(mapArg, code string, from uint64) ([]target, error) {
+	var out []target
+	if code != "" {
+		spec, err := custom.Decode(code)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, target{
+			name: "custom " + code, season: spec.Season(), spec: &spec, shift: spec.Seed - from,
+		})
+		if mapArg == "city" {
+			return out, nil
+		}
+	}
+	for _, name := range strings.Split(mapArg, ",") {
+		name = strings.TrimSpace(name)
+		if name == edgeName {
+			spec := custom.Edge(city.MapCity, 0)
+			out = append(out, target{name: edgeName, season: spec.Season(), spec: &spec})
+			continue
+		}
+		ms, err := mapsNamed(name)
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range ms {
+			out = append(out, target{name: m.Name(), season: m.Season(), world: m})
+		}
+	}
+	return out, nil
+}
+
+// mapsNamed reads a preset map by name, or all of them.
 func mapsNamed(name string) ([]city.Map, error) {
 	if name == "all" {
 		return city.Maps(), nil
@@ -190,7 +254,11 @@ func mapsNamed(name string) ([]city.Map, error) {
 
 // runConfig is what every city in a run shares.
 type runConfig struct {
-	world         city.Map
+	world city.Map
+	// spec, if set, is a custom map driven in place of world. Each city is the
+	// spec with its seed taken from the run's, plus seedShift.
+	spec          *custom.Spec
+	seedShift     uint64
 	mode          autopilot.Mode
 	seconds       float32
 	traffic       int
@@ -329,9 +397,16 @@ func (s *session) step() {
 }
 
 func driveOne(seed uint64, cfg runConfig) result {
-	w := sim.NewWorld(sim.Config{
+	wc := sim.Config{
 		Seed: seed, Map: cfg.world, Traffic: cfg.traffic, Police: cfg.police, Works: cfg.works, Weather: cfg.weather,
-	})
+	}
+	if cfg.spec != nil {
+		// A custom map brings its own sky, as the player's does.
+		spec := *cfg.spec
+		spec.Seed = seed + cfg.seedShift
+		wc = spec.Apply(wc)
+	}
+	w := sim.NewWorld(wc)
 	s := newSession(w, cfg)
 	sites := newSiteCounter()
 	driver := s.driver

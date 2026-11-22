@@ -94,6 +94,7 @@ gate:
     {{go}} run ./tools/eval -map all -seeds 24 -seconds 60 -max-points 12
     {{go}} run ./tools/eval -map all -seeds 48 -seconds 60 -max-points 12 -works dense
     {{go}} run ./tools/eval -map all -seeds 24 -seconds 60 -max-points 12 -weather fog,storm
+    {{go}} run ./tools/eval -map custom:edge -seeds 24 -seconds 60 -max-points 12
 
 # full gate: lint + test + build + boundary + the autopilot gate. all must pass
 # before committing

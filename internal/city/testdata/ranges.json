@@ -1,0 +1,15 @@
+[
+  {"name": "minSpan", "lo": 70, "hi": 170},
+  {"name": "maxSpan", "lo": 120, "hi": 290},
+  {"name": "roundabouts", "lo": 0.1, "hi": 0.28},
+  {"name": "parks", "lo": 0.1, "hi": 0.42},
+  {"name": "rise", "lo": 0, "hi": 1},
+  {"name": "floor", "lo": 5.5, "hi": 7},
+  {"name": "storeys", "lo": 4.5, "hi": 10},
+  {"name": "mainEvery", "lo": 2, "hi": 5},
+  {"name": "limit", "lo": 0, "hi": 50},
+  {"name": "wind", "lo": 0, "hi": 40},
+  {"name": "hills", "lo": 0, "hi": 11},
+  {"name": "hillSpan", "lo": 700, "hi": 2600},
+  {"name": "bluff", "lo": 0, "hi": 20}
+]

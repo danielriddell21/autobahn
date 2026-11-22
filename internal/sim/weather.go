@@ -27,6 +27,17 @@ type Climate struct {
 	// applied is the grip every vehicle was last fitted to, or zero before the
 	// first fitting.
 	applied float32
+	// scale multiplies the season's grip, for a custom map; zero is one.
+	scale float32
+}
+
+// roadGrip is the grip the season gives, before any weather.
+func (c *Climate) roadGrip() float32 {
+	g := SeasonGrip(c.Season)
+	if c.scale > 0 {
+		g *= c.scale
+	}
+	return g
 }
 
 // NewClimate returns the climate of a map.
@@ -42,14 +53,14 @@ func (c *Climate) Weather(t float32) weather.State {
 // GripAt returns the grip the road gives at a moment: the worse of the
 // season's and the weather's, in steps.
 func (c *Climate) GripAt(t float32) float32 {
-	return min(SeasonGrip(c.Season), QuantiseGrip(c.Weather(t).Grip))
+	return min(c.roadGrip(), QuantiseGrip(c.Weather(t).Grip))
 }
 
 // Grip returns the grip every vehicle is currently fitted to, which is what a
 // car spawned or changed now should be fitted to as well.
 func (c *Climate) Grip() float32 {
 	if c.applied == 0 {
-		return SeasonGrip(c.Season)
+		return c.roadGrip()
 	}
 	return c.applied
 }

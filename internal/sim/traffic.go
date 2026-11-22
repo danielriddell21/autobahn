@@ -133,6 +133,10 @@ type Agent struct {
 	// Input and is left alone otherwise: no route to follow, no lane to be
 	// nudged back onto, and no opinion about junctions.
 	Manual bool
+	// signal is the turn signal a person or the network has set, which stands
+	// in for the one the route would imply once signalSet is.
+	signal    Indicator
+	signalSet bool
 	// Input is the driver's controls while Manual is set.
 	Input Controls
 	// Blocking marks a unit parked across the carriageway as part of a
@@ -160,6 +164,9 @@ func (a *Agent) style() Style {
 
 // Indicator returns the turn signal implied by the agent's next manoeuvre.
 func (a *Agent) Indicator() Indicator {
+	if a.signalSet {
+		return a.signal
+	}
 	if ind, ok := a.laneIndicator(); ok {
 		return ind
 	}
@@ -197,16 +204,54 @@ func (a *Agent) SpeedLimit() float32 {
 
 // NewAgent spawns a traffic car at the given distance along a lane.
 func NewAgent(id int, c *city.City, lane *city.Lane, s float32, rng *rand.Rand) *Agent {
-	body := RandomBody(rng, c.Map())
+	return newAgent(id, c, lane, s, rng, placeOf(c))
+}
+
+// place is what a world's traffic is drawn from and driven on: the mix of
+// cars, and how much of a tyre's grip the road gives. A map has both of its
+// own; a custom map's Config may say otherwise.
+type place struct {
+	mix  mix
+	grip float32
+}
+
+// placeOf is the place a map makes when nothing overrides it.
+func placeOf(c *city.City) place {
+	return place{mix: mixFor(c.Map()), grip: SeasonGrip(c.Map().Season())}
+}
+
+// placeFor is the place a config asks for.
+func placeFor(cfg Config) place {
+	m := cfg.Map
+	if cfg.Params != nil {
+		m = cfg.Params.Map
+	}
+	pl := place{mix: mixFor(m)}
+	if cfg.Mix != nil {
+		pl.mix = *cfg.Mix
+	}
+	season := m.Season()
+	if cfg.Season != nil {
+		season = *cfg.Season
+	}
+	pl.grip = SeasonGrip(season)
+	if cfg.GripScale > 0 {
+		pl.grip *= cfg.GripScale
+	}
+	return pl
+}
+
+func newAgent(id int, c *city.City, lane *city.Lane, s float32, rng *rand.Rand, pl place) *Agent {
+	body := randomBody(rng, pl.mix)
 	paint := rng.IntN(8)
 	if body.Livery >= 0 {
 		paint = body.Livery
 	}
 	a := &Agent{
-		ID: id, V: NewVehicle(seasoned(body.Spec, c), lane.Point(s), lane.HeadingAt(s)),
+		ID: id, V: NewVehicle(body.Spec.OnSurface(pl.grip), lane.Point(s), lane.HeadingAt(s)),
 		Paint: paint, Body: body, Style: RandomStyle(rng), Role: RoleCivilian,
 		lane: lane, s: s, stoppedAt: -1, rng: rng,
-		surface: SeasonGrip(c.Map().Season()),
+		surface: pl.grip,
 	}
 	a.chooseNext(c)
 	return a
@@ -215,7 +260,11 @@ func NewAgent(id int, c *city.City, lane *city.Lane, s float32, rng *rand.Rand) 
 // NewPoliceUnit spawns a marked police car, which patrols like any other
 // vehicle until it is called to a pursuit.
 func NewPoliceUnit(id int, c *city.City, lane *city.Lane, s float32, rng *rand.Rand) *Agent {
-	a := NewAgent(id, c, lane, s, rng)
+	return newPoliceUnit(id, c, lane, s, rng, placeOf(c))
+}
+
+func newPoliceUnit(id int, c *city.City, lane *city.Lane, s float32, rng *rand.Rand, pl place) *Agent {
+	a := newAgent(id, c, lane, s, rng, pl)
 	a.Role = RolePolice
 	a.Style = Normal()
 	a.Body = BodyOf(Estate) // a marked traffic car, not a hatchback

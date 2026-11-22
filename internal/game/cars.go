@@ -107,7 +107,7 @@ func (g *Game) drawTraffic(eye mathx.Vec, drawPlayer bool) {
 // playerIndicator is the signal the autopilot is showing, while it drives.
 func (g *Game) playerIndicator() sim.Indicator {
 	if !g.auto {
-		return sim.IndicatorOff
+		return g.indicator
 	}
 	switch g.lastCmd.Indicator {
 	case autopilot.IndicateLeft:

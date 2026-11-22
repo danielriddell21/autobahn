@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "ghosts": {
+    "city-clean": {
+      "score": 367,
+      "distance": 367,
+      "points": 0,
+      "faults": 0
+    },
+    "city-sprint": {
+      "score": 570,
+      "distance": 570,
+      "points": 0,
+      "faults": 0
+    },
+    "roadtown-sprint": {
+      "score": 412,
+      "distance": 412,
+      "points": 0,
+      "faults": 0
+    },
+    "roadtown-works": {
+      "score": 379,
+      "distance": 379,
+      "points": 0,
+      "faults": 0
+    },
+    "seatown-clean": {
+      "score": 508,
+      "distance": 508,
+      "points": 0,
+      "faults": 0
+    },
+    "seatown-sprint": {
+      "score": 590,
+      "distance": 590,
+      "points": 0,
+      "faults": 0
+    },
+    "village-rain": {
+      "score": 411,
+      "distance": 411,
+      "points": 0,
+      "faults": 0
+    },
+    "village-sprint": {
+      "score": 324,
+      "distance": 324,
+      "points": 0,
+      "faults": 0
+    }
+  }
+}

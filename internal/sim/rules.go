@@ -84,6 +84,10 @@ type Judge struct {
 	// Faults is the number of infractions recorded, including any that have
 	// since rolled out of the bounded history.
 	Faults int
+	// RedsStopped counts the approaches to a signal at red that the vehicle
+	// stood still at, and RedsRun the ones it went through on red. They are not
+	// cleared by the cooldown that mutes a repeated fault.
+	RedsStopped, RedsRun int
 	// Events publishes every infraction as it happens, so the HUD can react
 	// without polling. The bus is generic over this game's own event type.
 	Events *telemetry.Bus[Infraction]
@@ -103,6 +107,7 @@ type Judge struct {
 	approach    *city.Lane
 	judgedPass  bool
 	stopDone    bool
+	redStop     bool // stood still at this approach while the signal showed red
 	speedTimer  float32
 	wrongTimer  float32
 	offTimer    float32
@@ -141,9 +146,10 @@ func (j *Judge) Reset() {
 	j.Faults = 0
 	j.Points = 0
 	j.Distance = 0
+	j.RedsStopped, j.RedsRun = 0, 0
 	j.approach = nil
 	j.judgedPass = false
-	j.stopDone = false
+	j.stopDone, j.redStop = false, false
 	j.speedTimer, j.wrongTimer, j.offTimer = 0, 0, 0
 	clear(j.cooldown)
 	j.initialised = false
@@ -288,7 +294,7 @@ func (j *Judge) checkOffRoad(v *Vehicle, proj city.LaneProjection, speed, now, d
 func (j *Judge) checkJunction(v *Vehicle, proj city.LaneProjection, sig *Signals, speed, now float32) {
 	l := proj.Lane
 	beyond := v.Pos.Sub(l.B).Dot(l.Fwd)
-	if j.trackApproach(v, l, beyond, speed) {
+	if j.trackApproach(v, l, sig, beyond, speed) {
 		return
 	}
 
@@ -303,17 +309,20 @@ func (j *Judge) checkJunction(v *Vehicle, proj city.LaneProjection, sig *Signals
 	j.judgeControl(v, l, sig, speed, now)
 }
 
-func (j *Judge) trackApproach(v *Vehicle, l *city.Lane, beyond, speed float32) bool {
+func (j *Judge) trackApproach(v *Vehicle, l *city.Lane, sig *Signals, beyond, speed float32) bool {
 	// Only while the car is still short of the stop line and heading for it.
 	if beyond >= -0.5 || l.Control == city.ControlNone || v.Vel.Dot(l.Fwd) <= 0 {
 		return false
 	}
 	if j.approach != l {
-		j.approach, j.judgedPass, j.stopDone = l, false, false
+		j.approach, j.judgedPass, j.stopDone, j.redStop = l, false, false, false
 	}
 	// A full stop anywhere near the line satisfies a stop sign.
 	if beyond > -4.5 && speed < 0.7 {
 		j.stopDone = true
+		if l.Control == city.ControlSignal && sig.LaneState(l) == SignalRed {
+			j.redStop = true
+		}
 	}
 	return true
 }
@@ -322,11 +331,14 @@ func (j *Judge) judgeControl(v *Vehicle, l *city.Lane, sig *Signals, speed, now 
 	switch l.Control {
 	case city.ControlSignal:
 		if ranLight(sig, l, speed) {
+			j.RedsRun++
 			j.record(Infraction{
 				Kind: RedLight, At: now, Pos: v.Pos,
 				Detail: fmt.Sprintf("entered on %s at %.0f mph",
 					strings.ToLower(sig.LaneState(l).String()), mathx.ToMPH(speed)),
 			})
+		} else if j.redStop {
+			j.RedsStopped++
 		}
 	case city.ControlStop:
 		if !j.stopDone {

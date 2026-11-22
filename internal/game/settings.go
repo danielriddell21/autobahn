@@ -5,6 +5,7 @@ import (
 
 	"github.com/danielriddell21/autobahn/internal/autopilot"
 	"github.com/danielriddell21/autobahn/internal/city"
+	"github.com/danielriddell21/autobahn/internal/custom"
 	"github.com/danielriddell21/autobahn/internal/sim"
 	"github.com/danielriddell21/autobahn/internal/weather"
 
@@ -57,6 +58,12 @@ type Settings struct {
 	// Weather is the sky a new session is driven under: drifting, or held at one
 	// kind.
 	Weather weather.Setting `json:"weather"`
+	// Custom is the share code of the custom map last edited, or empty. The
+	// named ones are kept apart, in customs.json.
+	Custom string `json:"custom,omitempty"`
+	// HostMode is what the host row on the title screen starts: a chase or one
+	// of the co-op games.
+	HostMode NetMode `json:"hostMode,omitempty"`
 }
 
 // DefaultSettings returns the settings a first run starts with.
@@ -105,6 +112,17 @@ func (s *Settings) clamp() {
 	}
 	if !s.Map.Valid() {
 		s.Map = city.MapCity
+	}
+	s.clampStored()
+}
+
+// clampStored brings the settings that are stored as codes back into range.
+func (s *Settings) clampStored() {
+	if s.HostMode >= numNetModes {
+		s.HostMode = ModeChase
+	}
+	if _, err := custom.Decode(s.Custom); err != nil {
+		s.Custom = ""
 	}
 }
 

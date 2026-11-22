@@ -202,6 +202,8 @@ type Wanted struct {
 	Stops int
 	// Escapes counts how many pursuits the driver has got away from.
 	Escapes int
+	// Roadblocks counts the roadblocks the driver has gone through.
+	Roadblocks int
 	// Bounty is what the pursuit in progress is worth, and Banked what has
 	// been kept from the ones escaped. Being stopped forfeits the bounty.
 	Bounty, Banked int
@@ -289,14 +291,18 @@ func (w *Wanted) earn(points float32) {
 func (w *Wanted) coolFor() float32 { return coolBase + coolPerLevel*float32(w.Level) }
 
 func (w *World) nearestUnit() (float32, bool) {
-	// Returns the distance to the closest police unit, and whether
-	// there is one at all.
+	return w.nearestUnitTo(w.Suspect().Pos)
+}
+
+// nearestUnitTo returns the distance from a point to the closest police unit,
+// and whether there is one at all.
+func (w *World) nearestUnitTo(p mathx.Vec) (float32, bool) {
 	best, found := float32(1e9), false
 	for _, a := range w.Agents {
 		if a.Role != RolePolice {
 			continue
 		}
-		if d := a.V.Pos.DistTo(w.Player.Pos); d < best {
+		if d := a.V.Pos.DistTo(p); d < best {
 			best, found = d, true
 		}
 	}
@@ -317,12 +323,23 @@ func (w *World) witnessed() bool {
 // inSight reports whether any unit currently knows where the driver is: it
 // can see the car down a clear street, or is close enough not to need to.
 func (w *World) inSight() bool {
+	for _, v := range w.team() {
+		if w.sees(v) {
+			return true
+		}
+	}
+	return false
+}
+
+// sees reports whether any unit knows where one car is. A team is in sight
+// while either of its cars is.
+func (w *World) sees(v *Vehicle) bool {
 	for _, a := range w.Agents {
 		if a.Role != RolePolice {
 			continue
 		}
-		d := a.V.Pos.DistTo(w.Player.Pos)
-		if d < closeRange || (d < sightRange && w.LineOfSight(a.V.Pos, w.Player.Pos)) {
+		d := a.V.Pos.DistTo(v.Pos)
+		if d < closeRange || (d < sightRange && w.LineOfSight(a.V.Pos, v.Pos)) {
 			return true
 		}
 	}
@@ -383,7 +400,7 @@ func (w *World) updateWanted(dt float32) {
 	}
 	if w.inSight() {
 		wa.State = PursuitActive
-		wa.LastSeen = w.Player.Pos
+		wa.LastSeen = w.seenCar().Pos
 		// Being found again does not hand back all the ground gained, but it
 		// goes quickly.
 		wa.hidden = max(wa.hidden-dt*3, 0)
@@ -410,12 +427,22 @@ func (w *World) updateWanted(dt float32) {
 // that has just ended the pursuit.
 func (w *World) holdStill(dt float32) bool {
 	wa := &w.Wanted
-	dist, haveUnit := w.nearestUnit()
+	// Either car of a team being held stops the whole team.
+	alongside, cornered := false, false
+	for _, v := range w.team() {
+		dist, haveUnit := w.nearestUnitTo(v.Pos)
+		switch {
+		case haveUnit && dist < stopRange && v.Speed() < 2.5:
+			alongside = true
+		case haveUnit && dist < cornerRange && v.Speed() < 1.2 && wa.State == PursuitActive:
+			cornered = true
+		}
+	}
 	switch {
-	case haveUnit && dist < stopRange && w.Player.Speed() < 2.5:
+	case alongside:
 		// A unit alongside and the car stopped: the ordinary way it ends.
 		wa.heldStill += dt
-	case haveUnit && dist < cornerRange && w.Player.Speed() < 1.2 && wa.State == PursuitActive:
+	case cornered:
 		// Stopped in plain view with units close by, wherever the car has got
 		// itself to. It takes them longer to walk over, but they will.
 		wa.heldStill += dt * cornerRate
@@ -467,14 +494,15 @@ func (w *World) setPursuit(on bool) {
 		return
 	}
 	// Nearest first.
+	sp := w.Suspect().Pos
 	for i := 1; i < len(units); i++ {
-		for j := i; j > 0 && units[j].V.Pos.DistTo(w.Player.Pos) < units[j-1].V.Pos.DistTo(w.Player.Pos); j-- {
+		for j := i; j > 0 && units[j].V.Pos.DistTo(sp) < units[j-1].V.Pos.DistTo(sp); j-- {
 			units[j], units[j-1] = units[j-1], units[j]
 		}
 	}
 	reach := pursuitRange * (0.55 + 0.15*float32(level))
 	for i, a := range units {
-		if i >= unitsFor[level] || a.V.Pos.DistTo(w.Player.Pos) > reach {
+		if i >= unitsFor[level] || a.V.Pos.DistTo(sp) > reach {
 			break
 		}
 		a.pursuing, a.rank = true, i
@@ -519,7 +547,8 @@ func (w *World) interceptOf(a *Agent) mathx.Vec {
 	if w.Wanted.State == PursuitEvading {
 		return w.Wanted.LastSeen
 	}
-	return InterceptPoint(w.Player.Pos, w.Player.Vel, a.V.Pos, a.V.Speed())
+	s := w.Suspect()
+	return InterceptPoint(s.Pos, s.Vel, a.V.Pos, a.V.Speed())
 }
 
 // Close-quarters pursuit, in metres and m/s.
@@ -545,7 +574,7 @@ const (
 // finds itself ahead simply drives at it. Once the car is nearly stopped
 // everybody closes in around it.
 func (a *Agent) engage(w *World, dt float32) bool {
-	p := w.Player
+	p := w.Suspect()
 	dist := a.V.Pos.DistTo(p.Pos)
 	if w.Wanted.State != PursuitActive || dist > engageRange || !w.LineOfSight(a.V.Pos, p.Pos) {
 		if a.free {
@@ -602,7 +631,7 @@ const backTime float32 = 1.1
 // tactic is where a unit in close pursuit is trying to put itself, and how
 // fast it wants to be going when it gets there.
 func (a *Agent) tactic(w *World, dist float32) (mathx.Vec, float32) {
-	p := w.Player
+	p := w.Suspect()
 	fwd := p.Forward()
 	side := fwd.Right()
 	speed := p.Speed()
@@ -713,6 +742,7 @@ func (w *World) updateRoadblock(dt float32) {
 		// Through it, or round it.
 		w.blockRun = true
 		w.Wanted.earn(bountyPerBlock)
+		w.Wanted.Roadblocks++
 	}
 	if w.blocked && w.sinceBlock < blockRedeploy {
 		return

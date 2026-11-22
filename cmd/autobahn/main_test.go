@@ -6,6 +6,7 @@ import (
 
 	"github.com/danielriddell21/autobahn/internal/autopilot"
 	"github.com/danielriddell21/autobahn/internal/city"
+	"github.com/danielriddell21/autobahn/internal/custom"
 	"github.com/danielriddell21/autobahn/internal/game"
 	"github.com/danielriddell21/autobahn/internal/sim"
 )
@@ -165,5 +166,19 @@ func TestParseReadsTheMapAndTheBypass(t *testing.T) {
 	}
 	if _, _, err := parse("autobahn", []string{"-map", "atlantis"}, &strings.Builder{}); err == nil {
 		t.Error("a map that does not exist should be refused")
+	}
+}
+
+func TestParseCustomAndPlay(t *testing.T) {
+	code := custom.FromMap(city.MapVillage, 5).Encode()
+	opts, _, err := parse("autobahn", []string{"-custom", code, "-play", "coop-car"}, &strings.Builder{})
+	if err != nil {
+		t.Fatalf("parse() error = %v", err)
+	}
+	if opts.Custom == nil || opts.Custom.Seed != 5 || opts.Custom.Base != city.MapVillage {
+		t.Errorf("custom = %+v", opts.Custom)
+	}
+	if opts.Play != game.ModeCoopCar || !opts.Given["custom"] || !opts.Given["play"] {
+		t.Errorf("play = %v, given %v", opts.Play, opts.Given)
 	}
 }

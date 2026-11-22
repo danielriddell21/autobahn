@@ -101,11 +101,6 @@ func (s Spec) OnSurface(grip float32) Spec {
 	return s
 }
 
-// seasoned is a vehicle's profile on the roads of a particular city.
-func seasoned(s Spec, c *city.City) Spec {
-	return s.OnSurface(SeasonGrip(c.Map().Season()))
-}
-
 // Wheelbase returns the distance between the axles.
 func (s Spec) Wheelbase() float32 { return s.FrontAxle + s.RearAxle }
 

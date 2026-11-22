@@ -236,3 +236,36 @@ func TestWallsStandWhereTheBuildingsAre(t *testing.T) {
 		t.Error("a car three metres clear of the long face is in collision with it")
 	}
 }
+
+// A car that stands at a red and goes on at green has stopped at a red; one
+// that goes through on red has run it. The achievements count both.
+func TestJudgeCountsRedsStoppedAtAndRun(t *testing.T) {
+	l, sig := signalledLane(t)
+	j := NewJudge(city.Generate(city.DefaultParams(7)))
+	v := &Vehicle{}
+	v.Pos = l.B.Sub(l.Fwd.Mul(2))
+
+	until(t, sig, l, SignalRed)
+	v.Vel = l.Fwd.Mul(0.1)
+	if !j.trackApproach(v, l, sig, -2, v.Speed()) {
+		t.Fatal("the approach was not tracked")
+	}
+	until(t, sig, l, SignalGreen)
+	j.judgeControl(v, l, sig, 5, 0)
+	if j.RedsStopped != 1 || j.RedsRun != 0 {
+		t.Errorf("stopped at a red and went on green: stopped %d, run %d", j.RedsStopped, j.RedsRun)
+	}
+
+	j.approach = nil
+	until(t, sig, l, SignalRed)
+	v.Vel = l.Fwd.Mul(5)
+	j.trackApproach(v, l, sig, -2, v.Speed())
+	j.judgeControl(v, l, sig, 5, 1)
+	if j.RedsStopped != 1 || j.RedsRun != 1 {
+		t.Errorf("ran a red: stopped %d, run %d", j.RedsStopped, j.RedsRun)
+	}
+	j.Reset()
+	if j.RedsStopped != 0 || j.RedsRun != 0 {
+		t.Error("Reset left the red counts")
+	}
+}

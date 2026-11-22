@@ -143,8 +143,10 @@ func (w *World) collideCone(v *Vehicle, cone mathx.OBB, report bool) {
 	if closing := v.Vel.Dot(axis); closing > 0 {
 		v.Vel = v.Vel.Sub(axis.Mul(closing * (1 + restitution)))
 		if report {
-			w.Judge.ReportCollision(v, "hit roadworks", closing, w.Time)
-			w.batter(closing)
+			w.judgeFor(v).ReportCollision(v, "hit roadworks", closing, w.Time)
+			if v == w.Player {
+				w.batter(closing)
+			}
 		}
 	}
 }
