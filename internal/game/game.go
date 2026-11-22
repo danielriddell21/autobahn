@@ -342,6 +342,36 @@ func (o Options) chaseReady() Options {
 	return o
 }
 
+// ambulancesInTraffic is how many ambulances go about an ordinary drive: the
+// number the gate measures with.
+const ambulancesInTraffic = 2
+
+// worldConfig is the simulation a set of options asks for. The scenario of a
+// challenge names the place and the rules, so it is used as it stands (only the
+// car is the player's), and has no ambulances, which would disturb its ghosts.
+// A networked game has none either: they are not in the Snapshot.
+func worldConfig(opts Options) sim.Config {
+	cfg := sim.Config{
+		Seed: opts.Seed, Map: opts.Map, Traffic: opts.Traffic, Police: opts.Police,
+		PlayerBody: sim.PlayerBodyOf(opts.Car), Weather: opts.Weather,
+	}
+	switch {
+	case opts.Challenge != nil:
+		cfg = challengeConfig(*opts.Challenge)
+		cfg.PlayerBody = sim.PlayerBodyOf(opts.Car)
+	case opts.Custom != nil:
+		// The map is the preset the custom one starts from, so it is dressed as that
+		// preset is; the rest of the world is the spec's.
+		if !opts.networked() {
+			cfg.Ambulances = ambulancesInTraffic
+		}
+		cfg = opts.Custom.Apply(cfg)
+	case !opts.networked():
+		cfg.Ambulances = ambulancesInTraffic
+	}
+	return cfg
+}
+
 // New creates a game with a freshly generated city. The window must already be
 // open, because the AI camera allocates a render texture.
 func New(opts Options) *Game {
@@ -351,21 +381,12 @@ func New(opts Options) *Game {
 	if opts.Play.SharedCar() {
 		opts.Autopilot = false // nobody can take the wheel of a shared car
 	}
-	cfg := sim.Config{
-		Seed: opts.Seed, Map: opts.Map, Traffic: opts.Traffic, Police: opts.Police,
-		PlayerBody: sim.PlayerBodyOf(opts.Car), Weather: opts.Weather,
-	}
+	cfg := worldConfig(opts)
 	switch {
 	case opts.Challenge != nil:
-		// The scenario names the place and the rules; only the car is the player's.
-		cfg = challengeConfig(*opts.Challenge)
-		cfg.PlayerBody = sim.PlayerBodyOf(opts.Car)
 		opts.Map, opts.Seed, opts.Custom = opts.Challenge.CityMap(), opts.Challenge.Seed, nil
 		opts.Autopilot, opts.Chase = false, false
 	case opts.Custom != nil:
-		// The map is the preset the custom one starts from, so it is dressed as that
-		// preset is; the rest of the world is the spec's.
-		cfg = opts.Custom.Apply(cfg)
 		opts.Map, opts.Seed = opts.Custom.Base, opts.Custom.Seed
 	}
 	g := &Game{

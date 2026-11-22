@@ -68,3 +68,22 @@ func TestChallengeVerdict(t *testing.T) {
 		t.Fatal(title)
 	}
 }
+
+func TestAmbulancesGoAboutOrdinaryDrivesOnly(t *testing.T) {
+	sc := scenario.All()[0]
+	for name, c := range map[string]struct {
+		o    Options
+		want int
+	}{
+		"normal":    {Options{Seed: 5}, ambulancesInTraffic},
+		"autopilot": {Options{Seed: 5, Autopilot: true}, ambulancesInTraffic},
+		"challenge": {Options{Seed: 5, Challenge: &sc}, 0},
+		"networked": {Options{Seed: 5, Networked: true}, 0},
+		"hosted":    {Options{Seed: 5, Host: ":1"}, 0},
+		"joined":    {Options{Seed: 5, Join: "x:1"}, 0},
+	} {
+		if got := worldConfig(c.o).Ambulances; got != c.want {
+			t.Errorf("%s: %d ambulances, want %d", name, got, c.want)
+		}
+	}
+}
