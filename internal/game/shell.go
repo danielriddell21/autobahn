@@ -2,6 +2,7 @@ package game
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -11,7 +12,9 @@ import (
 	"github.com/danielriddell21/crucible/netplay"
 
 	"github.com/danielriddell21/autobahn/internal/autopilot"
+	"github.com/danielriddell21/autobahn/internal/job"
 	"github.com/danielriddell21/autobahn/internal/pack"
+	"github.com/danielriddell21/autobahn/internal/weather"
 )
 
 // screen is what the window is currently showing.
@@ -36,6 +39,8 @@ const (
 	screenGarage
 	// screenPacks lists the packs and how far the player is toward each.
 	screenPacks
+	// screenShop lists what earnings can buy.
+	screenShop
 )
 
 // Shell is the menu layer around a session: the title screen a run opens on,
@@ -68,14 +73,22 @@ type Shell struct {
 // NewShell builds the menu layer for a session, loading the player's stored
 // settings.
 func NewShell(opts Options) *Shell {
+	set := LoadSettings()
 	s := &Shell{
 		opts:     opts,
-		settings: LoadSettings(),
-		career:   LoadCareer(),
+		settings: set,
+		career:   loadCareerFor(set),
 		net:      &netplay.Session[Snapshot, Input]{},
 		joinAddr: "127.0.0.1",
 	}
-	s.settings.keepTo(s.access())
+	// A migrated file is written back once. Under bypass nothing about
+	// ownership is ever written, so the file is left as it was found.
+	if !s.access().Bypass {
+		if err := s.career.Save(); err != nil {
+			s.notice = err.Error()
+		}
+	}
+	s.settings.keepTo(s.holdings())
 	s.showTitle()
 	return s
 }
@@ -109,9 +122,29 @@ func (s *Shell) access() pack.Access {
 	return pack.Access{Banked: s.career.Banked, Bypass: s.opts.UnlockAll || s.settings.UnlockAll}
 }
 
+// payJobs adds what the finished jobs paid to the career's earnings and
+// reports whether anything was added.
+func (s *Shell) payJobs(rs []job.Result) bool {
+	paid := false
+	for _, r := range rs {
+		if r.Pay > 0 {
+			s.career.Earn(r.Pay)
+			paid = true
+		}
+	}
+	return paid
+}
+
 // collect moves the bounty the player has just banked into their career,
 // and announces any pack it unlocked.
 func (s *Shell) collect() {
+	// Job pay is earnings, which the shop spends. Bounty is not earnings: it
+	// only ever opens packs.
+	if s.payJobs(s.game.TakeJobResults()) {
+		if err := s.career.Save(); err != nil {
+			s.notice = err.Error()
+		}
+	}
 	earned := s.game.TakeEarned()
 	if earned == 0 {
 		return
@@ -187,7 +220,7 @@ func (s *Shell) showTitle() {
 	s.menu = &menu.Menu{
 		Title:    "AUTOBAHN",
 		Subtitle: s.titleSubtitle(),
-		Items: []menu.Item{
+		Items: s.withShop([]menu.Item{
 			{Label: text("Drive"), Action: func() { s.startGame(false) }},
 			{Label: text("Autopilot"), Action: func() { s.startGame(true) }},
 			{
@@ -203,8 +236,23 @@ func (s *Shell) showTitle() {
 			{Label: text("Packs"), Action: s.showPacks},
 			{Label: text("Settings"), Action: func() { s.showSettings(screenTitle) }},
 			{Label: text("Quit"), Action: func() { s.quit = true }},
-		},
+		}),
 	}
+}
+
+// withShop puts the Shop row after Packs. A player who has bypassed the
+// prices has nothing to buy, so the row is left out.
+func (s *Shell) withShop(items []menu.Item) []menu.Item {
+	if s.access().Bypass {
+		return items
+	}
+	row := menu.Item{Label: text("Shop"), Action: func() { s.showShop(0) }}
+	for i, it := range items {
+		if it.Label() == "Packs" {
+			return slices.Insert(items, i+1, row)
+		}
+	}
+	return items
 }
 
 // chooseMap steps the title screen's map through the ones the player holds.
@@ -294,6 +342,15 @@ func (s *Shell) showSettings(from screen) {
 				},
 			},
 			{
+				Label:  func() string { return "Jobs on auto  " + menu.OnOff(set.AutopilotJobs) },
+				Adjust: func(int) { set.AutopilotJobs = !set.AutopilotJobs },
+				Action: func() { set.AutopilotJobs = !set.AutopilotJobs },
+			},
+			{
+				Label:  func() string { return "Weather       " + set.Weather.String() },
+				Adjust: func(d int) { set.Weather = cycleWeather(set.Weather, d) },
+			},
+			{
 				Label:  func() string { return "Start time    " + set.Time.String() },
 				Adjust: func(d int) { set.Time = cycleTime(set.Time, d) },
 			},
@@ -321,11 +378,11 @@ func (s *Shell) showGarage(from screen) {
 		Items: []menu.Item{
 			{
 				Label:  func() string { return "Car     " + set.Car.Name() },
-				Adjust: func(d int) { set.Car = cycleBody(s.access().Bodies(), set.Car, d); s.applyCar() },
+				Adjust: func(d int) { set.Car = cycleBody(s.holdings().Drivables(), set.Car, d); s.applyCar() },
 			},
 			{
 				Label:  func() string { return "Paint   " + paintOf(set.Paint).name },
-				Adjust: func(d int) { set.Paint = cyclePaint(set.Paint, d); s.applyCar() },
+				Adjust: func(d int) { set.Paint = cyclePaint(s.holdings().Wearables(), set.Paint, d); s.applyCar() },
 			},
 			{Label: text("Back"), Action: s.leaveSettings},
 		},
@@ -342,6 +399,15 @@ func (s *Shell) applyCar() {
 // cycleTime steps through the times of day, wrapping at both ends.
 func cycleTime(t TimeOfDay, dir int) TimeOfDay {
 	return TimeOfDay((int(t) + dir + int(NumTimes)) % int(NumTimes))
+}
+
+// cycleWeather steps through the weather settings, drift first, wrapping at
+// both ends.
+func cycleWeather(w weather.Setting, dir int) weather.Setting {
+	all := append([]weather.Setting{weather.Drift}, weather.Held(weather.Clear), weather.Held(weather.Rain),
+		weather.Held(weather.Fog), weather.Held(weather.Storm))
+	i := slices.Index(all, w)
+	return all[(max(i, 0)+dir+len(all))%len(all)]
 }
 
 // cycleCamera steps through the viewpoints, wrapping at both ends.
@@ -487,9 +553,9 @@ func (s *Shell) startGame(autopilot bool) {
 		o = s.settings.applyTo(o)
 	}
 	o.Autopilot = autopilot
-	if err := o.locked(s.access()); err != nil {
-		// Only a command line can ask for what the player does not hold; the
-		// menus never offer it.
+	if err := o.lockedFor(s.holdings()); err != nil {
+		// Only a command line can ask for what the player does not hold or
+		// own; the menus never offer it.
 		s.net.Leave()
 		s.game = nil
 		s.notice = err.Error()

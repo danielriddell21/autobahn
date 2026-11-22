@@ -40,6 +40,9 @@ type Snapshot struct {
 	Clock float32
 	// Hour is the host's time of day, so both players drive in the same light.
 	Hour float32
+	// Weather is the host's weather setting, which with Clock is all the weather
+	// there is: the guest works the sky out from the same seed.
+	Weather uint8
 	// Runner is the car being chased.
 	Runner Pose
 	// Agents are the traffic and police, in the order the seeded world creates

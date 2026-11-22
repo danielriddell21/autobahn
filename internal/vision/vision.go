@@ -47,8 +47,24 @@ const (
 	// ClassLaneOncoming marks the middle of the lane beside the car's own that
 	// carries traffic the other way.
 	ClassLaneOncoming
+	// The classes of roadworks. They come after every other class so that none
+	// of the numbering above moves. {128, 255, 128} is deliberately unused: it
+	// is held back for an ambulance.
+
+	// ClassCone is a traffic cone, and ClassBarrier a barrier across a lane.
+	// Both are solid, and both are in the way.
+	ClassCone
+	ClassBarrier
+	// ClassRoadClosed is the sign at the mouth of a street that is shut.
+	ClassRoadClosed
+	// ClassDiversion is a sign warning of roadworks or a diversion ahead.
+	ClassDiversion
 	numClasses
 )
+
+// NumClasses is how many classes there are, counting ClassNone. Every class
+// below it is a real one with a colour of its own.
+const NumClasses = int(numClasses)
 
 // classNames are the labels drawn beside each box.
 var classNames = [numClasses]string{
@@ -69,6 +85,10 @@ var classNames = [numClasses]string{
 	ClassStopLine:      "STOP LINE",
 	ClassLaneSide:      "LANE ALONGSIDE",
 	ClassLaneOncoming:  "ONCOMING LANE",
+	ClassCone:          "CONE",
+	ClassBarrier:       "BARRIER",
+	ClassRoadClosed:    "ROAD CLOSED",
+	ClassDiversion:     "DIVERSION",
 }
 
 // String returns the class label drawn beside each box.
@@ -125,6 +145,10 @@ var classColors = [numClasses]color.RGBA{
 	ClassStopLine:      {128, 255, 0, 255},
 	ClassLaneSide:      {128, 128, 255, 255},
 	ClassLaneOncoming:  {255, 128, 128, 255},
+	ClassCone:          {255, 176, 0, 255},
+	ClassBarrier:       {255, 80, 80, 255},
+	ClassRoadClosed:    {176, 0, 255, 255},
+	ClassDiversion:     {255, 255, 80, 255},
 }
 
 // RGBA returns the exact colour a class is annotated in.
@@ -134,6 +158,13 @@ func RGBA(c Class) color.RGBA { return classColors[c] }
 // still something to avoid rear-ending, so the autopilot treats both alike
 // when it is deciding what to follow.
 func IsVehicle(c Class) bool { return c == ClassVehicle || c == ClassPolice }
+
+// IsObstacle reports whether a class is something solid in the road that the
+// car must not run into: a vehicle of any kind, or the cones and barriers of
+// roadworks.
+func IsObstacle(c Class) bool {
+	return IsVehicle(c) || c == ClassCone || c == ClassBarrier
+}
 
 // IsLaneMarker reports whether a class is one of the lane centreline markers.
 //
@@ -285,6 +316,8 @@ const (
 	SignTopHeight float32 = 2.28
 	// SpeedSignTopHeight is the top of a speed limit sign's box.
 	SpeedSignTopHeight float32 = 2.45
+	// WorksSignTopHeight is the top of a road closed or diversion sign's box.
+	WorksSignTopHeight float32 = 2.55
 )
 
 // RangeAtHeight estimates how far ahead a point lies when its height above the

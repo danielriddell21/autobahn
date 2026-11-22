@@ -7,6 +7,8 @@ import (
 
 	"github.com/danielriddell21/autobahn/internal/city"
 	"github.com/danielriddell21/autobahn/internal/mathx"
+	"github.com/danielriddell21/autobahn/internal/weather"
+	"github.com/danielriddell21/autobahn/internal/works"
 )
 
 // The crucible random streams this package draws from. Each subsystem has its
@@ -43,6 +45,12 @@ type Config struct {
 	Police int
 	// PlayerBody is the player's car. Left empty, it is the usual one.
 	PlayerBody Body
+	// Works is how much of the town is dug up. The zero value is the normal
+	// amount, so roadworks are part of the world unless somebody turns them off.
+	Works works.Level
+	// Weather is how the sky is chosen. The zero value drifts through the spells
+	// the seed gives it; hold it at weather.Clear for the dry runs the gate scores.
+	Weather weather.Setting
 }
 
 // DefaultConfig returns a populated city configuration.
@@ -65,12 +73,22 @@ type World struct {
 	// Route is the player car's navigation plan, used to draw lane guidance
 	// into the annotated camera image.
 	Route *Route
+	// Works is the roadworks in force, brought up to Time every step.
+	Works *works.Index
+	// Climate is the weather the world is driven in, applied every step.
+	Climate Climate
 
 	// Time is the elapsed simulation time in seconds.
 	Time float32
 	// Damage is how battered the player's car is, from 0 to 1. Every hard
 	// knock adds to it, and a car at 1 has very little left to give.
 	Damage float32
+
+	// solid is every cone and barrier in the road at the moment, and stubs the
+	// stopped stand-ins traffic queues behind at the start of each; see works.go.
+	solid    []mathx.OBB
+	stubs    []*Vehicle
+	stubPool []*Vehicle
 
 	rng       *rand.Rand
 	buildings map[[2]int][]int
@@ -111,9 +129,12 @@ func NewWorld(cfg Config) *World {
 		City: c, Signals: NewSignals(c, cfg.Seed),
 		Judge: NewJudge(c),
 		rng:   traffic, buildings: map[[2]int][]int{}, cellSize: 48,
-		parked: map[[2]int][]int{},
+		parked:  map[[2]int][]int{},
+		Climate: NewClimate(cfg.Seed, cfg.Map, cfg.Weather),
 	}
 	w.indexBuildings()
+	w.Works = works.NewIndex(c, cfg.Seed, cfg.Works)
+	w.syncWorks()
 
 	// Put the player on a decent length of arterial near the middle.
 	start := c.Lanes[0]
@@ -136,13 +157,18 @@ func NewWorld(cfg Config) *World {
 	w.Player = NewVehicle(seasoned(w.PlayerBody.Spec, c), w.spawnPos, w.spawnYaw)
 	w.Player.Nitro = 1
 	w.Route = NewRoute(c, rng.Stream(cfg.Seed, streamRoute))
+	w.Route.works = w.Works
 	w.Route.Update(w.Player.Pos, w.Player.Forward())
 
 	for i := range cfg.Traffic {
 		lane := c.RandomLane(traffic, 30)
 		a := NewAgent(i, c, lane, traffic.Float32()*lane.Length, traffic)
-		if w.tooClose(a.V.Pos, 9) {
+		if w.tooClose(a.V.Pos, 9) || w.Works.Barred(lane.ID) {
 			continue
+		}
+		a.works = w.Works
+		if a.closedTurn() {
+			a.chooseNext(c)
 		}
 		w.Agents = append(w.Agents, a)
 	}
@@ -150,12 +176,17 @@ func NewWorld(cfg Config) *World {
 		lane := c.RandomLane(traffic, 30)
 		u := NewPoliceUnit(cfg.Traffic+i, c, lane, traffic.Float32()*lane.Length, traffic)
 		u.SetUnit(unitRoster[i%len(unitRoster)])
-		if w.tooClose(u.V.Pos, 9) {
+		if w.tooClose(u.V.Pos, 9) || w.Works.Barred(lane.ID) {
 			continue
+		}
+		u.works = w.Works
+		if u.closedTurn() {
+			u.chooseNext(c)
 		}
 		w.Agents = append(w.Agents, u)
 	}
 	w.watchForOffences()
+	w.Climate.Apply(w)
 	return w
 }
 
@@ -263,7 +294,9 @@ func (w *World) PlaceOnNearestLane() {
 // with the given controls.
 func (w *World) Update(c Controls, dt float32) {
 	w.Time += dt
+	w.Climate.Apply(w)
 	w.grow()
+	w.syncWorks()
 	w.Signals.Update(dt)
 	if w.Damage >= 1 {
 		// A wrecked car still moves, but only just.
@@ -393,6 +426,12 @@ func (w *World) leaderFor(a *Agent) (gap, leadSpeed float32, lead *Vehicle) {
 	for _, o := range w.Agents {
 		if o != a && o.V.Pos.DistTo(a.V.Pos) <= idmScanRange {
 			near = append(near, o.V)
+		}
+	}
+	// A cone or a barrier is a stopped car, as far as queueing is concerned.
+	for _, s := range w.stubs {
+		if s.Pos.DistTo(a.V.Pos) <= idmScanRange {
+			near = append(near, s)
 		}
 	}
 	w.near = near
@@ -733,6 +772,10 @@ func (w *World) resolveCollisions() {
 	for _, a := range w.Agents {
 		w.collideBuildings(a.V, false)
 	}
+	w.collideWorks(w.Player, true)
+	for _, a := range w.Agents {
+		w.collideWorks(a.V, false)
+	}
 }
 
 func (w *World) separate(a, b *Vehicle, axis mathx.Vec, depth float32) float32 {
@@ -855,6 +898,9 @@ func (w *World) relocate(a *Agent) {
 	for range 24 {
 		lane := w.City.RandomLane(w.rng, 30)
 		s := w.rng.Float32() * lane.Length
+		if w.laneBarred(lane) {
+			continue
+		}
 		p := lane.Point(s)
 		d := p.DistTo(w.Player.Pos)
 		if d < spawnNear || d > spawnFar {
@@ -878,11 +924,14 @@ func (w *World) relocate(a *Agent) {
 	}
 }
 
+// Weather returns the weather now.
+func (w *World) Weather() weather.State { return w.Climate.Weather(w.Time) }
+
 // SetPlayerBody changes the player's car in place, wherever it is, keeping its
 // speed and heading.
 func (w *World) SetPlayerBody(b Body) {
 	w.PlayerBody = b
-	w.Player.Spec = seasoned(b.Spec, w.City)
+	w.Player.Spec = b.Spec.OnSurface(w.Climate.Grip())
 }
 
 // ApplyPose moves a vehicle to a pose supplied by the host of a network game.

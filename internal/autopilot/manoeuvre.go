@@ -61,6 +61,9 @@ const (
 	moveSpeed float32 = 5
 	// heldRange is how close a slower car has to be to hold the driver up.
 	heldRange float32 = 40
+	// coneRoom is how much of the lane alongside has to be seen to go on, for a
+	// car stopped at a cone to move over into it.
+	coneRoom float32 = 10
 	// jumpAt is how far the lane markers have to move at once to count as the
 	// route having followed the car into another lane.
 	jumpAt float32 = 2.4
@@ -208,7 +211,7 @@ func (d *Driver) trackLead(dist float32, seen bool, speed, dt float32) {
 func (d *Driver) nearestInPath(dets []vision.Detection, lane []lanePoint) (float32, bool) {
 	best, found := float32(1e9), false
 	for _, det := range dets {
-		if !vision.IsVehicle(det.Class) {
+		if !vision.IsObstacle(det.Class) {
 			continue
 		}
 		if dist, in := d.inPath(det, lane); in && dist < best {
@@ -218,11 +221,26 @@ func (d *Driver) nearestInPath(dets []vision.Detection, lane []lanePoint) (float
 	return best, found
 }
 
-// laneOccupied reports whether the bonnet camera shows a vehicle in the lane
-// whose middle is off metres across from the car's own, between near and far.
+// coneAt reports whether what is in the path at the given range is a cone or a
+// barrier.
+func (d *Driver) coneAt(dets []vision.Detection, lane []lanePoint, at float32) bool {
+	for _, det := range dets {
+		if det.Class != vision.ClassCone && det.Class != vision.ClassBarrier {
+			continue
+		}
+		if dist, in := d.inPath(det, lane); in && abs(dist-at) < 0.01 {
+			return true
+		}
+	}
+	return false
+}
+
+// laneOccupied reports whether the bonnet camera shows a vehicle, cone or
+// barrier in the lane whose middle is off metres across from the car's own,
+// between near and far.
 func (d *Driver) laneOccupied(dets []vision.Detection, raw []lanePoint, off, near, far float32) bool {
 	for _, det := range dets {
-		if !vision.IsVehicle(det.Class) {
+		if !vision.IsObstacle(det.Class) {
 			continue
 		}
 		dist := d.cam.GroundDistance(det.MaxY)
@@ -283,8 +301,7 @@ func (d *Driver) straightAhead(raw []lanePoint) bool {
 // car should now aim for.
 func (d *Driver) manoeuvre(dets []vision.Detection, raw []lanePoint, cruise, speed, dt float32, pf profile) float32 {
 	d.speed = speed
-	dist, ahead := d.nearestInPath(dets, d.path)
-	d.trackLead(dist, ahead, speed, dt)
+	dist, ahead := d.watchAhead(dets, speed, dt)
 	held := ahead && dist < heldRange && d.leadSpeed < cruise*(1-mixf(0.5, 0.08, pf.overtake))
 	if held {
 		d.heldUp += dt
@@ -310,19 +327,37 @@ func (d *Driver) manoeuvre(dets []vision.Detection, raw []lanePoint, cruise, spe
 		return d.carryOnPassing(dets, raw, cruise, pf)
 	}
 
-	if len(raw) == 0 || pf.overtake <= 0 || speed < moveSpeed || !d.straightAhead(raw) {
+	if len(raw) == 0 || pf.overtake <= 0 || d.tooSlowToMove(speed) || !d.straightAhead(raw) {
 		return cruise
 	}
 	d.chooseLane(dets, raw, sides, held, cruise, dt, pf)
 	return cruise
 }
 
+// watchAhead finds the nearest thing in the way and keeps track of how fast it
+// is going. A cone is not going anywhere.
+func (d *Driver) watchAhead(dets []vision.Detection, speed, dt float32) (float32, bool) {
+	dist, ahead := d.nearestInPath(dets, d.path)
+	d.coned = ahead && d.coneAt(dets, d.path, dist)
+	d.trackLead(dist, ahead, speed, dt)
+	if d.coned {
+		d.leadSpeed = 0
+	}
+	return dist, ahead
+}
+
+// tooSlowToMove reports whether the car is going too slowly to change lane. In
+// a queue the gaps alongside open and shut faster than the mirrors can be
+// trusted; but a car stopped at a cone has to move over from a standstill, or
+// it would sit there for ever.
+func (d *Driver) tooSlowToMove(speed float32) bool { return speed < moveSpeed && !d.coned }
+
 // signalled counts down the indicator, then moves across if there is room.
 func (d *Driver) signalled(dets []vision.Detection, raw []lanePoint, sides sideLanes, speed, dt float32, pf profile) {
 	if d.signalTimer += dt; d.signalTimer < signalFor {
 		return
 	}
-	if speed < moveSpeed || !d.roomIn(dets, raw, d.moveSide, speed, pf) {
+	if d.tooSlowToMove(speed) || !d.roomIn(dets, raw, d.moveSide, speed, pf) {
 		if d.signalTimer > signalFor+5 {
 			d.endMove()
 		}
@@ -340,9 +375,15 @@ func (d *Driver) signalled(dets []vision.Detection, raw []lanePoint, sides sideL
 
 // chooseLane picks a lane change or overtake to start, if any.
 func (d *Driver) chooseLane(dets []vision.Detection, raw []lanePoint, sides sideLanes, held bool, cruise, dt float32, pf profile) {
-	fedUp := held && d.heldUp > pf.patience
+	fedUp := held && (d.heldUp > pf.patience || d.coned)
 	// Enough of the lane alongside left to get into it.
 	room := max(sideReach, d.speed*moveTime)
+	if d.coned {
+		// The cones are in the way whatever the lane alongside does further on,
+		// and from a standstill so close the far end of it is hidden: it only
+		// has to be seen to go on for as far as getting round them takes.
+		room = max(coneRoom, d.speed*moveTime)
+	}
 	left := sides.left != 0 && sides.leftReach > room
 	if fedUp && d.passBy(dets, raw, sides, room, cruise, pf) {
 		return
@@ -352,7 +393,7 @@ func (d *Driver) chooseLane(dets []vision.Detection, raw []lanePoint, sides side
 		return
 	}
 	// Sat out in an outer lane with nothing to pass: back in, in time.
-	if d.outside += dt; d.outside > pf.keepLeft {
+	if d.outside += dt; d.outside > pf.keepLeft && !d.laneOccupied(dets, raw, sides.left, 0, heldRange) {
 		d.startMove(sides.left, false)
 	}
 }

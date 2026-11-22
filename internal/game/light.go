@@ -43,6 +43,8 @@ type lighting struct {
 	// night runs from 0 in daylight to 1 in the dark, and drives everything
 	// that only shows once the light goes: lit windows, lamps, headlights.
 	night float32
+	// wet is how wet the road is, which darkens asphalt in the shader.
+	wet float32
 }
 
 // lightingFor returns the light for a time of day.
@@ -147,6 +149,7 @@ uniform vec3 groundCol;
 uniform vec3 fogCol;
 uniform float fogRange;
 uniform float night;
+uniform float wet;
 out vec4 finalColor;
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -195,6 +198,8 @@ void main() {
         float near = clamp(1.0 - length(fragPos - viewPos) / 45.0, 0.0, 1.0);
         float g = hash(floor(fragPos.xz * 9.0));
         base *= 1.0 + (g - 0.5) * 0.09 * near;
+        // A wet road is darker, and never brighter.
+        base *= 1.0 - 0.3 * wet;
     }
 
     // A surface with no normal is not a surface but a pool of light on one:
@@ -235,7 +240,7 @@ type sceneShader struct {
 	// material is what a patch of ground is drawn with: the same shader.
 	material rl.Material
 
-	viewPos, sunDir, sunCol, skyCol, groundCol, fogCol, fogRange, night int32
+	viewPos, sunDir, sunCol, skyCol, groundCol, fogCol, fogRange, night, wet int32
 }
 
 func loadSceneShader() sceneShader {
@@ -249,7 +254,7 @@ func loadSceneShader() sceneShader {
 	loc := func(name string) int32 { return rl.GetShaderLocation(s.shader, name) }
 	s.viewPos, s.sunDir, s.sunCol = loc("viewPos"), loc("sunDir"), loc("sunCol")
 	s.skyCol, s.groundCol, s.fogCol = loc("skyCol"), loc("groundCol"), loc("fogCol")
-	s.fogRange, s.night = loc("fogRange"), loc("night")
+	s.fogRange, s.night, s.wet = loc("fogRange"), loc("night"), loc("wet")
 	return s
 }
 
@@ -271,6 +276,7 @@ func (s sceneShader) use(l lighting, eye rl.Vector3, reach float32) {
 	v3(s.fogCol, l.fog)
 	rl.SetShaderValue(s.shader, s.fogRange, []float32{l.fogRange * reach}, rl.ShaderUniformFloat)
 	rl.SetShaderValue(s.shader, s.night, []float32{l.night}, rl.ShaderUniformFloat)
+	rl.SetShaderValue(s.shader, s.wet, []float32{l.wet}, rl.ShaderUniformFloat)
 }
 
 // drawSky fills the frame with the sky before anything is drawn over it: a

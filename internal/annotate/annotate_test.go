@@ -263,7 +263,7 @@ func TestMirrorsPlaceTheCarsAroundUs(t *testing.T) {
 		mirrors := d.Mirrors()
 		for m := range mirrors {
 			eye := annotate.NewMirrorEye(mirrors[m].Width, mirrors[m].Height)
-			d.Watch(vision.Mirror(m), eye.Look(w, mirrors[m], w.City.StandAt(w.Player.Pos, w.Player.Yaw)))
+			d.Watch(vision.Mirror(m), eye.Look(w, mirrors[m], w.City.StandAt(w.Player.Pos, w.Player.Yaw), w.Weather()))
 		}
 		found := false
 		for _, n := range d.Around() {

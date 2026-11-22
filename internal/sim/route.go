@@ -5,6 +5,7 @@ import (
 
 	"github.com/danielriddell21/autobahn/internal/city"
 	"github.com/danielriddell21/autobahn/internal/mathx"
+	"github.com/danielriddell21/autobahn/internal/works"
 )
 
 // Route is a navigation plan for the player's car: which lane it is in and
@@ -37,6 +38,8 @@ type Route struct {
 	// ringSkip is how many exits the plan still passes before it leaves the
 	// roundabout its far end is on.
 	ringSkip int
+	// works is the roadworks, which the plan is not allowed to run into.
+	works *works.Index
 }
 
 // NewRoute returns a route that will latch onto the nearest lane on its first
@@ -99,6 +102,7 @@ func (r *Route) Update(pos, fwd mathx.Vec) {
 		}
 	}
 
+	r.revalidate()
 	along := r.lane.Run(pos)
 	r.s = mathx.Clamp(along, 0, r.lane.Length)
 	r.extend(1)
@@ -108,6 +112,21 @@ func (r *Route) Update(pos, fwd mathx.Vec) {
 		r.u = r.turnProgress(pos)
 	}
 	r.replan(pos, fwd)
+}
+
+// revalidate drops the part of the plan that now runs into a street that has
+// been closed since it was made, so it is chosen again. A turn already being
+// made is not taken back.
+func (r *Route) revalidate() {
+	if r.works == nil {
+		return
+	}
+	for i, t := range r.plan {
+		if r.works.Barred(t.Lane) && (i != 0 || !r.crossing) {
+			r.plan = r.plan[:i]
+			return
+		}
+	}
 }
 
 // arrived moves the route onto the next planned lane once the car is on it.
@@ -239,23 +258,24 @@ func (r *Route) extend(n int) {
 
 // choose decides where the route goes at the end of a lane.
 func (r *Route) choose(l *city.Lane) (city.Turn, bool) {
-	if len(l.Succ) == 0 {
+	turns := openTurns(r.works, l)
+	if len(turns) == 0 {
 		// The frontier of a growing city: the junction ahead is not wired yet.
 		return city.Turn{}, false
 	}
 	if r.c.Roads[l.Road].Ring {
-		return r.chooseOnRing(l), true
+		return r.chooseOnRing(turns), true
 	}
 	if r.c.Nodes[l.ToNode].IsRoundabout() {
 		// Decide the exit on the way in, as a driver does, rather than at each
 		// one in turn. Going all the way round to the road just left is not
 		// offered.
 		r.ringSkip = r.rng.IntN(max(r.c.Nodes[l.ToNode].Degree()-1, 1))
-		return l.Succ[0], true
+		return turns[0], true
 	}
 	// Prefer to carry straight on, which keeps the driven line predictable.
 	var straight []city.Turn
-	for _, t := range l.Succ {
+	for _, t := range turns {
 		if t.Kind == city.TurnStraight {
 			straight = append(straight, t)
 		}
@@ -263,14 +283,14 @@ func (r *Route) choose(l *city.Lane) (city.Turn, bool) {
 	if len(straight) > 0 && r.rng.Float32() < 0.7 {
 		return straight[r.rng.IntN(len(straight))], true
 	}
-	return l.Succ[r.rng.IntN(len(l.Succ))], true
+	return turns[r.rng.IntN(len(turns))], true
 }
 
 // chooseOnRing carries on round a roundabout until the planned exit comes up.
-func (r *Route) chooseOnRing(l *city.Lane) city.Turn {
+func (r *Route) chooseOnRing(turns []city.Turn) city.Turn {
 	var exits []city.Turn
-	round := l.Succ[0]
-	for _, t := range l.Succ {
+	round := turns[0]
+	for _, t := range turns {
 		if t.Kind == city.TurnStraight {
 			round = t
 		} else {

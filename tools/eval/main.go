@@ -20,6 +20,7 @@ import (
 	"os"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 	"text/tabwriter"
 
@@ -29,6 +30,8 @@ import (
 	"github.com/danielriddell21/autobahn/internal/mathx"
 	"github.com/danielriddell21/autobahn/internal/sim"
 	"github.com/danielriddell21/autobahn/internal/vision"
+	"github.com/danielriddell21/autobahn/internal/weather"
+	"github.com/danielriddell21/autobahn/internal/works"
 )
 
 // The simulation runs at a fixed step, so a run is reproducible from its seed.
@@ -45,23 +48,32 @@ type result struct {
 	byKind     map[string]int
 	detections float32
 	blind      float32 // share of frames with no lane in view
+	// sites is how many stretches of roadworks the car came up to and went
+	// past, which is how a gate with roadworks in it is known to have met any.
+	sites int
 }
 
 func main() {
 	var (
-		seeds    = flag.Int("seeds", 12, "how many cities to drive")
-		from     = flag.Uint64("from", 1, "first seed")
-		seconds  = flag.Float64("seconds", 90, "simulated seconds per city")
-		traffic  = flag.Int("traffic", 70, "ambient traffic cars")
-		police   = flag.Int("police", 7, "patrolling police units")
-		hz       = flag.Float64("perception", 20, "perception updates per second")
-		width    = flag.Int("camwidth", 420, "camera width in pixels")
-		height   = flag.Int("camheight", 236, "camera height in pixels")
-		workers  = flag.Int("workers", runtime.NumCPU(), "cities to drive in parallel")
-		modeName = flag.String("mode", "normal", "autopilot style: cautious, normal, brisk, aggressive or getaway")
-		verbose  = flag.Bool("verbose", false, "report the circumstances of every fault")
-		failOver = flag.Int("max-points", -1, "exit non-zero if mean penalty exceeds this")
-		mapName  = flag.String("map", "city", "the map to drive, or all for every one in turn")
+		seeds      = flag.Int("seeds", 12, "how many cities to drive")
+		from       = flag.Uint64("from", 1, "first seed")
+		seconds    = flag.Float64("seconds", 90, "simulated seconds per city")
+		traffic    = flag.Int("traffic", 70, "ambient traffic cars")
+		police     = flag.Int("police", 7, "patrolling police units")
+		hz         = flag.Float64("perception", 20, "perception updates per second")
+		width      = flag.Int("camwidth", 420, "camera width in pixels")
+		height     = flag.Int("camheight", 236, "camera height in pixels")
+		workers    = flag.Int("workers", runtime.NumCPU(), "cities to drive in parallel")
+		modeName   = flag.String("mode", "normal", "autopilot style: cautious, normal, brisk, aggressive or getaway")
+		verbose    = flag.Bool("verbose", false, "report the circumstances of every fault")
+		failOver   = flag.Int("max-points", -1, "exit non-zero if mean penalty exceeds this")
+		mapName    = flag.String("map", "city", "the map to drive, or all for every one in turn")
+		worksArg   = flag.String("works", "normal", "how much of the town is dug up: off, normal or dense")
+		weatherArg = flag.String("weather", "clear",
+			"the weather to drive in: clear, rain, fog, storm or drift, or a comma-separated list of them")
+		minSites = flag.Int("min-sites", -1,
+			"exit non-zero if fewer roadworks than this were passed over the whole run; "+
+				"with -works dense and -max-points set it is 24 unless given")
 	)
 	flag.Parse()
 
@@ -76,30 +88,92 @@ func main() {
 		fmt.Fprintf(os.Stderr, "eval: unknown mode %q\n", *modeName)
 		os.Exit(2)
 	}
+	level, ok := works.ParseLevel(*worksArg)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "eval: unknown works level %q\n", *worksArg)
+		os.Exit(2)
+	}
+	if *minSites < 0 && level == works.Dense && *failOver >= 0 {
+		*minSites = defaultMinSites
+	}
+	skies, err := weathersNamed(*weatherArg)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "eval:", err)
+		os.Exit(2)
+	}
 	cfg := runConfig{
 		mode: mode, seconds: float32(*seconds), traffic: *traffic, police: *police,
 		perception: float32(*hz), width: *width, height: *height,
-		verbose: *verbose,
+		verbose: *verbose, works: level,
 	}
 
-	// Every map is held to the same mark, and every one is driven before
-	// any verdict, so a run that fails says everything that failed.
-	failed := false
+	if !scoreIn(skies, maps, cfg, *seeds, *from, max(*workers, 1), *failOver, *minSites) {
+		os.Exit(1)
+	}
+}
+
+// weathersNamed reads -weather: one setting or a comma-separated list.
+func weathersNamed(arg string) ([]weather.Setting, error) {
+	var out []weather.Setting
+	for _, name := range strings.Split(arg, ",") {
+		set, ok := weather.ParseSetting(name)
+		if !ok || strings.TrimSpace(name) == "" {
+			return nil, fmt.Errorf("unknown weather %q", name)
+		}
+		out = append(out, set)
+	}
+	return out, nil
+}
+
+// scoreIn drives every map in each of the weathers, and reports whether every
+// one passed. Every weather is driven before any verdict.
+func scoreIn(skies []weather.Setting, maps []city.Map, cfg runConfig, seeds int, from uint64, workers, failOver, minSites int) bool {
+	ok := true
+	for _, set := range skies {
+		cfg.weather = set
+		if len(skies) > 1 {
+			fmt.Printf("\n######## weather: %s ########\n", set)
+		}
+		if !score(maps, cfg, seeds, from, workers, failOver, minSites) {
+			ok = false
+		}
+	}
+	return ok
+}
+
+// score drives every map and reports whether the run passed its marks.
+//
+// Every map is held to the same mark, and every one is driven before any
+// verdict, so a run that fails says everything that failed.
+func score(maps []city.Map, cfg runConfig, seeds int, from uint64, workers, failOver, minSites int) bool {
+	ok := true
+	passed := 0
 	for _, m := range maps {
 		cfg.world = m
 		if len(maps) > 1 {
 			fmt.Printf("\n== %s, in %s ==\n", m.Name(), m.Season().Name())
 		}
-		mean := report(drive(*seeds, *from, cfg, max(*workers, 1)))
-		if *failOver >= 0 && mean > float64(*failOver) {
+		results := drive(seeds, from, cfg, workers)
+		for _, r := range results {
+			passed += r.sites
+		}
+		mean := report(results)
+		if failOver >= 0 && mean > float64(failOver) {
 			fmt.Fprintf(os.Stderr,
-				"\neval: %s: mean penalty %.1f exceeds the %d allowed\n", m.Name(), mean, *failOver)
-			failed = true
+				"\neval: %s: mean penalty %.1f exceeds the %d allowed\n", m.Name(), mean, failOver)
+			ok = false
 		}
 	}
-	if failed {
-		os.Exit(1)
+	if cfg.works != works.Off {
+		fmt.Printf("\nroadworks passed: %d sites\n", passed)
 	}
+	if minSites >= 0 && passed < minSites {
+		fmt.Fprintf(os.Stderr,
+			"\neval: only %d roadworks sites were passed, and the gate wants %d: it is not testing them\n",
+			passed, minSites)
+		ok = false
+	}
+	return ok
 }
 
 // mapsNamed reads -map: one map by name, or all of them.
@@ -124,6 +198,54 @@ type runConfig struct {
 	perception    float32
 	width, height int
 	verbose       bool
+	works         works.Level
+	weather       weather.Setting
+}
+
+// defaultMinSites is how many stretches of roadworks a dense gate has to have
+// driven past, over every map, to count as having tested them at all.
+const defaultMinSites = 24
+
+// Roadworks counted as passed: the car came within nearSite of a cone or a
+// barrier that was standing, and went on until it was farSite further off than
+// it had been at its nearest.
+const (
+	nearSite float32 = 30
+	farSite  float32 = 25
+)
+
+// siteCounter counts the roadworks a car passes.
+type siteCounter struct {
+	nearest map[works.Edge]float32
+	passed  map[works.Edge]bool
+}
+
+func newSiteCounter() *siteCounter {
+	return &siteCounter{nearest: map[works.Edge]float32{}, passed: map[works.Edge]bool{}}
+}
+
+// look takes note of where the player is against everything standing.
+func (c *siteCounter) look(w *sim.World) {
+	at := w.Player.Pos
+	for _, cl := range w.Works.Active() {
+		if cl.Phase != works.PhaseSolid || c.passed[cl.Edge] {
+			continue
+		}
+		nearest := float32(1e9)
+		for _, o := range cl.Cones {
+			nearest = min(nearest, o.Center.DistTo(at))
+		}
+		for _, o := range cl.Barriers {
+			nearest = min(nearest, o.Center.DistTo(at))
+		}
+		best, seen := c.nearest[cl.Edge]
+		switch {
+		case nearest < nearSite && (!seen || nearest < best):
+			c.nearest[cl.Edge] = nearest
+		case seen && nearest > best+farSite:
+			c.passed[cl.Edge] = true
+		}
+	}
 }
 
 func drive(seeds int, from uint64, cfg runConfig, workers int) []result {
@@ -194,10 +316,10 @@ func (s *session) step() {
 	if s.perceived += fixedStep; s.perceived >= s.interval || s.dets == nil {
 		s.perceived = 0
 		car := w.City.StandAt(w.Player.Pos, w.Player.Yaw)
-		annotate.RasteriseInto(s.frame, annotate.Layout(w, annotate.BonnetView(s.cam, car)))
+		annotate.RasteriseInto(s.frame, annotate.LayoutIn(w, annotate.BonnetView(s.cam, car), w.Weather()))
 		s.dets = s.scanner.Scan(annotate.Pixels(s.frame, s.px), s.cam.Width, s.cam.Height)
 		for m, eye := range s.eyes {
-			s.driver.Watch(vision.Mirror(m), eye.Look(w, s.mirrors[m], car))
+			s.driver.Watch(vision.Mirror(m), eye.Look(w, s.mirrors[m], car, w.Weather()))
 		}
 		s.looks++
 		s.seen += len(s.dets)
@@ -207,8 +329,11 @@ func (s *session) step() {
 }
 
 func driveOne(seed uint64, cfg runConfig) result {
-	w := sim.NewWorld(sim.Config{Seed: seed, Map: cfg.world, Traffic: cfg.traffic, Police: cfg.police})
+	w := sim.NewWorld(sim.Config{
+		Seed: seed, Map: cfg.world, Traffic: cfg.traffic, Police: cfg.police, Works: cfg.works, Weather: cfg.weather,
+	})
 	s := newSession(w, cfg)
+	sites := newSiteCounter()
 	driver := s.driver
 
 	if cfg.verbose {
@@ -232,6 +357,9 @@ func driveOne(seed uint64, cfg runConfig) result {
 		steps++
 		speedSum += w.Player.Speed()
 		s.step()
+		if steps%10 == 0 {
+			sites.look(w)
+		}
 		if driver.State == autopilot.StateSearching {
 			blindCount++
 		}
@@ -240,7 +368,7 @@ func driveOne(seed uint64, cfg runConfig) result {
 	r := result{
 		seed: seed, seconds: w.Time, distance: w.Judge.Distance,
 		points: w.Judge.Points, faults: w.Judge.Faults,
-		byKind: map[string]int{},
+		byKind: map[string]int{}, sites: len(sites.passed),
 	}
 	if steps > 0 {
 		r.avgSpeed = mathx.ToMPH(speedSum / float32(steps))
@@ -265,14 +393,14 @@ func report(results []result) float64 {
 	sort.Slice(results, func(i, j int) bool { return results[i].seed < results[j].seed })
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "seed\tdistance\tavg mph\tdet/frame\tno lane\tpoints\tfaults")
+	_, _ = fmt.Fprintln(tw, "seed\tdistance\tavg mph\tdet/frame\tno lane\tpoints\tfaults\tsites passed")
 	var totalPoints, totalFaults int
 	var sumSpeed, sumDist, sumBlind float64
 	clean := 0
 
 	for _, r := range results {
-		_, _ = fmt.Fprintf(tw, "%d\t%.0f m\t%.0f\t%.1f\t%.0f%%\t%d\t%d\n",
-			r.seed, r.distance, r.avgSpeed, r.detections, r.blind*100, r.points, r.faults)
+		_, _ = fmt.Fprintf(tw, "%d\t%.0f m\t%.0f\t%.1f\t%.0f%%\t%d\t%d\t%d\n",
+			r.seed, r.distance, r.avgSpeed, r.detections, r.blind*100, r.points, r.faults, r.sites)
 		totalPoints += r.points
 		totalFaults += r.faults
 		sumSpeed += float64(r.avgSpeed)

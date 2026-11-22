@@ -178,11 +178,11 @@ func (a *Agent) trackHeldUp(st Style, close bool, lead, want, dt float32) {
 // moveForTurn signals for the lane the next turn is made from, if this is not
 // it, and reports whether it did.
 func (a *Agent) moveForTurn(c *city.City, left float32, lanes int) bool {
-	if !a.hasWant || serves(a.lane, a.wantKind) || left <= turnLaneEnd {
+	if !a.hasWant || a.serves(a.lane, a.wantKind) || left <= turnLaneEnd {
 		return false
 	}
 	for i := range lanes {
-		if to := sibling(c, a.lane, i); to != nil && serves(to, a.wantKind) {
+		if to := sibling(c, a.lane, i); to != nil && a.serves(to, a.wantKind) {
 			a.requestLane(c, i)
 			return true
 		}
@@ -232,7 +232,8 @@ func (a *Agent) keepLeft(c *city.City, st Style, passing bool, dt float32) {
 // turn they mean to.
 func (a *Agent) keepsTurn(c *city.City, idx int) bool {
 	to := sibling(c, a.lane, idx)
-	return to != nil && (!a.hasWant || serves(to, a.wantKind))
+	// Not into a lane that is coned off ahead, either.
+	return to != nil && !a.restOfCones(to) && (!a.hasWant || a.serves(to, a.wantKind))
 }
 
 // laneLeadSpeed is the speed of the nearest car ahead in another lane, or a
@@ -364,14 +365,14 @@ func (a *Agent) repickTurn() {
 	}
 	a.hasNext = true
 	if a.hasWant {
-		for _, t := range a.lane.Succ {
+		for _, t := range a.openTurns(a.lane) {
 			if t.Kind == a.wantKind {
 				a.next = t
 				return
 			}
 		}
 	}
-	a.next, _ = onward(a.lane)
+	a.next, _ = onwardOpen(a.works, a.lane)
 }
 
 // tryPassOncoming starts an overtake on a single carriageway if the road is

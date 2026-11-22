@@ -497,8 +497,9 @@ func (a *Agent) pursuitTurn(c *city.City, target mathx.Vec) (city.Turn, bool) {
 	if len(a.lane.Succ) == 0 {
 		return city.Turn{}, false
 	}
-	best, bestDist := a.lane.Succ[0], float32(1e9)
-	for _, t := range a.lane.Succ {
+	turns := a.openTurns(a.lane)
+	best, bestDist := turns[0], float32(1e9)
+	for _, t := range turns {
 		// Score on where the successor lane ends up, so a turn that heads the
 		// right way is preferred even if it starts by going the wrong way.
 		if d := c.Lanes[t.Lane].B.DistTo(target); d < bestDist {

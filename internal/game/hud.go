@@ -47,6 +47,7 @@ func (g *Game) drawHUD() {
 	}
 	g.drawWanted()
 	g.drawCarState()
+	g.drawJob()
 	g.drawMinimap(int32(g.opts.Width)/2-72, 8, 144)
 	g.drawNotice()
 	g.drawBanner()
@@ -427,6 +428,7 @@ func controlBindings() []keymap.Binding {
 		{Key: "M", Action: "autopilot mode"},
 		{Key: "V", Action: "AI camera (autopilot)"},
 		{Key: "L", Action: "labels"},
+		{Key: "J", Action: "offer a drop-off job"},
 		{Key: "N", Action: "back on road"},
 		{Key: "R", Action: "restart"},
 		{Key: "Esc", Action: "menu"},
@@ -522,5 +524,6 @@ func (g *Game) drawMinimap(x, y, size int32) {
 	l := rl.NewVector2(float32(cx)-f.X*4+r.X*4, float32(cy)-f.Z*4+r.Z*4)
 	rr := rl.NewVector2(float32(cx)-f.X*4-r.X*4, float32(cy)-f.Z*4-r.Z*4)
 	rl.DrawTriangle(tip, l, rr, hudAccent)
+	g.drawJobPip(cx, cy, float32(half), scale)
 	rl.EndScissorMode()
 }

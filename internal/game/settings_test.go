@@ -5,8 +5,6 @@ import (
 
 	"github.com/danielriddell21/autobahn/internal/autopilot"
 	"github.com/danielriddell21/autobahn/internal/city"
-	"github.com/danielriddell21/autobahn/internal/pack"
-	"github.com/danielriddell21/autobahn/internal/sim"
 )
 
 func TestDefaultSettingsAreInRange(t *testing.T) {
@@ -228,33 +226,6 @@ func TestClampRepairsAMapThatDoesNotExist(t *testing.T) {
 	s.clamp()
 	if s.Map != city.MapCity {
 		t.Errorf("Map = %v, want the city", s.Map)
-	}
-}
-
-func TestKeepToDropsWhatThePlayerDoesNotHold(t *testing.T) {
-	none := pack.Access{}
-	for _, m := range city.Maps() {
-		for _, k := range sim.PlayerBodies() {
-			s := DefaultSettings()
-			s.Map, s.Car = m, k
-			s.keepTo(none)
-			if !none.HasMap(s.Map) || !none.HasBody(s.Car) {
-				t.Errorf("kept %s and the %s for a player who holds neither", s.Map.Name(), s.Car.Name())
-			}
-			if none.HasMap(m) && s.Map != m {
-				t.Errorf("dropped %s, which the player holds", m.Name())
-			}
-			if none.HasBody(k) && s.Car != k {
-				t.Errorf("dropped the %s, which the player holds", k.Name())
-			}
-
-			all := DefaultSettings()
-			all.Map, all.Car = m, k
-			all.keepTo(pack.Access{Bypass: true})
-			if all.Map != m || all.Car != k {
-				t.Errorf("bypass dropped %s or the %s", m.Name(), k.Name())
-			}
-		}
 	}
 }
 

@@ -5,8 +5,8 @@ import (
 
 	"github.com/danielriddell21/autobahn/internal/autopilot"
 	"github.com/danielriddell21/autobahn/internal/city"
-	"github.com/danielriddell21/autobahn/internal/pack"
 	"github.com/danielriddell21/autobahn/internal/sim"
+	"github.com/danielriddell21/autobahn/internal/weather"
 
 	"github.com/danielriddell21/crucible/geom"
 	"github.com/danielriddell21/crucible/store"
@@ -52,6 +52,11 @@ type Settings struct {
 	// UnlockAll offers every pack without it being earned. There is no row
 	// for it on the settings screen: it is for whoever opens the file.
 	UnlockAll bool `json:"unlockAll"`
+	// AutopilotJobs lets a job continue, unpaid, while the autopilot drives.
+	AutopilotJobs bool `json:"autopilotJobs"`
+	// Weather is the sky a new session is driven under: drifting, or held at one
+	// kind.
+	Weather weather.Setting `json:"weather"`
 }
 
 // DefaultSettings returns the settings a first run starts with.
@@ -59,7 +64,7 @@ func DefaultSettings() Settings {
 	return Settings{
 		Volume: 0.7, ShowPanel: true, ShowLabels: true,
 		Traffic: 70, Police: 7, Camera: CameraChase, Car: sim.HotHatch,
-		DayLength: DayMedium,
+		DayLength: DayMedium, Weather: weather.Drift,
 	}
 }
 
@@ -89,6 +94,9 @@ func (s *Settings) clamp() {
 	if s.DayLength < 0 || s.DayLength >= numDayLengths {
 		s.DayLength = DayMedium
 	}
+	if s.Weather > weather.Drift {
+		s.Weather = weather.Drift
+	}
 	if !sim.IsPlayerBody(s.Car) {
 		s.Car = sim.HotHatch
 	}
@@ -97,18 +105,6 @@ func (s *Settings) clamp() {
 	}
 	if !s.Map.Valid() {
 		s.Map = city.MapCity
-	}
-}
-
-// keepTo brings the stored choices back to what the player holds. A career
-// file that has gone, or a pack that was only ever bypassed, would otherwise
-// leave the settings naming a map or a car that is no longer offered.
-func (s *Settings) keepTo(a pack.Access) {
-	if !a.HasMap(s.Map) {
-		s.Map = city.MapCity
-	}
-	if !a.HasBody(s.Car) {
-		s.Car = sim.HotHatch
 	}
 }
 
@@ -168,6 +164,11 @@ func (s Settings) applyTo(o Options) Options {
 	if !o.Given["map"] {
 		o.Map = s.Map
 	}
+	// The weather is the grip of the road, so like the map it is the host's
+	// to say in a chase; see Snapshot.Weather.
+	if !o.Given["weather"] {
+		o.Weather = s.Weather
+	}
 	return s.applyViewTo(o)
 }
 
@@ -195,6 +196,9 @@ func (s Settings) applyViewTo(o Options) Options {
 	}
 	if !o.Given["daylength"] {
 		o.DayLength = s.DayLength.Minutes()
+	}
+	if !o.Given["autopilot-jobs"] {
+		o.AutopilotJobs = s.AutopilotJobs
 	}
 	if !o.Given["paint"] {
 		o.Paint = s.Paint

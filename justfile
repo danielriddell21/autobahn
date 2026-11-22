@@ -52,7 +52,7 @@ boundary:
     set -euo pipefail
     deps=$({{go}} list -tags "{{tags}}" -deps ./internal/autopilot | grep autobahn || true)
     echo "$deps"
-    if echo "$deps" | grep -qE '/internal/(sim|city|game|annotate)$'; then
+    if echo "$deps" | grep -qE '/internal/(sim|city|game|annotate|weather)$'; then
         echo "FAIL: autopilot reaches simulation state" >&2
         exit 1
     fi
@@ -92,6 +92,8 @@ soak frames="1800":
 [group('test')]
 gate:
     {{go}} run ./tools/eval -map all -seeds 24 -seconds 60 -max-points 12
+    {{go}} run ./tools/eval -map all -seeds 48 -seconds 60 -max-points 12 -works dense
+    {{go}} run ./tools/eval -map all -seeds 24 -seconds 60 -max-points 12 -weather fog,storm
 
 # full gate: lint + test + build + boundary + the autopilot gate. all must pass
 # before committing

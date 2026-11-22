@@ -70,3 +70,14 @@ jobs:
 
       - name: Score the autopilot across 24 cities
         run: go run ./tools/eval -map all -seeds 24 -seconds 60 -max-points 12
+
+      # The same again with the roads dug up all over the place, which also
+      # fails if the car drove past fewer than 24 of them: a gate that met no
+      # roadworks would be testing nothing.
+      - name: Score the autopilot among the roadworks
+        run: go run ./tools/eval -map all -seeds 48 -seconds 60 -max-points 12 -works dense
+
+      # And again in fog and in a storm, where the camera loses its far markers
+      # and the autopilot has to slow to what it can see.
+      - name: Score the autopilot in fog and storm
+        run: go run ./tools/eval -map all -seeds 24 -seconds 60 -max-points 12 -weather fog,storm

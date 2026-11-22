@@ -59,11 +59,18 @@ func TestMapNamesParseBack(t *testing.T) {
 }
 
 func TestCyclePaintWraps(t *testing.T) {
-	if got := cyclePaint(len(playerPaints)-1, 1); got != 0 {
+	owned := []int{0, 3, 7}
+	if got := cyclePaint(owned, 7, 1); got != 0 {
 		t.Errorf("past the last paint gave %d, want 0", got)
 	}
-	if got := cyclePaint(0, -1); got != len(playerPaints)-1 {
+	if got := cyclePaint(owned, 0, -1); got != 7 {
 		t.Errorf("before the first paint gave %d, want the last", got)
+	}
+	if got := cyclePaint(owned, 5, 1); got != 0 {
+		t.Errorf("stepping from a paint not owned gave %d, want the first", got)
+	}
+	if got := cyclePaint(nil, 5, 1); got != 5 {
+		t.Errorf("stepping with nothing owned moved to %d", got)
 	}
 	if paintOf(99) != playerPaints[0] || paintOf(-1) != playerPaints[0] {
 		t.Error("a paint out of range should fall back to the first")

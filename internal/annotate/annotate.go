@@ -21,6 +21,8 @@ import (
 	"github.com/danielriddell21/autobahn/internal/mathx"
 	"github.com/danielriddell21/autobahn/internal/sim"
 	"github.com/danielriddell21/autobahn/internal/vision"
+	"github.com/danielriddell21/autobahn/internal/weather"
+	"github.com/danielriddell21/autobahn/internal/works"
 )
 
 // View is a camera pose and lens, independent of any renderer. It is the
@@ -87,6 +89,18 @@ const (
 	SignalDrop, SignalHalf       float32 = 0.55, 0.85
 	SignDrop, SignHalf           float32 = 0.42, 0.5
 	SpeedSignDrop, SpeedSignHalf float32 = 0.4, 0.55
+	// WorksSignDrop and WorksSignHalf place the box of a roadworks sign on a
+	// post works.SignHeight high.
+	WorksSignDrop, WorksSignHalf float32 = 0.4, 0.55
+)
+
+// What roadworks look like to the camera, in metres. A cone's box is a little
+// bigger than the cone, so that it is still more than a speck at the far end of
+// its range.
+const (
+	worksRange float32 = 70
+	coneBox    float32 = 0.4
+	barrierBox float32 = 1.0
 )
 
 // projector turns world points into image coordinates for one view.
@@ -134,9 +148,13 @@ func (p projector) project(w mathx.Vec3) (x, y float32, ok bool) {
 // they should be drawn. Later boxes paint over earlier ones, which is how a car
 // standing on a stop line breaks that line into fragments — the same occlusion
 // a real detector would have to cope with.
-func Layout(w *sim.World, v View) []Box {
-	pr := newProjector(v)
-	lo := &layout{p: pr, land: w.City, eye: v.Position.Ground(), fwd: pr.fwd.Ground().Norm()}
+func Layout(w *sim.World, v View) []Box { return LayoutIn(w, v, clearState) }
+
+// LayoutIn is [Layout] in weather: the same boxes, less what is out of sight.
+// Both the live window and the evaluation harness lay boxes out here, so they
+// lose the same ones. Clear weather gives exactly the boxes of [Layout].
+func LayoutIn(w *sim.World, v View, st weather.State) []Box {
+	lo := newLayout(w, v, st)
 
 	// Lane guidance first, so anything solid paints over it: the lanes
 	// alongside, then the car's own over them.
@@ -144,6 +162,7 @@ func Layout(w *sim.World, v View) []Box {
 	lo.laneMarkers(w)
 	lo.stopLine(w)
 	lo.props(w)
+	lo.works(w)
 	lo.vehicles(w)
 	return lo.out
 }
@@ -154,6 +173,20 @@ type layout struct {
 	land     *city.City
 	eye, fwd mathx.Vec
 	out      []Box
+	// st is the weather the camera looks through, and frame the moment, which
+	// decides what haze takes. wet is set when the weather takes anything away;
+	// otherwise seen and put are plain visible and add.
+	st    weather.State
+	frame int
+	wet   bool
+}
+
+func newLayout(w *sim.World, v View, st weather.State) *layout {
+	pr := newProjector(v)
+	return &layout{
+		p: pr, land: w.City, eye: v.Position.Ground(), fwd: pr.fwd.Ground().Norm(),
+		st: st, frame: int(w.Time * flickerRate), wet: !clearSky(st),
+	}
 }
 
 // box projects a box standing on the ground, as boxOf does, on this land.
@@ -166,22 +199,17 @@ func (lo *layout) visible(at mathx.Vec, limit float32) bool {
 	return rel.Dot(lo.fwd) > 1.5 && rel.Len() < limit
 }
 
-func (lo *layout) add(b Box, ok bool) {
-	if ok {
-		lo.out = append(lo.out, b)
-	}
-}
-
 func (lo *layout) laneMarkers(w *sim.World) {
 	for i, pt := range w.Route.Centreline(4, laneSpacing, int(laneRange/laneSpacing)) {
-		if !lo.visible(pt, laneRange) {
+		if !lo.seen(pt, laneRange, keyLane+i, true) {
 			continue
 		}
 		cl := vision.ClassLaneMarker
 		if i%2 == 1 {
 			cl = vision.ClassLaneMarkerAlt
 		}
-		lo.add(lo.box(cl, pt, laneMarkerRise, laneMarkerSize, laneMarkerRise, laneMarkerSize, 0))
+		b, ok := lo.box(cl, pt, laneMarkerRise, laneMarkerSize, laneMarkerRise, laneMarkerSize, 0)
+		lo.put(b, ok, pt, keyLane+i)
 	}
 }
 
@@ -198,12 +226,12 @@ func (lo *layout) sideLanes(w *sim.World) {
 		if o.Road != l.Road || o == l {
 			continue
 		}
-		cl := vision.ClassLaneSide
+		cl, base := vision.ClassLaneSide, keySide
 		if o.Dir != l.Dir {
 			if o.Index != 0 {
 				continue
 			}
-			cl = vision.ClassLaneOncoming
+			cl, base = vision.ClassLaneOncoming, keySide+64
 		}
 		for d := sideLaneSpacing; d <= sideLaneRange; d += sideLaneSpacing {
 			// The same distance along the road as the car's own lane, which on
@@ -213,17 +241,19 @@ func (lo *layout) sideLanes(w *sim.World) {
 				break
 			}
 			pt := o.Point(o.Along(l.Point(at)))
-			if !lo.visible(pt, sideLaneRange+5) {
+			key := base + int(d/sideLaneSpacing)
+			if !lo.seen(pt, sideLaneRange+5, key, false) {
 				continue
 			}
-			lo.add(lo.box(cl, pt, sideMarkerRise, sideMarkerSize, sideMarkerRise, sideMarkerSize, 0))
+			b, ok := lo.box(cl, pt, sideMarkerRise, sideMarkerSize, sideMarkerRise, sideMarkerSize, 0)
+			lo.put(b, ok, pt, key)
 		}
 	}
 }
 
 func (lo *layout) stopLine(w *sim.World) {
 	at, ctrl, ok := w.Route.StopLine(stopLineRange)
-	if !ok || ctrl == city.ControlNone || !lo.visible(at, stopLineRange) {
+	if !ok || ctrl == city.ControlNone || !lo.seen(at, stopLineRange, keyProp-1, false) {
 		return
 	}
 	l := w.Route.Lane()
@@ -231,25 +261,72 @@ func (lo *layout) stopLine(w *sim.World) {
 		return
 	}
 	hw := w.City.RoadHalfWidth(l)
-	lo.add(lo.box(vision.ClassStopLine, at, 0.9, hw*0.5, 0.9, 0.3, l.Heading))
+	b, ok := lo.box(vision.ClassStopLine, at, 0.9, hw*0.5, 0.9, 0.3, l.Heading)
+	lo.put(b, ok, at, keyProp-1)
 }
 
 func (lo *layout) props(w *sim.World) {
-	for _, prop := range w.City.Props {
-		if !lo.visible(prop.Pos, propRange) || !lo.propFacesUs(prop) {
+	for i, prop := range w.City.Props {
+		key := keyProp + i
+		if !lo.seen(prop.Pos, propRange, key, false) || !lo.propFacesUs(prop) {
 			continue
 		}
+		var b Box
+		var ok bool
 		switch prop.Kind {
 		case city.PropTrafficLight:
-			lo.add(lo.box(signalClass(w, prop), prop.Pos, prop.Height-SignalDrop, 0.55, SignalHalf, 0.3, prop.Heading))
+			b, ok = lo.box(signalClass(w, prop), prop.Pos, prop.Height-SignalDrop, 0.55, SignalHalf, 0.3, prop.Heading)
 		case city.PropStopSign:
-			lo.add(lo.box(vision.ClassStopSign, prop.Pos, prop.Height-SignDrop, 0.5, SignHalf, 0.12, prop.Heading))
+			b, ok = lo.box(vision.ClassStopSign, prop.Pos, prop.Height-SignDrop, 0.5, SignHalf, 0.12, prop.Heading)
 		case city.PropGiveWaySign:
-			lo.add(lo.box(vision.ClassGiveWay, prop.Pos, prop.Height-SignDrop, 0.5, SignHalf, 0.12, prop.Heading))
+			b, ok = lo.box(vision.ClassGiveWay, prop.Pos, prop.Height-SignDrop, 0.5, SignHalf, 0.12, prop.Heading)
 		case city.PropSpeedSign:
-			lo.add(lo.box(speedClass(prop.Limit), prop.Pos, prop.Height-SpeedSignDrop, 0.45, SpeedSignHalf, 0.12, prop.Heading))
+			b, ok = lo.box(speedClass(prop.Limit), prop.Pos, prop.Height-SpeedSignDrop, 0.45, SpeedSignHalf, 0.12, prop.Heading)
+		}
+		lo.put(b, ok, prop.Pos, key)
+	}
+}
+
+// works marks the roadworks in view: the signs once they are up, and the cones
+// and barriers once they are in the road.
+func (lo *layout) works(w *sim.World) {
+	key := keyWorks
+	for _, cl := range w.Works.Active() {
+		for _, s := range cl.Signs {
+			lo.worksSign(s, key)
+			key++
+		}
+		if cl.Phase != works.PhaseSolid {
+			continue
+		}
+		for _, c := range cl.Cones {
+			if lo.seen(c.Center, worksRange, key, false) {
+				b, ok := lo.box(vision.ClassCone, c.Center, coneBox, coneBox, coneBox, coneBox, c.Heading)
+				lo.put(b, ok, c.Center, key)
+			}
+			key++
+		}
+		for _, b := range cl.Barriers {
+			if lo.seen(b.Center, worksRange, key, false) {
+				bx, ok := lo.box(vision.ClassBarrier, b.Center, barrierBox/2, b.HalfW, barrierBox/2, b.HalfL, b.Heading)
+				lo.put(bx, ok, b.Center, key)
+			}
+			key++
 		}
 	}
+}
+
+// worksSign marks a roadworks sign, if it is in view and faces the car.
+func (lo *layout) worksSign(s works.Sign, key int) {
+	if !lo.seen(s.Pos, propRange, key, false) || mathx.FromAngle(s.Heading).Dot(lo.fwd) < 0.25 {
+		return
+	}
+	class := vision.ClassDiversion
+	if s.Kind == works.SignClosed {
+		class = vision.ClassRoadClosed
+	}
+	b, ok := lo.box(class, s.Pos, works.SignHeight-WorksSignDrop, 0.5, WorksSignHalf, 0.12, s.Heading)
+	lo.put(b, ok, s.Pos, key)
 }
 
 func (lo *layout) propFacesUs(prop city.Prop) bool {
@@ -266,7 +343,8 @@ func (lo *layout) vehicles(w *sim.World) {
 
 func (lo *layout) vehiclesWithin(w *sim.World, limit float32) {
 	for _, a := range w.Agents {
-		if !lo.visible(a.V.Pos, limit) {
+		key := keyVehicle + a.ID
+		if !lo.seen(a.V.Pos, limit, key, false) {
 			continue
 		}
 		cl := vision.ClassVehicle
@@ -274,7 +352,8 @@ func (lo *layout) vehiclesWithin(w *sim.World, limit float32) {
 			cl = vision.ClassPolice
 		}
 		s := a.V.Spec
-		lo.add(lo.box(cl, a.V.Pos, s.Height/2, s.HalfWidth, s.Height/2, s.HalfLength, a.V.Yaw))
+		b, ok := lo.box(cl, a.V.Pos, s.Height/2, s.HalfWidth, s.Height/2, s.HalfLength, a.V.Yaw)
+		lo.put(b, ok, a.V.Pos, key)
 	}
 }
 
@@ -408,9 +487,11 @@ func set(img *image.RGBA, x, y int, c color.RGBA) {
 
 // LayoutMirror returns the detection boxes visible in one of the mirror
 // cameras. A mirror is for traffic, so it shows vehicles and nothing else.
-func LayoutMirror(w *sim.World, v View) []Box {
-	pr := newProjector(v)
-	lo := &layout{p: pr, land: w.City, eye: v.Position.Ground(), fwd: pr.fwd.Ground().Norm()}
+func LayoutMirror(w *sim.World, v View) []Box { return LayoutMirrorIn(w, v, clearState) }
+
+// LayoutMirrorIn is [LayoutMirror] in weather.
+func LayoutMirrorIn(w *sim.World, v View, st weather.State) []Box {
+	lo := newLayout(w, v, st)
 	lo.vehiclesWithin(w, mirrorRange)
 	return lo.out
 }
@@ -478,8 +559,8 @@ func NewMirrorEye(width, height int) *MirrorEye {
 
 // Look lays out, rasterises and scans one mirror camera on a car standing as
 // given. The detections are valid until the next look through the same eye.
-func (e *MirrorEye) Look(w *sim.World, c vision.Camera, car city.Stand) []vision.Detection {
-	e.Boxes = LayoutMirror(w, MirrorView(c, car))
+func (e *MirrorEye) Look(w *sim.World, c vision.Camera, car city.Stand, st weather.State) []vision.Detection {
+	e.Boxes = LayoutMirrorIn(w, MirrorView(c, car), st)
 	RasteriseInto(e.img, e.Boxes)
 	b := e.img.Bounds()
 	return e.scan.Scan(Pixels(e.img, e.px), b.Dx(), b.Dy())

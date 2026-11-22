@@ -29,6 +29,7 @@ import (
 	"github.com/danielriddell21/autobahn/internal/pack"
 	"github.com/danielriddell21/autobahn/internal/sim"
 	"github.com/danielriddell21/autobahn/internal/vision"
+	"github.com/danielriddell21/autobahn/internal/weather"
 )
 
 // CameraMode selects the player's viewpoint.
@@ -71,6 +72,13 @@ type Options struct {
 	// Reckless drives the car along its route at full throttle, ignoring every
 	// rule. It is a development aid for exercising the judge and the police.
 	Reckless bool
+	// AutopilotJobs lets a job go on while the autopilot drives. It then pays
+	// nothing; without it, turning the autopilot on cancels the job.
+	AutopilotJobs bool
+	// Weather is how the sky is chosen. The zero value is clear; a player's
+	// stored setting, which drifts by default, replaces it unless -weather
+	// was given.
+	Weather weather.Setting
 	// ShowPanel draws the AI camera panel while the autopilot is driving. It
 	// never appears in manual driving: it is the autopilot's view of the road,
 	// and the camera is not even run when nothing is reading it.
@@ -189,6 +197,8 @@ type Game struct {
 	seenBanked         int
 	// career counts the bounty banked here that goes toward the packs.
 	career bountyMeter
+	// jobs is the jobs framework's end of the game: see jobs.go.
+	jobs jobs
 
 	camMode CameraMode
 	// overheadHeight is how much ground the overhead camera shows either side
@@ -225,6 +235,7 @@ type Game struct {
 	lastDT        float32
 
 	audio     *audio.Kit
+	skySound  *audio.Sky
 	recorder  *record.Recorder
 	notices   *crucihud.Overlay
 	lastCmd   autopilot.Command
@@ -301,7 +312,7 @@ func New(opts Options) *Game {
 		opts: opts,
 		world: sim.NewWorld(sim.Config{
 			Seed: opts.Seed, Map: opts.Map, Traffic: opts.Traffic, Police: opts.Police,
-			PlayerBody: sim.PlayerBodyOf(opts.Car),
+			PlayerBody: sim.PlayerBodyOf(opts.Car), Weather: opts.Weather,
 		}),
 		// In a chase against the machine the runner is always the autopilot;
 		// that is what makes it a chase against the machine.
@@ -318,8 +329,10 @@ func New(opts Options) *Game {
 		g.recorder = record.New(opts.Rec, record.WithFrameDiff())
 	}
 	g.audio = audio.Open(opts.Mute)
+	g.skySound = audio.OpenSky(g.audio)
 	g.notices = crucihud.New()
 	g.watchInfractions()
+	g.watchJobs()
 	g.driver = autopilot.New(g.visionCam)
 	g.driver.Mode = opts.Mode
 	g.aiTarget = rl.LoadRenderTexture(int32(opts.CamWidth), int32(opts.CamHeight))
@@ -382,6 +395,7 @@ func (g *Game) watchInfractions() {
 
 // Close releases the GPU resources the game owns.
 func (g *Game) Close() {
+	g.skySound.Close()
 	g.audio.Close()
 	rl.UnloadRenderTexture(g.aiTarget)
 	g.freeGround()
@@ -415,6 +429,21 @@ func (g *Game) advanceDay(dt float32) {
 // relight sets the light for the hour on the clock, in the map's season.
 func (g *Game) relight() {
 	g.light = relight(lightingAt(g.clock.hour), g.opts.Map.Season())
+	if g.world == nil {
+		return
+	}
+	// The weather is asked of the clock each frame, as everything in it is.
+	flash := float32(0)
+	if f, ok := g.strike(); ok {
+		flash = flashLevel(f, g.world.Time)
+	}
+	g.light = rewet(g.light, g.world.Weather(), flash)
+}
+
+// strike returns the lightning that has lately struck, if any.
+func (g *Game) strike() (weather.Flash, bool) {
+	c := &g.world.Climate
+	return weather.Strike(c.Seed, c.Season, c.Setting, g.world.Time)
 }
 
 // sky clears the frame to the sky for the current time of day.
@@ -496,6 +525,7 @@ func (g *Game) Step(dt float32) {
 	}
 
 	g.world.Update(controls, dt)
+	g.stepJobs()
 	g.updateEffects(dt)
 	g.watchPursuit(dt)
 	g.updateCameras(dt)
@@ -627,6 +657,8 @@ func (g *Game) updateAudio() {
 	p := g.world.Player
 	g.audio.Engine(p.Speed(), p.Throttle)
 	g.audio.Skid(p.Slip, p.Speed())
+	strike, struck := g.strike()
+	g.skySound.Update(g.world.Weather(), strike, struck, g.world.Time)
 
 	nearest, bearing := float32(1e9), float32(0)
 	for _, u := range g.world.Police() {
@@ -704,6 +736,8 @@ func (g *Game) handleInput() {
 		g.showLabels = !g.showLabels
 	case rl.IsKeyPressed(rl.KeyR):
 		g.world.Respawn()
+	case rl.IsKeyPressed(rl.KeyJ):
+		g.offerJob()
 	case rl.IsKeyPressed(rl.KeyN):
 		g.world.PlaceOnNearestLane()
 	case rl.IsKeyPressed(rl.KeyH):
@@ -832,7 +866,7 @@ func (g *Game) renderAICamera() {
 	rl.BeginTextureMode(g.aiTarget)
 	g.sky(g.opts.CamWidth, g.opts.CamHeight)
 	g.drawWorld(g.aiCam, false)
-	boxes := annotate.Layout(g.world, g.aiView)
+	boxes := annotate.LayoutIn(g.world, g.aiView, g.world.Weather())
 	drawBoxes(boxes, g.showLabels)
 	rl.EndTextureMode()
 }
@@ -845,7 +879,7 @@ func (g *Game) watchMirrors() {
 		if g.eyes[m] == nil {
 			g.eyes[m] = annotate.NewMirrorEye(cams[m].Width, cams[m].Height)
 		}
-		g.driver.Watch(vision.Mirror(m), g.eyes[m].Look(g.world, cams[m], g.world.City.StandAt(p.Pos, p.Yaw)))
+		g.driver.Watch(vision.Mirror(m), g.eyes[m].Look(g.world, cams[m], g.world.City.StandAt(p.Pos, p.Yaw), g.world.Weather()))
 		g.mirrorBoxes[m] = g.eyes[m].Boxes
 	}
 }
@@ -933,8 +967,9 @@ func Run(opts Options) error {
 		// There is no menu to keep a run like this to what the player holds,
 		// so it is checked here.
 		set := LoadSettings()
-		held := pack.Access{Banked: LoadCareer().Banked, Bypass: opts.UnlockAll || set.UnlockAll}
-		if err := opts.locked(held); err != nil {
+		c := loadCareerFor(set)
+		held := pack.Access{Banked: c.Banked, Bypass: opts.UnlockAll || set.UnlockAll}
+		if err := opts.lockedFor(c.holdings(held)); err != nil {
 			return err
 		}
 		return WithWindow(opts, run)

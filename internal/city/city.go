@@ -449,6 +449,10 @@ type Params struct {
 	// line CoastRow, which becomes the seafront, with a beach below it.
 	Coast    bool
 	CoastRow int
+	// Works is the share of closable streets that are dug up at any one time.
+	// It only says how often: which streets, and when, is a function of the
+	// seed, the street and the clock, and is worked out by package works.
+	Works float32
 }
 
 // DefaultParams returns generation parameters for a reasonably sized city.
@@ -456,7 +460,7 @@ func DefaultParams(seed uint64) Params {
 	return Params{
 		Seed: seed, Cols: 9, Rows: 9, MinSpan: 80, MaxSpan: 150,
 		Roundabouts: 0.28, Parks: parkShare, Rise: 1,
-		Floor: 7, Storeys: 10, MainEvery: 3,
+		Floor: 7, Storeys: 10, MainEvery: 3, Works: 0.12,
 	}
 }
 

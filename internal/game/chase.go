@@ -7,6 +7,7 @@ import (
 
 	"github.com/danielriddell21/autobahn/internal/mathx"
 	"github.com/danielriddell21/autobahn/internal/sim"
+	"github.com/danielriddell21/autobahn/internal/weather"
 )
 
 // EscapeTime is how long the runner must stay free to win, in seconds.
@@ -89,11 +90,12 @@ func (g *Game) publish() {
 	g.sinceSnapshot = 0
 
 	s := Snapshot{
-		Clock:  g.world.Time,
-		Hour:   g.clock.hour,
-		Runner: poseOf(g.world.Player, false),
-		Agents: make([]Pose, 0, len(g.world.Agents)),
-		Chaser: -1,
+		Clock:   g.world.Time,
+		Hour:    g.clock.hour,
+		Weather: uint8(g.world.Climate.Setting),
+		Runner:  poseOf(g.world.Player, false),
+		Agents:  make([]Pose, 0, len(g.world.Agents)),
+		Chaser:  -1,
 
 		WantedLevel: g.world.Wanted.Level,
 		WantedState: int(g.world.Wanted.State),
@@ -166,6 +168,7 @@ func (g *Game) adopt(s Snapshot, dt float32) {
 	// only the moving parts are taken from the host.
 	g.world.Signals.SetClock(s.Clock)
 	g.world.Time = s.Clock
+	g.world.Climate.Setting = weather.Setting(s.Weather)
 	g.clock.hour, g.clock.glide = wrapHour(s.Hour), 0
 	g.relight()
 	ease(g.world.Player, s.Runner, dt)

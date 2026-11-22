@@ -5,6 +5,7 @@ import (
 
 	"github.com/danielriddell21/autobahn/internal/city"
 	"github.com/danielriddell21/autobahn/internal/mathx"
+	"github.com/danielriddell21/autobahn/internal/works"
 )
 
 // Indicator is the turn signal an agent is showing.
@@ -140,6 +141,8 @@ type Agent struct {
 	// surface is the share of full grip the roads it drives on give, so a
 	// car it is changed to gets the same.
 	surface float32
+	// works is the roadworks, which no turn chosen may run into.
+	works *works.Index
 }
 
 // Pursuing reports whether this unit is currently on a blue-light run.
@@ -253,7 +256,8 @@ func (a *Agent) chooseNextToward(c *city.City, target mathx.Vec, chasing bool) {
 			return
 		}
 	}
-	if len(a.lane.Succ) == 0 {
+	turns := a.openTurns(a.lane)
+	if len(turns) == 0 {
 		a.hasNext = false
 		return
 	}
@@ -266,17 +270,17 @@ func (a *Agent) chooseNextToward(c *city.City, target mathx.Vec, chasing bool) {
 		// The exit is chosen on the way in, as a driver chooses it, so the car
 		// goes round with a purpose instead of rolling a die at every exit.
 		a.ringSkip = a.rng.IntN(max(c.Nodes[a.lane.ToNode].Degree()-1, 1))
-		a.next = a.lane.Succ[0]
+		a.next = turns[0]
 		return
 	}
 	// On a wider road the choice is made from every lane's turns, not just
 	// this one's, and the driver changes lane for it on the way.
-	cands := a.lane.Succ
+	cands := turns
 	if lanes := c.Roads[a.lane.Road].Class.Lanes(); lanes > 1 {
 		cands = nil
 		for i := range lanes {
 			if l := sibling(c, a.lane, i); l != nil {
-				cands = append(cands, l.Succ...)
+				cands = append(cands, a.openTurns(l)...)
 			}
 		}
 	}
@@ -291,7 +295,7 @@ func (a *Agent) chooseNextToward(c *city.City, target mathx.Vec, chasing bool) {
 		pick = straight[a.rng.IntN(len(straight))]
 	}
 	a.wantKind, a.hasWant = pick.Kind, true
-	for _, t := range a.lane.Succ {
+	for _, t := range turns {
 		if t == pick {
 			a.next = t
 			return
@@ -304,9 +308,10 @@ func (a *Agent) chooseNextToward(c *city.City, target mathx.Vec, chasing bool) {
 
 // ringTurn carries on round a roundabout until the chosen exit comes up.
 func (a *Agent) ringTurn() city.Turn {
-	round := a.lane.Succ[0]
+	turns := a.openTurns(a.lane)
+	round := turns[0]
 	var exits []city.Turn
-	for _, t := range a.lane.Succ {
+	for _, t := range turns {
 		if t.Kind == city.TurnStraight {
 			round = t
 		} else {
@@ -340,7 +345,7 @@ func (a *Agent) routePoint(c *city.City, ahead float32) mathx.Vec {
 		}
 		ahead -= remain
 		lane = c.Lanes[turn.Lane]
-		turn, hasTurn = onward(lane)
+		turn, hasTurn = onwardOpen(a.works, lane)
 	} else {
 		remain := lane.Length - a.s
 		if ahead <= remain {
@@ -362,7 +367,7 @@ func (a *Agent) routePoint(c *city.City, ahead float32) mathx.Vec {
 			return lane.Point(ahead)
 		}
 		ahead -= lane.Length
-		turn, hasTurn = onward(lane)
+		turn, hasTurn = onwardOpen(a.works, lane)
 	}
 	return lane.Point(lane.Length)
 }
@@ -415,6 +420,10 @@ func (a *Agent) drive(w *World, dt float32) {
 	c := w.City
 	if a.idle(c, dt) || (a.pursuing && a.engage(w, dt)) {
 		return
+	}
+	if a.closedTurn() {
+		// The street ahead has been shut since the turn was chosen.
+		a.chooseNext(c)
 	}
 
 	st := a.style()

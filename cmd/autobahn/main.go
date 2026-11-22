@@ -15,6 +15,7 @@ import (
 	"github.com/danielriddell21/autobahn/internal/autopilot"
 	"github.com/danielriddell21/autobahn/internal/city"
 	"github.com/danielriddell21/autobahn/internal/game"
+	"github.com/danielriddell21/autobahn/internal/weather"
 )
 
 // version is written by the linker at release time. The release tool verifies
@@ -48,7 +49,7 @@ func parse(name string, args []string, out io.Writer) (opts game.Options, done b
 	fs := flag.NewFlagSet(name, flag.ExitOnError)
 	seed := fs.Uint64("seed", opts.Seed, "city generation seed")
 	mapName := fs.String("map", "city", "the place to drive: "+strings.Join(game.MapNames(), ", "))
-	unlockAll := fs.Bool("unlock-all", false, "offer every pack without it being earned")
+	unlockAll := fs.Bool("unlock-all", false, "offer every pack, car and paint without it being earned or bought")
 	traffic := fs.Int("traffic", opts.Traffic, "number of ambient traffic cars")
 	police := fs.Int("police", opts.Police, "number of patrolling police units; 0 disables them")
 	width := fs.Int("width", opts.Width, "window width in pixels")
@@ -56,6 +57,7 @@ func parse(name string, args []string, out io.Writer) (opts game.Options, done b
 	camW := fs.Int("camwidth", opts.CamWidth, "AI camera width in pixels")
 	camH := fs.Int("camheight", opts.CamHeight, "AI camera height in pixels")
 	auto := fs.Bool("autopilot", false, "start with the AI driving")
+	autoJobs := fs.Bool("autopilot-jobs", false, "let a job go on, unpaid, while the autopilot drives")
 	reckless := fs.Bool("reckless", false, "drive the route at full throttle ignoring every rule, to exercise the police")
 	panel := fs.Bool("panel", true, "show the AI camera panel while the autopilot drives")
 	mute := fs.Bool("mute", false, "synthesise no sound")
@@ -67,6 +69,7 @@ func parse(name string, args []string, out io.Writer) (opts game.Options, done b
 	timeOfDay := fs.String("time", "day", "the time of day to start at: dawn, day, dusk or night")
 	dayLength := fs.Float64("daylength", 0, "real minutes a whole day lasts; 0 holds the time of day")
 	car := fs.String("car", "hothatch", "the player's car: "+strings.Join(game.CarNames(), ", "))
+	weatherName := fs.String("weather", "clear", "the weather: clear, rain, fog, storm or drift")
 	paintName := fs.String("paint", "rosso", "the player's paint, as the garage names it, spaces dropped")
 	hz := fs.Float64("perception", float64(opts.PerceptionH), "perception updates per second")
 	frames := fs.Int("frames", 0, "run this many frames then exit; 0 runs until closed")
@@ -104,6 +107,10 @@ func parse(name string, args []string, out io.Writer) (opts game.Options, done b
 	opts.CamWidth, opts.CamHeight = *camW, *camH
 	opts.Autopilot = *auto
 	opts.Reckless = *reckless
+	if opts.Weather, ok = weather.ParseSetting(*weatherName); !ok {
+		return opts, false, fmt.Errorf("unknown weather %q; try clear, rain, fog, storm or drift", *weatherName)
+	}
+	opts.AutopilotJobs = *autoJobs
 	opts.ShowPanel = *panel
 	opts.Mute = *mute
 	opts.Chase = *chase

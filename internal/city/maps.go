@@ -137,6 +137,7 @@ func ParamsFor(m Map, seed uint64) Params {
 		p.Roundabouts, p.Parks, p.Rise = 0.2, 0.14, 0.22
 		p.Coast, p.CoastRow = true, 3
 		p.Wind = 26
+		p.Works = 0.06
 		// The town comes down a hill to the front.
 		p.Hills, p.HillSpan, p.Bluff = 3.5, 700, 20
 	}
@@ -151,6 +152,7 @@ func ParamsFor(m Map, seed uint64) Params {
 		p.Floor, p.Storeys, p.MainEvery, p.Balanced = 5.5, 4.5, 5, true
 		// Nothing in a village runs straight for long.
 		p.Wind = 40
+		p.Works = 0.06
 		// And nothing is level either: rolling country.
 		p.Hills, p.HillSpan = 8, 850
 	}
@@ -176,3 +178,6 @@ func ParamsFor(m Map, seed uint64) Params {
 
 // Map returns which place this city is.
 func (c *City) Map() Map { return c.params.Map }
+
+// Params returns the parameters the city was generated from.
+func (c *City) Params() Params { return c.params }

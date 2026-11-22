@@ -49,10 +49,18 @@ func paintOf(i int) carPaint {
 	return playerPaints[i]
 }
 
-// cyclePaint steps through the paints, wrapping at both ends.
-func cyclePaint(i, dir int) int {
-	n := len(playerPaints)
-	return ((i+dir)%n + n) % n
+// cyclePaint steps through the paints on offer, wrapping at both ends. A paint
+// that is not among them steps onto the first.
+func cyclePaint(all []int, i, dir int) int {
+	n := len(all)
+	if n == 0 {
+		return i
+	}
+	at := slices.Index(all, i)
+	if at < 0 {
+		return all[0]
+	}
+	return all[((at+dir)%n+n)%n]
 }
 
 // cycleBody steps through the shapes on offer, wrapping at both ends. A car

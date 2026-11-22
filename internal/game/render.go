@@ -132,10 +132,12 @@ func (g *Game) drawWorld(cam rl.Camera3D, drawPlayer bool) {
 	g.drawProps(eye)
 	g.drawFurniture(eye)
 	g.drawBarriers(eye)
+	g.drawWorks(eye)
 	g.drawParking(eye)
 	g.drawTraffic(eye, drawPlayer)
 	g.drawLightPools(eye, drawPlayer)
 	g.drawFall(eye)
+	g.drawRain(eye, g.world.Weather())
 	g.drawSmoke()
 
 	if g.scene.ok {
@@ -764,8 +766,8 @@ func PaletteBases() []color.RGBA {
 // palette needs exactly: the boxes are drawn flat, and a shade of one is
 // never seen.
 func BoxColours() []color.RGBA {
-	out := make([]color.RGBA, 0, int(vision.ClassLaneOncoming))
-	for cl := vision.ClassVehicle; cl <= vision.ClassLaneOncoming; cl++ {
+	out := make([]color.RGBA, 0, vision.NumClasses)
+	for cl := vision.ClassVehicle; cl < vision.Class(vision.NumClasses); cl++ {
 		out = append(out, vision.RGBA(cl))
 	}
 	return out

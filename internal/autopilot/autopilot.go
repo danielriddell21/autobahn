@@ -247,6 +247,9 @@ type Driver struct {
 	LaneOffset float32
 	// Detections is how many boxes the last frame produced.
 	Detections int
+	// Sight is how much road the last frames showed. It holds the car to a speed
+	// it can stop from within that, which in clear weather is never.
+	Sight Sight
 
 	steer float32
 	// curve is the curvature of the arc currently being steered, 1/m.
@@ -296,6 +299,12 @@ type Driver struct {
 	// reach is how far ahead the lane to the left, the lane to the right and
 	// the oncoming lane were last known to go on.
 	reach [3]float32
+	// coned is set while what is in the way is a cone or a barrier, which is not
+	// going anywhere and has to be gone round.
+	coned bool
+	// odo is how far the car has gone, and divEnd where a diversion sign said
+	// to take care until.
+	odo, divEnd float32
 }
 
 // New returns a driver calibrated to the given camera, with mirrors at the
@@ -383,10 +392,12 @@ type target struct {
 // car's own road speed in metres per second.
 func (d *Driver) Drive(dets []vision.Detection, speed, dt float32) Command {
 	d.Detections = len(dets)
+	d.odo += max(speed, 0) * dt
 
 	raw := d.lanePoints(dets)
 	lane := d.shiftLane(raw, dt)
 	d.readSigns(dets, lane)
+	d.Sight.Update(d.cam, dets, dt)
 
 	cmd := Command{}
 	cmd.Steer = d.steerFor(lane, speed, dt)
@@ -411,12 +422,15 @@ func (d *Driver) Drive(dets []vision.Detection, speed, dt float32) Command {
 		d.blindTimer = 0
 	}
 
+	cruise = d.takeCareAtWorks(dets, lane, cruise)
+
 	cruise = d.manoeuvre(dets, raw, cruise, speed, dt, pf)
 	d.path = lane
 
 	// Collect everything that constrains speed, then obey the tightest.
 	targets := d.bendTargets(lane, pf)
 	targets = append(targets, d.vehicleTargets(dets, lane, pf)...)
+	targets = append(targets, d.closedTargets(dets, lane)...)
 	targets = append(targets, d.junctionTargets(dets, lane, speed, dt, pf)...)
 
 	governed, need := cruise, float32(0)
@@ -444,6 +458,10 @@ func (d *Driver) Drive(dets []vision.Detection, speed, dt float32) Command {
 		default:
 			d.State = StateSlowing
 		}
+	}
+	if sightCap := d.Sight.Cap(brakeDecel * 0.5); sightCap < governed {
+		governed = sightCap
+		d.Reason = "limited sight"
 	}
 	if d.stopHeld {
 		d.State = StateWaiting
@@ -711,7 +729,7 @@ func (d *Driver) vehicleTargets(dets []vision.Detection, lane []lanePoint, pf pr
 	// The car in front. A vehicle box's bottom edge is where its tyres meet
 	// the road, which is the usable range cue.
 	for _, det := range dets {
-		if !vision.IsVehicle(det.Class) {
+		if !vision.IsObstacle(det.Class) {
 			continue
 		}
 		dist, blocking := d.inPath(det, lane)
@@ -725,6 +743,74 @@ func (d *Driver) vehicleTargets(dets []vision.Detection, lane []lanePoint, pf pr
 		out = append(out, target{
 			kind: targetVehicle, dist: max(dist-gap, 0), decel: pf.followDecel,
 			why: fmt.Sprintf("vehicle %.0fm ahead", dist),
+		})
+	}
+	return out
+}
+
+// Roadworks signs, in metres and as a share of the speed.
+const (
+	// diversionSlow is how much of its speed the car keeps after a diversion
+	// sign, for diversionRun metres.
+	diversionSlow float32 = 0.8
+	diversionRun  float32 = 150
+	// worksSignRange is how far off a roadworks sign is read, and
+	// closedStopShort how far short of a road closed sign the car stops.
+	worksSignRange  float32 = 60
+	closedStopShort float32 = 8
+)
+
+// takeCareAtWorks slows the speed the car is aiming for while a diversion sign
+// read a short way back still holds.
+func (d *Driver) takeCareAtWorks(dets []vision.Detection, lane []lanePoint, cruise float32) float32 {
+	if d.readDiversion(dets, lane) && d.State == StateCruise {
+		d.Reason = "diversion ahead"
+	}
+	if d.odo < d.divEnd {
+		return cruise * diversionSlow
+	}
+	return cruise
+}
+
+// readDiversion takes note of a diversion sign beside the road being driven,
+// and reports whether it saw one. The warning holds for a stretch of road
+// after it, because the sign itself passes out of the lens.
+func (d *Driver) readDiversion(dets []vision.Detection, lane []lanePoint) bool {
+	seen := false
+	for _, det := range dets {
+		if det.Class != vision.ClassDiversion {
+			continue
+		}
+		dist := d.cam.RangeAtHeight(det.MinY, vision.WorksSignTopHeight)
+		lateral := dist * tan(d.cam.Bearing(det.CenterX()))
+		if dist > worksSignRange || abs(lateral-laneLateralAt(lane, dist)) > signCorridor {
+			continue
+		}
+		d.divEnd, seen = d.odo+diversionRun, true
+	}
+	return seen
+}
+
+// closedTargets stops the car for a road closed sign it is steering at: one
+// the lane markers go on past. The route never leads into a closed street, so
+// this is only a net under it.
+func (d *Driver) closedTargets(dets []vision.Detection, lane []lanePoint) []target {
+	if len(lane) == 0 {
+		return nil
+	}
+	var out []target
+	for _, det := range dets {
+		if det.Class != vision.ClassRoadClosed {
+			continue
+		}
+		dist := d.cam.RangeAtHeight(det.MinY, vision.WorksSignTopHeight)
+		lateral := dist * tan(d.cam.Bearing(det.CenterX()))
+		if dist > worksSignRange || lane[len(lane)-1].dist < dist || abs(lateral-laneLateralAt(lane, dist)) > 6 {
+			continue
+		}
+		out = append(out, target{
+			kind: targetControl, dist: max(dist-closedStopShort, 0),
+			why: fmt.Sprintf("road closed %.0fm ahead", dist),
 		})
 	}
 	return out

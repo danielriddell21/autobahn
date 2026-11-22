@@ -181,6 +181,46 @@ and must never be made brighter than it was defined. A pale colour scaled past
 full wraps round, and came out cyan once; `crownShade` and the season tests
 are there because of it.
 
+## Roadworks
+
+`internal/works` says which streets are dug up and when, and it is the growth
+rule carried over to time: a function of the seed, the street (its lower
+junction and axis on the lattice, never `Road.ID`) and the clock, in 900 s
+slots. It never touches the lane graph. Only streets on a parity pattern of the
+lattice can close, so a junction has at most one shut arm, and only once both
+ends are `City.Complete`. A local street or collector is barred to entry by a
+barrier across each lane at its mouth; an arterial has its kerbside lane coned
+for a stretch ending 30 m before the stop line. Signs and routing close first,
+the cones and barriers are solid a minute later.
+
+`sim` acts on it in one place: `openTurns` filters every turn a driver or the
+route chooses, `collideWorks` makes cones and barriers solid, and a stopped
+stand-in at the first cone is what traffic queues behind, so the lane-change
+logic it already has does the merging. The autopilot sees cones and barriers
+(`vision.IsObstacle`) and the two signs, and nothing else. `Config.Works`
+defaults to normal; `eval -works dense` is the gate's second line, and fails if
+it drove past fewer than 24 sites.
+
+## Weather
+
+Weather is drawn on the season and never stored: `weather.At` is a function of
+the seed, the season, the setting and `sim.World.Time`, so the player, traffic,
+camera and a guest in a chase (who gets the host's setting and Time in the
+snapshot) all ask separately and agree. `sim.Climate` applies it once per step.
+Grip is the worse of the season's and the weather's (`min`), refitted only when
+it moves a step, and winter's rain and storms are sleet.
+
+The autopilot is told nothing and `internal/weather` is on the boundary's
+forbidden list. What it loses is range, and that loss lives in the annotator:
+`layout.seen` and `layout.put` drop and shake boxes past the weather's sight,
+the same for the window and for `eval`. The autopilot notices only that its
+far lane markers have gone (`autopilot.Sight`) and holds its speed to what it
+can stop within. A clear sky is byte-identical to no weather at all.
+
+`weather.Setting`'s zero value is clear, so a world built without asking, a
+test, and `eval` (default `-weather clear`) are dry; the player's stored
+setting drifts. `just gate` also scores fog and storm.
+
 ## Dressing
 
 Roofs, shop fronts, street furniture, park paths, fields and the beach are
@@ -196,6 +236,15 @@ nothing is locked by accident. A pack unlocks when the bounty banked over a
 player's career reaches its price, and only a pursuit the player drove all of
 counts: `bountyMeter` marks one the autopilot touched. The menus never offer
 what is locked; `-unlock-all` and the tools bypass it.
+
+Bounty only opens the shop; earnings buy from it. `internal/shop` prices every
+player car and paint and decides what a player may drive, wear and buy. A car
+is for sale only once its pack is held, a paint bought once works on every
+car, and some paints are never for sale. What is owned lives in `career.json`
+(`Career`, versioned: `migrate` brings an old file up, `sanitise` cleans it).
+Cars and paints are stored as integers, so `sim.BodyKind` and `playerPaints`
+may only grow at the end; a test pins them. `-unlock-all` skips ownership too
+and never writes it.
 
 ## eval is a gate, not a report
 

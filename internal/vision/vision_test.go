@@ -2,6 +2,7 @@ package vision_test
 
 import (
 	"image/color"
+	"math"
 	"testing"
 
 	"github.com/danielriddell21/autobahn/internal/mathx"
@@ -195,12 +196,56 @@ func TestSignalClassesThatStopTraffic(t *testing.T) {
 // Distinct colours per class are what makes the scanner work at all.
 func TestClassColoursAreDistinct(t *testing.T) {
 	seen := map[color.RGBA]vision.Class{}
-	for cl := vision.ClassVehicle; cl <= vision.ClassStopLine; cl++ {
+	for cl := vision.ClassVehicle; cl < vision.Class(vision.NumClasses); cl++ {
 		c := vision.RGBA(cl)
 		if prev, dup := seen[c]; dup {
 			t.Errorf("%v and %v share the colour %v", prev, cl, c)
 		}
 		seen[c] = cl
+	}
+}
+
+// A box edge blended into its neighbour by anti-aliasing or filtering must
+// never come out as another class. Every mix of a roadworks colour with any
+// other class colour has to stay clear of all of them. (The older colours blend
+// into one another in places, which is why they are not held to this.)
+func TestWorksColoursSurviveBlending(t *testing.T) {
+	near := func(a, b color.RGBA) bool {
+		d := func(x, y uint8) float64 { return math.Abs(float64(x) - float64(y)) }
+		return math.Max(d(a.R, b.R), math.Max(d(a.G, b.G), d(a.B, b.B))) <= 1
+	}
+	for a := vision.ClassCone; a < vision.Class(vision.NumClasses); a++ {
+		for b := vision.ClassVehicle; b < vision.Class(vision.NumClasses); b++ {
+			if a == b {
+				continue
+			}
+			ca, cb := vision.RGBA(a), vision.RGBA(b)
+			for _, f := range []float64{0.25, 0.5, 0.75} {
+				mix := func(x, y uint8) uint8 { return uint8(math.Round(float64(x)*(1-f) + float64(y)*f)) }
+				m := color.RGBA{mix(ca.R, cb.R), mix(ca.G, cb.G), mix(ca.B, cb.B), 255}
+				for c := vision.ClassVehicle; c < vision.Class(vision.NumClasses); c++ {
+					if near(m, vision.RGBA(c)) {
+						t.Errorf("%v mixed %.0f%% with %v is %v, which is %v", a, f*100, b, m, c)
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestWorksClassesAreObstaclesOrSigns(t *testing.T) {
+	for _, c := range []vision.Class{vision.ClassCone, vision.ClassBarrier, vision.ClassVehicle, vision.ClassPolice} {
+		if !vision.IsObstacle(c) {
+			t.Errorf("%v should be an obstacle", c)
+		}
+	}
+	for _, c := range []vision.Class{vision.ClassRoadClosed, vision.ClassDiversion, vision.ClassLaneMarker, vision.ClassStopLine} {
+		if vision.IsObstacle(c) {
+			t.Errorf("%v should not be an obstacle", c)
+		}
+	}
+	if vision.ClassLaneOncoming != 17 || vision.ClassCone != 18 {
+		t.Errorf("class numbering moved: oncoming %d, cone %d", vision.ClassLaneOncoming, vision.ClassCone)
 	}
 }
 

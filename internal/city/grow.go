@@ -397,6 +397,11 @@ func cellChance(seed uint64, salt uint64, col, row int) float32 {
 	return float32(h>>40) / float32(1<<24)
 }
 
+// Chance is cellChance for those outside the package that decide something per
+// street or per junction from where it is, as roadworks do: a value in [0, 1)
+// that is the same whenever and from wherever the place is reached.
+func Chance(seed, salt uint64, col, row int) float32 { return cellChance(seed, salt, col, row) }
+
 // cellValue is cellChance with an extra index, for the several decisions taken
 // within one cell — which building, which gap, how tall.
 func cellValue(seed, salt uint64, col, row, i int) float32 {
