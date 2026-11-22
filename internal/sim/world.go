@@ -7,6 +7,7 @@ import (
 
 	"github.com/danielriddell21/autobahn/internal/city"
 	"github.com/danielriddell21/autobahn/internal/mathx"
+	"github.com/danielriddell21/autobahn/internal/night"
 	"github.com/danielriddell21/autobahn/internal/weather"
 	"github.com/danielriddell21/autobahn/internal/works"
 )
@@ -91,6 +92,9 @@ type World struct {
 	Route *Route
 	// Works is the roadworks in force, brought up to Time every step.
 	Works *works.Index
+	// Night is the evening events, nil unless EnableNight has been called. They
+	// shut streets through Works; see night.go.
+	Night *night.Index
 	// Climate is the weather the world is driven in, applied every step.
 	Climate Climate
 
@@ -109,6 +113,8 @@ type World struct {
 	solid    []mathx.OBB
 	stubs    []*Vehicle
 	stubPool []*Vehicle
+	// shows are the show cars of the street meets in force.
+	shows []mathx.OBB
 
 	// partner is the second player's car, and offender the car that broke a
 	// rule last, which the police go after; see Suspect.
@@ -918,8 +924,10 @@ func (w *World) resolveCollisions() {
 		w.collideBuildings(a.V, a == w.partner)
 	}
 	w.collideWorks(w.Player, true)
+	w.collideShows(w.Player, true)
 	for _, a := range w.Agents {
 		w.collideWorks(a.V, a == w.partner)
+		w.collideShows(a.V, a == w.partner)
 	}
 }
 

@@ -683,7 +683,7 @@ func (a *Agent) cruise(w *World, st Style) float32 {
 	if a.inTurn {
 		limit = min(limit, turnSpeed(a.next, st))
 	}
-	return min(limit, bendSpeed(a.lane, a.s, st))
+	return min(limit, bendSpeed(a.lane, a.s, st)) * w.crowdScale(a)
 }
 
 // bendAhead is how far up the road a driver reads the bends, in metres.

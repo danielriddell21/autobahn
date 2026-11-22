@@ -255,6 +255,20 @@ worked out in `internal/game` from where they stand, the way the trees always
 were, and none of it is annotated. Parked cars are the exception: they are
 solid, so they live in `internal/city` and `sim` collides with them.
 
+## Night events
+
+The night pack adds evening events to every map: a market, a fair with fireworks,
+a street meet and a football crowd, open from dusk to one in the morning on the
+game's clock. `internal/night` decides them as roadworks are decided: one venue
+per super-cell of the plan, whether it holds an event a function of the seed, the
+cell and the night's number, nothing stored. The sim has no clock of its own, so
+`World.EnableNight` takes the game's (`dayClock.abs`, which counts midnights).
+Streets an event shuts go through `works.Shut` and the works `Source`, so the
+autopilot reads the same signs and cones as ever and no vision class was added; a
+crowd is a lower speed for traffic near it, and show cars are solid and unseen,
+like parked cars. There are no people: crowd and fireworks are sound only.
+`just eval -events on` holds the clock at night, and the gate runs it.
+
 ## Packs
 
 `internal/pack` groups maps and garage cars into the base game and the packs

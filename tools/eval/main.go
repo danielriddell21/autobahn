@@ -29,6 +29,7 @@ import (
 	"github.com/danielriddell21/autobahn/internal/city"
 	"github.com/danielriddell21/autobahn/internal/custom"
 	"github.com/danielriddell21/autobahn/internal/mathx"
+	"github.com/danielriddell21/autobahn/internal/night"
 	"github.com/danielriddell21/autobahn/internal/scenario"
 	"github.com/danielriddell21/autobahn/internal/sim"
 	"github.com/danielriddell21/autobahn/internal/vision"
@@ -83,6 +84,8 @@ func main() {
 				"with -works dense and -max-points set it is 24 unless given")
 	)
 	ambulances := flag.Int("ambulances", 0, "ambulances going about the town, now and then out on a call")
+	eventsArg := flag.String("events", "off",
+		"the night pack's evening events: off, or on to hold the clock at ten at night with them in force")
 	flag.Parse()
 
 	if *ghostArg != "" {
@@ -104,6 +107,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "eval: unknown mode %q\n", *modeName)
 		os.Exit(2)
 	}
+	if *eventsArg != "on" && *eventsArg != "off" {
+		fmt.Fprintf(os.Stderr, "eval: unknown events setting %q\n", *eventsArg)
+		os.Exit(2)
+	}
 	level, ok := works.ParseLevel(*worksArg)
 	if !ok {
 		fmt.Fprintf(os.Stderr, "eval: unknown works level %q\n", *worksArg)
@@ -120,7 +127,7 @@ func main() {
 	cfg := runConfig{
 		mode: mode, seconds: float32(*seconds), traffic: *traffic, police: *police, ambulances: *ambulances,
 		perception: float32(*hz), width: *width, height: *height,
-		verbose: *verbose, works: level,
+		verbose: *verbose, works: level, events: *eventsArg == "on",
 	}
 
 	if !scoreIn(skies, maps, cfg, *seeds, *from, max(*workers, 1), *failOver, *minSites) {
@@ -270,11 +277,17 @@ type runConfig struct {
 	verbose       bool
 	works         works.Level
 	weather       weather.Setting
+	// events holds the clock at night with the evening events in force.
+	events bool
 }
 
 // defaultMinSites is how many stretches of roadworks a dense gate has to have
 // driven past, over every map, to count as having tested them at all.
 const defaultMinSites = 24
+
+// eveningHour is the hour the clock is held at when events are on: the middle of
+// the first night.
+const eveningHour float32 = 22
 
 // Roadworks counted as passed: the car came within nearSite of a cone or a
 // barrier that was standing, and went on until it was farSite further off than
@@ -409,6 +422,9 @@ func driveOne(seed uint64, cfg runConfig) result {
 		wc = spec.Apply(wc)
 	}
 	w := sim.NewWorld(wc)
+	if cfg.events {
+		w.EnableNight(night.Fixed(eveningHour))
+	}
 	s := newSession(w, cfg)
 	sites := newSiteCounter()
 	driver := s.driver

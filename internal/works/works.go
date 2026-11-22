@@ -601,3 +601,20 @@ func kerb(l *city.Lane, r *city.Road, s, clearance float32) mathx.Vec {
 	out := r.HalfWidth + clearance - laneOffset
 	return l.Point(s).Add(l.DirAt(s).Right().Mul(out * side))
 }
+
+// Shut returns the closure that shuts a street of the plan for a night event,
+// and whether it can be shut at all. It obeys the same rules as the timetable:
+// only a street of the parity pattern, never beside a roundabout, and never one
+// that leaves a lane arriving at either end with nowhere to go, so an event and
+// the roadworks together still leave every junction at most one arm closed.
+// Its times are left for the caller, who knows the clock it keeps.
+func Shut(c *city.City, seed uint64, r *city.Road) (Closure, bool) {
+	if r.Ring || r.A == r.B || !edgeKey(c, r).Closable() {
+		return Closure{}, false
+	}
+	st, ok := NewScheduled(c, seed, 0).build(r)
+	if !ok {
+		return Closure{}, false
+	}
+	return st.closure, true
+}

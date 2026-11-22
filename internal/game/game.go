@@ -269,15 +269,17 @@ type Game struct {
 	sinceSnapshot float32
 	lastDT        float32
 
-	audio     *audio.Kit
-	skySound  *audio.Sky
-	recorder  *record.Recorder
-	notices   *crucihud.Overlay
-	lastCmd   autopilot.Command
-	perceived float32
-	blink     bool
-	blinkT    float32
-	frame     int
+	audio    *audio.Kit
+	skySound *audio.Sky
+	// nightSound is the night pack's crowd and fireworks, nil without the pack.
+	nightSound *audio.Night
+	recorder   *record.Recorder
+	notices    *crucihud.Overlay
+	lastCmd    autopilot.Command
+	perceived  float32
+	blink      bool
+	blinkT     float32
+	frame      int
 
 	peakWanted  int
 	speedSum    float32
@@ -454,6 +456,7 @@ func (g *Game) watchInfractions() {
 // Close releases the GPU resources the game owns.
 func (g *Game) Close() {
 	g.skySound.Close()
+	g.nightSound.Close()
 	g.audio.Close()
 	rl.UnloadRenderTexture(g.aiTarget)
 	g.freeGround()
@@ -735,6 +738,7 @@ func (g *Game) updateAudio() {
 	g.audio.Skid(p.Slip, p.Speed())
 	strike, struck := g.strike()
 	g.skySound.Update(g.world.Weather(), strike, struck, g.world.Time)
+	g.updateNightAudio()
 
 	nearest, bearing := float32(1e9), float32(0)
 	for _, u := range g.world.Police() {

@@ -79,7 +79,14 @@ type dayClock struct {
 	// glide is how many hours a skip still has to cover, and glideRate how
 	// fast it covers them, in hours a second.
 	glide, glideRate float32
+	// day counts the midnights the clock has passed, so evening events can tell
+	// one night from the next.
+	day int
 }
+
+// abs is the time in hours counted from the start of the first day, which is
+// what night events keep their nights by.
+func (c dayClock) abs() float32 { return float32(c.day)*24 + c.hour }
 
 // set puts the clock at a time of day, at once.
 func (c *dayClock) set(t TimeOfDay) {
@@ -96,6 +103,9 @@ func (c *dayClock) step(dt float32) {
 		g := min(c.glideRate*dt, c.glide)
 		c.glide -= g
 		adv += g
+	}
+	if next := c.hour + adv; next >= 24 {
+		c.day += int(next / 24)
 	}
 	c.hour = wrapHour(c.hour + adv)
 }

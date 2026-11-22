@@ -83,6 +83,11 @@ jobs:
       - name: Score the autopilot in fog and storm
         run: go run ./tools/eval -map all -seeds 24 -seconds 60 -max-points 12 -weather fog,storm
 
+      # And at night, with the night pack's evening events in force: crowds
+      # slowing the traffic and streets shut for them.
+      - name: Score the autopilot among the night events
+        run: go run ./tools/eval -map all -seeds 24 -seconds 60 -max-points 12 -events on
+
       # And the custom map editor's hardest corner: every range at its limit at
       # once. The ranges are only as wide as this passes the same mark, so if it
       # fails, narrow the ranges rather than raising the mark.

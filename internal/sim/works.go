@@ -75,6 +75,9 @@ func (w *World) syncWorks() {
 	}
 	w.Works.Update(w.Time)
 	w.solid = w.Works.Solid(w.solid[:0])
+	if w.Night != nil {
+		w.syncNight()
+	}
 	w.stubs = w.stubs[:0]
 	for _, cl := range w.Works.Active() {
 		if len(cl.Cones) > 0 {

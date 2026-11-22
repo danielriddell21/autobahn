@@ -133,6 +133,7 @@ func (g *Game) drawWorld(cam rl.Camera3D, drawPlayer bool) {
 	g.drawFurniture(eye)
 	g.drawBarriers(eye)
 	g.drawWorks(eye)
+	g.drawEvents(eye)
 	g.drawEmergency(eye)
 	g.drawTaxi(eye)
 	g.drawGates(eye)
