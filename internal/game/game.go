@@ -1064,6 +1064,9 @@ func WithWindow(opts Options, fn func(*Game) error) error {
 	rl.SetTraceLogLevel(rl.LogWarning)
 	rl.SetConfigFlags(rl.FlagMsaa4xHint)
 	rl.InitWindow(int32(opts.Width), int32(opts.Height), "Autobahn")
+	// Escape is the menus' back key and the drive's pause key. raylib's default
+	// would close the window before either saw it.
+	rl.SetExitKey(rl.KeyNull)
 	defer rl.CloseWindow()
 
 	g := New(opts)
