@@ -94,13 +94,7 @@ func TestMenuFontFallsBackWithoutAWindow(t *testing.T) {
 // TestMenuFontsLoad opens a window and checks that all three weights load,
 // that heavier weights measure wider, and that the fallback can be forced.
 func TestMenuFontsLoad(t *testing.T) {
-	requireDisplay(t)
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-	rl.SetTraceLogLevel(rl.LogError)
-	rl.InitWindow(320, 180, "autobahn font test")
-	defer rl.CloseWindow()
-	defer unloadMenuFonts()
+	openTestWindow(t, 320, 180)
 
 	const s = "Hot hatch - Rosso, banks £1,500 …"
 	var widths [3]int32
@@ -138,19 +132,31 @@ func TestMenuFontsLoad(t *testing.T) {
 }
 
 // TestMenuFontsFollowTheWindow: fonts made for one window are not used in the
-// next. The tests open several; a stale texture would draw garbage.
+// next. The tests open several; a stale texture would draw garbage, and under
+// X11 the next window can have the same handle as the last, so the cache is
+// held to rasterising the face afresh in each window, not merely to having one.
 func TestMenuFontsFollowTheWindow(t *testing.T) {
 	requireDisplay(t)
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	rl.SetTraceLogLevel(rl.LogError)
-	for range 2 {
-		rl.InitWindow(320, 180, "autobahn font test")
-		if _, ok := menuFont(faceRow); !ok {
-			rl.CloseWindow()
-			t.Fatal("the font did not load")
+	for i := range 3 {
+		openWindow(320, 180, "autobahn font test")
+		before := menuFontLoads
+		_, ok := menuFont(faceRow)
+		first := menuFontLoads - before
+		menuFont(faceRow) // asked again in the same window: the one made
+		all := menuFontLoads - before
+		closeWindow()
+		if !ok {
+			t.Fatalf("window %d: the font did not load", i)
 		}
-		rl.CloseWindow()
+		if first != 1 || all != 1 {
+			t.Errorf("window %d: the face was rasterised %d times on first use and %d in all, want 1 and 1", i, first, all)
+		}
+		if menuFonts.faces != nil {
+			t.Errorf("window %d: closing it left %d faces cached", i, len(menuFonts.faces))
+		}
 	}
 	if _, ok := menuFont(faceRow); ok {
 		t.Error("a font was offered with no window open")

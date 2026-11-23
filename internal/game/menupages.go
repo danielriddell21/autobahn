@@ -76,7 +76,7 @@ type navInput struct {
 
 // pollNav reads a page's keys from raylib.
 func pollNav() navInput {
-	return navInput{Input: pollMenu(), Back: rl.IsKeyPressed(rl.KeyEscape)}
+	return navInput{Input: pollMenu(), Back: keyPressed(rl.KeyEscape)}
 }
 
 // The hint sets a page registers with, for the bar along the bottom.

@@ -12,7 +12,9 @@ import (
 // rule that a place is a function of where it is.
 type Map int
 
-// The maps, in the order the title screen offers them.
+// The maps, in the order the menus offer them (Play's map cards). They are
+// stored as integers, in the settings and the share codes, so a new map goes
+// on the end.
 const (
 	// MapCity is the British city the game began with.
 	MapCity Map = iota

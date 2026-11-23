@@ -4,7 +4,6 @@ import (
 	"embed"
 	"math"
 	"unicode/utf8"
-	"unsafe"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
@@ -48,13 +47,18 @@ type fontKey struct {
 }
 
 // loadedFonts is every menu face loaded so far, for the window that loaded
-// them. A key mapped to a font with no texture is one that failed to load.
+// them (gen is its windowGen: game.go). A key mapped to a font with no texture
+// is one that failed to load.
 type loadedFonts struct {
-	window unsafe.Pointer
-	faces  map[fontKey]rl.Font
+	gen   uint64
+	faces map[fontKey]rl.Font
 }
 
 var menuFonts loadedFonts
+
+// menuFontLoads counts the faces rasterised, which is what the tests hold the
+// cache to.
+var menuFontLoads int
 
 // menuFontOff forces the built-in face. Tests use it to hold the fallback to
 // its old behaviour.
@@ -67,15 +71,16 @@ func menuFont(f typeFace) (rl.Font, bool) {
 		menuFonts = loadedFonts{} // whatever was loaded went with its window
 		return rl.Font{}, false
 	}
-	if h := rl.GetWindowHandle(); h != menuFonts.window {
+	if menuFonts.gen != windowGen {
 		// A different window than the one the fonts were made for (a test
-		// opens several): their textures are gone.
-		menuFonts = loadedFonts{window: h}
+		// opens several): their textures went with the old one.
+		menuFonts = loadedFonts{gen: windowGen}
 	}
 	key := fontKey{f.weight, f.size}
 	font, ok := menuFonts.faces[key]
 	if !ok {
 		font = loadMenuFont(f)
+		menuFontLoads++
 		if menuFonts.faces == nil {
 			menuFonts.faces = map[fontKey]rl.Font{}
 		}
@@ -101,10 +106,11 @@ func loadMenuFont(f typeFace) rl.Font {
 	return font
 }
 
-// unloadMenuFonts frees the menu faces. It is Shell.Close's, while the window
-// is still open.
+// unloadMenuFonts frees the menu faces and forgets them. It is Shell.Close's
+// and closeWindow's, while the window is still open; fonts made for a window
+// that has gone are only forgotten.
 func unloadMenuFonts() {
-	if rl.IsWindowReady() && rl.GetWindowHandle() == menuFonts.window {
+	if rl.IsWindowReady() && menuFonts.gen == windowGen {
 		for _, font := range menuFonts.faces {
 			if font.Texture.ID != 0 {
 				rl.UnloadFont(font)

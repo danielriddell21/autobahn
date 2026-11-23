@@ -25,6 +25,25 @@ func requireDisplay(t *testing.T) {
 	}
 }
 
+// openTestWindow opens a w by h window for a test that draws, or skips the
+// test with no display. Every display test comes through here. GL is current
+// only on the thread that opened the window and a test runs on a goroutine the
+// scheduler may move, so the goroutine is locked to its thread until the test
+// is over; then the menu fonts are freed while their context is still there
+// and the window closed (closeWindow), after anything the test itself cleans
+// up, since a cleanup registered later runs first.
+func openTestWindow(t *testing.T, w, h int32) {
+	t.Helper()
+	requireDisplay(t)
+	runtime.LockOSThread()
+	rl.SetTraceLogLevel(rl.LogError)
+	openWindow(w, h, "autobahn test")
+	t.Cleanup(func() {
+		closeWindow()
+		runtime.UnlockOSThread()
+	})
+}
+
 func TestTheShellOpensOnTheTitlePage(t *testing.T) {
 	sh := testShell(t)
 	if sh.screen != pageTitle || !sh.onPage() || len(sh.pager.stack) != 0 {
@@ -231,15 +250,8 @@ func TestAddressRuneAcceptsHostsAndPorts(t *testing.T) {
 // game keeps going while the leave dialog is up, so the other player is never
 // left waiting, and a drive alone stands still while it is paused.
 func TestANetworkedGameRunsOnUnderTheLeaveDialog(t *testing.T) {
-	requireDisplay(t)
 	inTempConfig(t)
-	// GL is current on the thread that opened the window.
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-
-	rl.SetTraceLogLevel(rl.LogError)
-	rl.InitWindow(640, 360, "autobahn test")
-	defer rl.CloseWindow()
+	openTestWindow(t, 640, 360)
 
 	o := DefaultOptions()
 	o.Width, o.Height, o.Mute = 640, 360, true
@@ -285,4 +297,16 @@ func TestANetworkedGameRunsOnUnderTheLeaveDialog(t *testing.T) {
 	if _, ok := sh.game.topSpeed(); !ok {
 		t.Error("the drive's top speed was never noted")
 	}
+}
+
+// TestAGameCanBeClosedTwice holds Close to being safe to repeat: the game the
+// window is opened with is closed by the shell and again by WithWindow, and
+// unloading a shader twice aborts the process.
+func TestAGameCanBeClosedTwice(t *testing.T) {
+	openTestWindow(t, 320, 180)
+	o := DefaultOptions()
+	o.Width, o.Height = 320, 180
+	g := New(o)
+	g.Close()
+	g.Close()
 }

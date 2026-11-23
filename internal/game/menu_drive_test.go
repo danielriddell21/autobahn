@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"reflect"
-	"runtime"
 	"testing"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -143,16 +142,8 @@ func TestMenuDriveOptions(t *testing.T) {
 // drive, with the career and settings in a scratch directory.
 func menuDriveShell(t *testing.T) *Shell {
 	t.Helper()
-	requireDisplay(t)
 	inTempConfig(t)
-	// GL is current on the thread that opened the window, and a test runs on
-	// a goroutine the scheduler may move; building a city gives it every
-	// chance to.
-	runtime.LockOSThread()
-	t.Cleanup(runtime.UnlockOSThread)
-	rl.SetTraceLogLevel(rl.LogError)
-	rl.InitWindow(480, 270, "autobahn test")
-	t.Cleanup(rl.CloseWindow)
+	openTestWindow(t, 480, 270)
 
 	o := DefaultOptions()
 	o.Width, o.Height, o.Mute = 480, 270, true

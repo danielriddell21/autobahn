@@ -30,10 +30,19 @@ func pauseOffered(g *Game) bool { return g != nil && !g.Networked() }
 
 // peakSpeed is the fastest the player has gone in the game it is for. The
 // Game keeps no such figure, and this file may not add one to it, so the shell
-// feeds this through notePeakSpeed. Only one drive is ever running.
+// feeds this through notePeakSpeed. Only one drive is ever running, and the
+// shell lets go of it with forgetPeakSpeed when it closes the drive, so a
+// closed game is not kept alive here.
 var peakSpeed struct {
 	g *Game
 	v float32
+}
+
+// forgetPeakSpeed drops what was noted for g, if it is the game noted.
+func forgetPeakSpeed(g *Game) {
+	if peakSpeed.g == g {
+		peakSpeed.g, peakSpeed.v = nil, 0
+	}
 }
 
 // notePeakSpeed looks at the player's speed for one frame.

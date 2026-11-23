@@ -256,6 +256,8 @@ type Game struct {
 	showHelp   bool
 	// handsOff says the keyboard is the menus' this frame; see advanceHandsOff.
 	handsOff bool
+	// closed says Close has run, so a second call does nothing.
+	closed bool
 
 	// net is the two-player session. It is always present and starts offline,
 	// so nothing here has to check for nil before asking about it.
@@ -479,8 +481,15 @@ func (g *Game) watchInfractions() {
 	))
 }
 
-// Close releases the GPU resources the game owns.
+// Close releases the GPU resources the game owns. It may be called more than
+// once: unloading a shader or a render target twice crashes raylib, and the
+// game the window is opened with is closed by the shell and then again by
+// WithWindow.
 func (g *Game) Close() {
+	if g.closed {
+		return
+	}
+	g.closed = true
 	g.skySound.Close()
 	g.nightSound.Close()
 	g.audio.Close()
@@ -591,9 +600,9 @@ func (g *Game) Chasing() bool { return g.opts.Chase || (g.Networked() && !g.mode
 // rendering. dt is the frame duration in seconds.
 func (g *Game) Step(dt float32) {
 	g.advance(dt)
-	rl.BeginDrawing()
+	beginDrawing()
 	g.drawFrame()
-	rl.EndDrawing()
+	endDrawing()
 	g.capture()
 }
 
@@ -880,27 +889,27 @@ func (g *Game) handleInput() {
 	}
 	g.handleIndicatorKeys()
 	switch {
-	case rl.IsKeyPressed(rl.KeyTab):
+	case keyPressed(rl.KeyTab):
 		g.toggleAutopilot()
-	case rl.IsKeyPressed(rl.KeyC):
+	case keyPressed(rl.KeyC):
 		g.camMode = (g.camMode + 1) % numCameraModes
-	case rl.IsKeyPressed(rl.KeyV):
+	case keyPressed(rl.KeyV):
 		g.showPanel = !g.showPanel
-	case rl.IsKeyPressed(rl.KeyL):
+	case keyPressed(rl.KeyL):
 		g.showLabels = !g.showLabels
-	case rl.IsKeyPressed(rl.KeyR):
+	case keyPressed(rl.KeyR):
 		g.world.Respawn()
-	case rl.IsKeyPressed(rl.KeyJ):
+	case keyPressed(rl.KeyJ):
 		g.offerJobUnlessCoop()
-	case rl.IsKeyPressed(rl.KeyN):
+	case keyPressed(rl.KeyN):
 		g.world.PlaceOnNearestLane()
-	case rl.IsKeyPressed(rl.KeyH):
+	case keyPressed(rl.KeyH):
 		g.showHelp = !g.showHelp
-	case rl.IsKeyPressed(rl.KeyT):
+	case keyPressed(rl.KeyT):
 		if g.net.Role() != netplay.Joining {
 			g.clock.skip()
 		}
-	case rl.IsKeyPressed(rl.KeyM):
+	case keyPressed(rl.KeyM):
 		g.driver.Mode = (g.driver.Mode + 1) % autopilot.NumModes
 	}
 }
@@ -1100,11 +1109,8 @@ func WithWindow(opts Options, fn func(*Game) error) error {
 
 	rl.SetTraceLogLevel(rl.LogWarning)
 	rl.SetConfigFlags(rl.FlagMsaa4xHint)
-	rl.InitWindow(int32(opts.Width), int32(opts.Height), "Autobahn")
-	// Escape is the menus' back key and the drive's pause key. raylib's default
-	// would close the window before either saw it.
-	rl.SetExitKey(rl.KeyNull)
-	defer rl.CloseWindow()
+	openWindow(int32(opts.Width), int32(opts.Height), "Autobahn")
+	defer closeWindow()
 
 	g := New(opts)
 	g.net = session
@@ -1114,6 +1120,31 @@ func WithWindow(opts Options, fn func(*Game) error) error {
 	defer g.Close()
 	return fn(g)
 }
+
+// windowGen counts the windows openWindow and closeWindow have opened and
+// closed. What was made on the GPU for one window is gone with it, and raylib
+// has no reliable way to tell one window from the next (under X11 two opened
+// one after the other can have the same handle), so the menu fonts are kept
+// against this instead (menufont.go).
+var windowGen uint64
+
+// openWindow opens the window. Every window this package opens, the tests'
+// included, goes through here and closeWindow.
+func openWindow(w, h int32, title string) {
+	rl.InitWindow(w, h, title)
+	windowGen++
+}
+
+// closeWindow frees the menu fonts while their context is still there, then
+// closes the window.
+func closeWindow() {
+	unloadMenuFonts()
+	rl.CloseWindow()
+	windowGen++
+}
+
+// setExitKey is raylib's, so a test can see which runs turn esc's exit off.
+var setExitKey = rl.SetExitKey
 
 // Run opens a window and plays until the player quits.
 //
@@ -1151,6 +1182,10 @@ func (o Options) headless() bool {
 // shell plays through the menu layer.
 func shell(g *Game) error {
 	rl.SetTargetFPS(60)
+	// Escape is the menus' back key and the drive's pause key. raylib's default
+	// would close the window before either saw it. A run from the command line
+	// (run) reads no esc, so it keeps the default and esc closes its window.
+	setExitKey(rl.KeyNull)
 
 	// The game the window was opened with is discarded: the shell builds its
 	// own from the player's stored settings once they choose to drive. Only

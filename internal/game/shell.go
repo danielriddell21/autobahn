@@ -115,26 +115,30 @@ func (s *Shell) goTitle() {
 
 // Close releases whatever the shell is holding.
 func (s *Shell) Close() {
-	if s.game != nil {
-		s.game.Close()
-	}
+	s.closeGame()
 	s.closeMenuDrive() // menu_drive.go
 	s.showroom.unload()
 	unloadMenuFonts() // menufont.go
 	s.net.Leave()
 }
 
-// Step advances whichever screen is showing by one frame, drawing it. It
-// reports false once the player has chosen to leave.
+// Step advances whichever screen is showing by one frame and draws exactly one
+// frame of whatever is showing at the end of it, even when the step changed
+// the screen. It reports false once the player has chosen to leave.
+//
+// The frame is not optional: raylib reads the keys only when a frame ends
+// (shellrender.go), so a step that drew nothing would see its own esc again
+// on the next and pause and resume for ever with the window deaf.
 func (s *Shell) Step(dt float32) bool {
 	if s.quit || rl.WindowShouldClose() {
 		return false
 	}
 	if s.screen == screenPlaying {
 		s.stepPlaying(dt)
-		return !s.quit
+	} else {
+		s.stepMenu(dt)
 	}
-	s.stepMenu(dt)
+	s.drawScreen(dt)
 	return !s.quit
 }
 
@@ -232,16 +236,18 @@ func (g *Game) banks() bool { return custom.Banks(g.opts.Custom) && g.chal == ni
 
 // stepPlaying runs a frame of the drive. Esc leaves the drive for a page: the
 // pause page, or in a networked game the leave dialog, under which the game
-// runs on (stepBehindPage).
+// runs on (stepBehindPage). F5 on a challenge starts it again. Either way the
+// frame is drawn by Step, of whatever is showing once this is done: the page
+// esc opened, or the new attempt.
 func (s *Shell) stepPlaying(dt float32) {
-	if rl.IsKeyPressed(rl.KeyEscape) && s.escapeDrive() {
+	if keyPressed(rl.KeyEscape) && s.escapeDrive() {
 		return
 	}
-	if s.game.chal != nil && rl.IsKeyPressed(rl.KeyF5) {
+	if s.game.chal != nil && keyPressed(rl.KeyF5) {
 		s.retryChallenge()
 		return
 	}
-	s.game.Step(dt)
+	s.game.advance(dt)     // Game.Step without its frame, which Step draws
 	s.game.notePeakSpeed() // for the pause page's top speed: menu_pause.go
 	s.collect()
 }
@@ -263,8 +269,10 @@ func (s *Shell) escapeDrive() bool {
 	return true
 }
 
-// stepMenu runs a frame of the page showing: its keys, the game or menu drive
-// behind it, and the drawing.
+// stepMenu runs a frame of the page showing: its keys, and the game or menu
+// drive behind it. Step draws the frame. A page that handed the window to the
+// drive (resume, Stay, a start) leaves the drive unstepped this frame, and
+// Step draws it as it stands.
 func (s *Shell) stepMenu(dt float32) {
 	s.stepPage(pollNav())
 	if s.quit || s.screen == screenPlaying {
@@ -272,7 +280,6 @@ func (s *Shell) stepMenu(dt float32) {
 	}
 	s.stepBehindPage(dt)
 	s.stepMenuDrive(dt) // the autopilot behind the menus: menu_drive.go
-	s.drawScreen(dt)
 }
 
 // stepBehindPage keeps a networked game going while a page is over it, which
@@ -295,7 +302,7 @@ func (s *Shell) stepBehindPage(dt float32) {
 func pollMenu() menu.Input {
 	down := func(keys ...int32) bool {
 		for _, k := range keys {
-			if rl.IsKeyPressed(k) {
+			if keyPressed(k) {
 				return true
 			}
 		}
@@ -402,10 +409,7 @@ func (s *Shell) retryChallenge() {
 // to it. A game already running is closed first. A session that cannot start
 // goes back to the title with the reason.
 func (s *Shell) startGame(autopilot bool) {
-	if s.game != nil {
-		s.game.Close()
-		s.game = nil
-	}
+	s.closeGame()
 	o, err := s.sessionOptions(autopilot)
 	if err != nil {
 		s.net.Leave()
@@ -530,12 +534,20 @@ func (s *Shell) resume() { s.screen = screenPlaying }
 // endGame abandons the drive and returns to the title page, ending any
 // network session with it.
 func (s *Shell) endGame() {
-	if s.game != nil {
-		s.game.Close()
-		s.game = nil
-	}
+	s.closeGame()
 	s.net.Leave()
 	s.goTitle()
+}
+
+// closeGame closes the drive, if there is one, and lets go of it: nothing the
+// pause page noted about it is kept either (menu_pause.go).
+func (s *Shell) closeGame() {
+	if s.game == nil {
+		return
+	}
+	s.game.Close()
+	forgetPeakSpeed(s.game)
+	s.game = nil
 }
 
 // text wraps a fixed string as a label, for the rows that do not change.

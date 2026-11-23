@@ -86,12 +86,12 @@ func (g *Game) offerJob() {
 func (g *Game) stepJobMenu() {
 	m := g.jobMenu
 	switch {
-	case rl.IsKeyPressed(rl.KeyEscape), rl.IsKeyPressed(rl.KeyJ):
+	case keyPressed(rl.KeyEscape), keyPressed(rl.KeyJ):
 		g.jobMenu = nil
 		return
 	}
 	for i := range min(len(m.entries), 9) {
-		if rl.IsKeyPressed(int32(rl.KeyOne) + int32(i)) {
+		if keyPressed(int32(rl.KeyOne) + int32(i)) {
 			g.jobMenu = nil
 			g.pickJob(m.entries[i])
 			return

@@ -1,7 +1,6 @@
 package game
 
 import (
-	"runtime"
 	"testing"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
@@ -188,13 +187,7 @@ func TestABuildingIsStoodAtItsDoor(t *testing.T) {
 // camera, which is what finds a patch built wrong or drawn with something
 // still on the matrix stack: neither shows in the arithmetic.
 func TestHillyPlacesDraw(t *testing.T) {
-	requireDisplay(t)
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-
-	rl.SetTraceLogLevel(rl.LogError)
-	rl.InitWindow(320, 180, "autobahn test")
-	defer rl.CloseWindow()
+	openTestWindow(t, 320, 180)
 
 	for _, m := range []city.Map{city.MapSeaside, city.MapVillage, city.MapMotorway} {
 		o := DefaultOptions()

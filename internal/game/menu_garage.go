@@ -430,10 +430,11 @@ func (g *garagePage) saveSettings() {
 	}
 }
 
-// fail says why a purchase did not happen.
+// fail says why a purchase did not happen, on the page. It is not the shell's
+// notice, which the title page would go on showing long after the garage was
+// left; a file that will not save still is (saveSettings, Shell.saveCareer).
 func (g *garagePage) fail(err error) {
 	g.msg = err.Error()
-	g.s.notice = err.Error()
 }
 
 // buyCar spends earnings on the viewed car, which is driven from then on.

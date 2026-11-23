@@ -358,8 +358,11 @@ how it is drawn, so the tests need no window. `docs/menus.md` is the design.
   and stepped by `stepAttract`, so it never passes through `Shell.collect` and
   banks nothing. Settings turns it off.
 * Esc is the back key on every page and the pause key on a drive, which is why
-  raylib's exit key is turned off in `WithWindow`: left on, Esc would close
-  the window before either saw it. In a networked game Esc opens the leave
+  raylib's exit key is turned off in `shell()` (a run from the command line
+  keeps it, and Esc closes that window): left on, Esc would close the window
+  before either saw it. Every shell step ends with exactly one drawn frame
+  (`drawScreen`): raylib only reads keys inside `EndDrawing`, so a step that
+  changed screen without drawing would see the same Esc again and loop. In a networked game Esc opens the leave
   dialog instead of the pause page, and the game runs on under it
   (`Shell.stepBehindPage`, `Game.advanceHandsOff`): a game somebody else is in
   cannot be paused, or the other player would freeze or time out.

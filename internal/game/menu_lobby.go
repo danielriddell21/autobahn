@@ -61,9 +61,13 @@ func lobbyAddress(hosting bool, hostAddr, reaching string) string {
 }
 
 // lobbyNote says the mode and map for a host, who chooses them, and says that
-// a joiner gets the host's choices.
-func lobbyNote(hosting bool, mode NetMode, mapName string) string {
-	if hosting {
+// a joiner gets the host's choices. A custom map is said to be one, and that
+// it banks nothing (custom.Banks), so the host knows before the game starts.
+func lobbyNote(hosting bool, mode NetMode, mapName string, custom bool) string {
+	switch {
+	case hosting && custom:
+		return mode.String() + " on a custom map: banks nothing"
+	case hosting:
 		return mode.String() + " on " + mapName
 	}
 	return "you get the host's map, mode and weather"
@@ -275,7 +279,7 @@ func (s *Shell) drawLobbyCard(list *rowList, hosting bool, copied *bool) {
 
 	// Mode and map.
 	ny := sy + lobbySlotH + lobbyGap
-	faceBody.draw(lobbyNote(hosting, s.hostMode, s.settings.Map.Name()), x+lobbyPad, ny, signDim)
+	faceBody.draw(lobbyNote(hosting, s.hostMode, s.settings.Map.Name(), s.customPlay), x+lobbyPad, ny, signDim)
 
 	// Buttons.
 	by := ny + faceBody.height() + lobbyGap

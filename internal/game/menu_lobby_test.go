@@ -54,10 +54,13 @@ func TestLobbyWordingForHostAndJoin(t *testing.T) {
 	if got := lobbyAddress(false, "10.0.0.2:7777", "127.0.0.1:7777"); got != "127.0.0.1:7777" {
 		t.Errorf("joiner shows %q, want the one being reached", got)
 	}
-	if got := lobbyNote(true, ModeCoopCar, "village"); got != "Co-op: one car on village" {
+	if got := lobbyNote(true, ModeCoopCar, "village", false); got != "Co-op: one car on village" {
 		t.Errorf("host note %q", got)
 	}
-	if got := lobbyNote(false, ModeChase, "city"); got != "you get the host's map, mode and weather" {
+	if got := lobbyNote(true, ModeChase, "village", true); got != "Chase on a custom map: banks nothing" {
+		t.Errorf("custom host note %q", got)
+	}
+	if got := lobbyNote(false, ModeChase, "city", false); got != "you get the host's map, mode and weather" {
 		t.Errorf("joiner note %q", got)
 	}
 }

@@ -4,8 +4,6 @@ import (
 	"slices"
 	"testing"
 
-	rl "github.com/gen2brain/raylib-go/raylib"
-
 	"github.com/danielriddell21/crucible/keymap"
 )
 
@@ -251,12 +249,8 @@ func TestPageHooks(t *testing.T) {
 // TestPagesDraw draws every page, and a page with a row of every kind in
 // every state, which catches a draw the model cannot satisfy.
 func TestPagesDraw(t *testing.T) {
-	requireDisplay(t)
 	inTempConfig(t)
-
-	rl.SetTraceLogLevel(rl.LogError)
-	rl.InitWindow(800, 450, "autobahn test")
-	defer rl.CloseWindow()
+	openTestWindow(t, 800, 450)
 
 	o := DefaultOptions()
 	o.Width, o.Height, o.Mute = 800, 450, true

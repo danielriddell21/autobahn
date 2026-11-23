@@ -52,8 +52,10 @@ map chosen under Play behind every menu screen except the garage and pause.
   it never passes through `Shell.collect`, so it banks no bounty, earnings or
   achievements.
 * Changing the map under Play rebuilds it, once the choice has settled for a
-  moment so stepping through maps does not build each one. A custom map
-  drives its share code.
+  moment so stepping through maps does not build each one. Choosing the
+  Custom card does not change it: the drive shows the map under Play's cards
+  until a custom map is being hosted, and only then, in the lobby, drives that
+  map's share code (`Shell.customPlay`, which the title page clears).
 * The menus darken only the left of the screen, where the list is, and fade
   to clear by three quarters of the way across. While the drive is on, the
   title screen's card drops its picture and sits small at the bottom right.
@@ -234,6 +236,13 @@ player's neither freezes nor times out: the shell steps it without drawing
 (`Game.advanceHandsOff`) while the dialog has the keys, and draws it behind
 the dialog. Nothing is pressed meanwhile, so a car driven by hand coasts and
 an autopilot drives on.
+
+Every step of the shell draws exactly one frame, of whatever is showing once
+the step is done (`Shell.Step`, `drawScreen`), even when esc, a page's Back or
+F5 changed the screen. raylib reads the keys only when a frame ends, so a step
+that drew nothing would see its own esc again on the next. Raylib's exit key
+is turned off only for the menus (`shell`); a run from the command line keeps
+it, and esc closes that window.
 
 The pause page notes the top speed with `Game.notePeakSpeed` after every step
 of the drive.

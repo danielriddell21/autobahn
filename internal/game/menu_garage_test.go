@@ -205,6 +205,11 @@ func TestALockedCarCannotBeDriven(t *testing.T) {
 	if slices.Contains(sh.career.Cars, int(sim.GrandTourer)) || sh.settings.Car != sim.HotHatch {
 		t.Error("buying a locked car through the page did something")
 	}
+	// The refusal is the garage's to say, and is not left behind for the
+	// title page to show long after.
+	if g.msg == "" || sh.notice != "" {
+		t.Errorf("a refused purchase said %q on the page and left the notice %q", g.msg, sh.notice)
+	}
 
 	// The card says which pack opens it and how much bounty that takes.
 	notes := strings.Join(g.notes(), " ")
@@ -625,10 +630,7 @@ func TestGarageLayoutFits(t *testing.T) {
 }
 
 func TestGarageWrapAndFit(t *testing.T) {
-	requireDisplay(t)
-	rl.SetTraceLogLevel(rl.LogError)
-	rl.InitWindow(320, 200, "autobahn test")
-	defer rl.CloseWindow()
+	openTestWindow(t, 320, 200)
 
 	for _, line := range garageWrap(faceSmall, "one two three four five six seven eight nine ten", 120) {
 		if faceSmall.width(line) > 120 {
@@ -646,12 +648,8 @@ func TestGarageWrapAndFit(t *testing.T) {
 // TestGarageDraws draws the page in each state it has, which catches a draw
 // the model cannot satisfy.
 func TestGarageDraws(t *testing.T) {
-	requireDisplay(t)
 	inTempConfig(t)
-
-	rl.SetTraceLogLevel(rl.LogError)
-	rl.InitWindow(1280, 720, "autobahn test")
-	defer rl.CloseWindow()
+	openTestWindow(t, 1280, 720)
 
 	o := DefaultOptions()
 	o.Mute = true

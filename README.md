@@ -21,7 +21,7 @@ colour-coded detection boxes it has to read back out of the pixels.
 | `Tab` | hand the car to the autopilot, or take it back |
 | `C` | camera |
 | `T` | skip ahead to the next time of day |
-| `Esc` | pause; with someone else in the game, ask before leaving it |
+| `Esc` | pause; with someone else in the game, ask before leaving it. A run started on the command line (`-host`, `-join`, `-chase`, `-frames` and the like) has no menus, and Esc closes it |
 | `H` | the rest |
 
 ![The autopilot driving the city](docs/media/drive.gif)

@@ -194,9 +194,9 @@ func indicatorOfCommand(cmd autopilot.Command) sim.Indicator {
 // handleIndicatorKeys reads the turn signal keys: Q for left, E for right.
 func (g *Game) handleIndicatorKeys() {
 	switch {
-	case rl.IsKeyPressed(rl.KeyQ):
+	case keyPressed(rl.KeyQ):
 		g.toggleIndicator(sim.IndicatorLeft)
-	case rl.IsKeyPressed(rl.KeyE):
+	case keyPressed(rl.KeyE):
 		g.toggleIndicator(sim.IndicatorRight)
 	}
 }
