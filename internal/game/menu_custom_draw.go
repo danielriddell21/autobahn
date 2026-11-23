@@ -149,6 +149,9 @@ func (p *customPage) drawRows(r rl.Rectangle) {
 		}
 	}
 	first, last := rowWindow(len(idx), sel, int(r.Height)/pageRowH)
+	// A panel under the rows, so the words stand on something steady whatever
+	// the menu drive shows through the fade.
+	rounded(rect(x-8, y-6, w+16, int32(last-first)*pageRowH+8), 10, rl.ColorAlpha(signCard, 0.92))
 	for k := first; k < last; k++ {
 		drawRowView(rect(x, y, w, pageRowH-4), views[idx[k]])
 		y += pageRowH

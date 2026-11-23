@@ -36,6 +36,9 @@ var (
 	signTrack = rl.NewColor(34, 38, 46, 255)
 	signRule  = menuRule
 	signLift  = rl.NewColor(26, 40, 56, 255)
+	// signGroove is the groove of a bar, which has to show against the drive
+	// even where the bar is empty.
+	signGroove = rl.NewColor(62, 68, 80, 255)
 )
 
 // toneInk is the colour a tone is drawn in.
@@ -186,7 +189,7 @@ func drawSwitch(x, y int32, on, lit, disabled bool) {
 // drawBar draws a level from 0 to 1 as a filled groove w wide, its top-left
 // corner at x, y.
 func drawBar(x, y, w int32, level float64, col rl.Color) {
-	rounded(rect(x, y, w, barH), barH/2, signTrack)
+	rounded(rect(x, y, w, barH), barH/2, signGroove)
 	if fill := int32(float64(w) * min(max(level, 0), 1)); fill > 0 {
 		rounded(rect(x, y, fill, barH), barH/2, col)
 	}
@@ -408,7 +411,12 @@ func (s *Shell) drawPage(dt float32) {
 	pg := s.pager.cur
 	w, h := int32(s.opts.Width), int32(s.opts.Height)
 	if pg.OverGame && s.game != nil {
+		// The drive's own HUD would show through the veil and lie under the
+		// page's words, so it is left off the picture behind a page.
+		hud := s.game.showHUD
+		s.game.showHUD = false
 		s.game.drawFrame()
+		s.game.showHUD = hud
 		rl.DrawRectangle(0, 0, w, h, menuVeil)
 	} else if !s.drawMenuDrive() { // the autopilot behind the menus: menu_drive.go
 		rl.ClearBackground(menuBackdrop)

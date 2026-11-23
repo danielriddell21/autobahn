@@ -348,6 +348,18 @@ func (g *garagePage) short(price int) string {
 	return ""
 }
 
+// shortOfView is how far earnings are from what the viewed car, or else the
+// viewed paint, costs, when it is for sale and they fall short.
+func (g *garagePage) shortOfView() string {
+	switch {
+	case g.carForSale() && !g.chase():
+		return g.short(shop.CarPrice(g.view))
+	case g.paintForSale():
+		return g.short(shop.PaintPrice(g.paint))
+	}
+	return ""
+}
+
 // rows is the page's rows as the viewed car and paint leave them.
 func (g *garagePage) rows() []menuRow {
 	car := actionRow(rowCar, "Car", nil).noted(func() string { return g.view.Name() })
@@ -520,6 +532,9 @@ func (g *garagePage) notes() []string {
 		out = append(out, why)
 	} else if g.msg != "" {
 		out = append(out, g.msg)
+	} else if short := g.shortOfView(); short != "" {
+		// The greyed button says so without being selected.
+		out = append(out, short)
 	}
 	if g.standingOf(g.view) == standLocked {
 		p := pack.ForBody(g.view)

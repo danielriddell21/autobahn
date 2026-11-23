@@ -623,7 +623,7 @@ func playNumber(v int) string {
 }
 
 // playJoin puts a summary's parts on one line.
-func playJoin(parts ...string) string { return strings.Join(parts, "  -  ") }
+func playJoin(parts ...string) string { return strings.Join(parts, "  ·  ") }
 
 // playBool is 1 for true, for a two-way options row.
 func playBool(b bool) int {

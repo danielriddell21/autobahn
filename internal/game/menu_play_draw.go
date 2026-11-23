@@ -189,9 +189,9 @@ func drawPlayCell(r rl.Rectangle, v rowView, note string) {
 		drawOptions(x+14, cy, v.Options, v.Choice, v.Selected, off)
 	case v.Kind == rowOptions:
 		// Too many to show side by side: the one chosen, with the way to step.
-		playStepWords(x+14, cy, "<  "+v.Value+"  >", v.Selected, off)
+		playStepWords(x+14, cy, "‹  "+v.Value+"  ›", v.Selected, off)
 	default:
-		playStepWords(x+14, cy, playFit(faceSmall, v.Value, inner-40)+"  >", v.Selected, off)
+		playStepWords(x+14, cy, playFit(faceSmall, v.Value, inner-40)+"  ›", v.Selected, off)
 	}
 }
 
@@ -373,11 +373,11 @@ func (p *playPage) drawBar(b playBox, vs map[string]rowView) {
 	rounded(r, 12, signCard)
 	ring(r, 12, 1, signRule)
 
-	backW := faceRow.width("< Back") + 32
-	drawButton(rect(b.left+10, b.bar+14, backW, 44), "< Back", vs["back"].Selected, false, tonePlain)
+	backW := faceRow.width("‹ Back") + 32
+	drawButton(rect(b.left+10, b.bar+14, backW, 44), "‹ Back", vs["back"].Selected, false, tonePlain)
 
 	goV := vs["go"]
-	label := goV.Label + "  >"
+	label := goV.Label + "  ›"
 	goW := max(240, faceRow.width(label)+48)
 	goX := b.right - 8 - goW
 	drawButton(rect(goX, b.bar+8, goW, playBarH-16), label, goV.Selected, goV.Disabled != "", tonePlain)

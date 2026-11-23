@@ -160,6 +160,9 @@ func drawSettingsPage(pg *menuPage, w int32) {
 	rw := min(pageListW, w-x-pageMargin)
 	rowH := listRowHeight(rows)
 	y = pageListTop
+	// A panel under the rows, so the words stand on something steady whatever
+	// the menu drive shows through the fade.
+	rounded(rect(x-10, y-8, rw+20, int32(len(rows))*rowH+12), 10, rl.ColorAlpha(signCard, 0.92))
 	for _, v := range rows {
 		drawRowView(rect(x, y, rw, rowH-4), v)
 		y += rowH
