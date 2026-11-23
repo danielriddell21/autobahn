@@ -72,6 +72,9 @@ type Shell struct {
 	prev     screen // where the settings screen returns to
 	menu     *menu.Menu
 	game     *Game
+	// drive is the autopilot driving behind the menus, never s.game, so nothing
+	// it does reaches collect; see menu_drive.go.
+	drive menuDrive
 	// showroom is the garage's turntable.
 	showroom showroom
 
@@ -130,6 +133,7 @@ func (s *Shell) Close() {
 	if s.game != nil {
 		s.game.Close()
 	}
+	s.closeMenuDrive() // menu_drive.go
 	s.showroom.unload()
 	s.net.Leave()
 }
@@ -276,6 +280,7 @@ func (s *Shell) stepMenu(dt float32) {
 	if s.quit || s.screen == screenPlaying {
 		return
 	}
+	s.stepMenuDrive(dt) // the autopilot behind the menus: menu_drive.go
 	s.drawScreen(dt)
 }
 
@@ -690,6 +695,7 @@ func (s *Shell) startGame(autopilot bool) {
 	}
 
 	s.feedFeats = featFeed{}
+	s.closeMenuDrive() // a real drive replaces the one behind the menus: menu_drive.go
 	s.game = New(o)
 	s.game.net = s.net
 	s.game.showLabels = s.settings.ShowLabels

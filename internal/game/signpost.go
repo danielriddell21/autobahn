@@ -402,7 +402,7 @@ func (s *Shell) drawPage(dt float32) {
 	if pg.OverGame && s.game != nil {
 		s.game.drawFrozen(dt)
 		rl.DrawRectangle(0, 0, w, h, menuVeil)
-	} else {
+	} else if !s.drawMenuDrive() { // the autopilot behind the menus: menu_drive.go
 		rl.ClearBackground(menuBackdrop)
 	}
 	if pg.Draw != nil {

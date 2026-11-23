@@ -125,6 +125,10 @@ type menuPage struct {
 	// OverGame draws the page over the paused drive, dimmed, when there is
 	// one, as the pause menu is; otherwise it stands on the menu backdrop.
 	OverGame bool
+	// Backdrop is what the page stands on when it is not over a game. The zero
+	// value is the menu drive, while it is on; a page that draws a whole scene
+	// of its own (the garage) asks for the plain one. See menu_drive.go.
+	Backdrop pageBackdrop
 
 	// Step sees each frame's keys first, and reports whether it used them; it
 	// runs every frame, so it is also where a page watches something (the
