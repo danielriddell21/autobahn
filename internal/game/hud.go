@@ -237,12 +237,18 @@ func (g *Game) meter(x, y, w int32, v float32, col rl.Color, label string) {
 }
 
 // money formats a bounty the way a British player would read it.
+// A debt goes before the sign: -£100.
 func money(v int) string {
+	sign := ""
+	if v < 0 {
+		sign = "-"
+	}
 	s := fmt.Sprintf("%d", v)
+	s = strings.TrimPrefix(s, "-")
 	for i := len(s) - 3; i > 0; i -= 3 {
 		s = s[:i] + "," + s[i:]
 	}
-	return "£" + s
+	return sign + "£" + s
 }
 
 // drawCarState shows what the car has left: nitrous, and how much of a

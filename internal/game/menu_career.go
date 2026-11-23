@@ -86,10 +86,10 @@ func packRoute(a pack.Access) []packEntry {
 	for _, p := range all {
 		e := packEntry{Pack: p, Progress: a.Progress(p.ID)}
 		for _, m := range p.Maps {
-			e.Maps = append(e.Maps, careerASCII(m.Name()))
+			e.Maps = append(e.Maps, careerDrawable(m.Name()))
 		}
 		for _, b := range p.Bodies {
-			e.Cars = append(e.Cars, careerASCII(b.Name()))
+			e.Cars = append(e.Cars, careerDrawable(b.Name()))
 		}
 		switch {
 		case a.Has(p.ID):
@@ -131,16 +131,12 @@ func (e packEntry) contents() string {
 	return strings.Join(parts, "  /  ")
 }
 
-// bountyWords is a bounty without the pound sign, which the menu face may not
-// have: "3,000".
-func bountyWords(v int) string { return strings.TrimPrefix(money(v), "£") }
-
 // status is the words on the right of the pack's line.
 func (e packEntry) status() string {
 	if e.State == packHeld {
 		return "held"
 	}
-	return bountyWords(e.Left) + " to go"
+	return money(e.Left) + " to go"
 }
 
 // featEntry is one tile of the grid.
@@ -158,7 +154,7 @@ func (e featEntry) name() string {
 	if !e.Shown {
 		return "???"
 	}
-	return careerASCII(e.Feat.Name)
+	return careerDrawable(e.Feat.Name)
 }
 
 // progress is "3/10", or "" when there is none to show.
@@ -174,7 +170,7 @@ func (e featEntry) note() string {
 	if !e.Shown {
 		return "hidden: earn it to find out what it is"
 	}
-	return careerASCII(e.Feat.Note)
+	return careerDrawable(e.Feat.Note)
 }
 
 // featGrid is every achievement, in the list's order.
@@ -191,10 +187,12 @@ func featGrid(f feats.Feats) []featEntry {
 	return out
 }
 
-// careerASCII drops anything the menu face cannot draw.
-func careerASCII(s string) string {
+// careerDrawable drops anything the menu face has no glyph for: every rune
+// outside menuGlyphs (menufont.go), so the pound sign, dashes and curly quotes
+// stay and control characters and anything exotic in a name go.
+func careerDrawable(s string) string {
 	return strings.Map(func(r rune) rune {
-		if r < 32 || r > 126 {
+		if !strings.ContainsRune(menuGlyphs, r) {
 			return -1
 		}
 		return r
@@ -223,7 +221,7 @@ func (c *careerPage) rebuild() {
 	var rows []menuRow
 	for _, e := range c.route {
 		rows = append(rows, menuRow{
-			Key: careerPackKey + fmt.Sprint(int(e.Pack.ID)), Label: careerASCII(e.Pack.Name), Kind: rowAction,
+			Key: careerPackKey + fmt.Sprint(int(e.Pack.ID)), Label: careerDrawable(e.Pack.Name), Kind: rowAction,
 			Note: text(e.status()), Tone: func() tone { return e.State.tone() },
 		})
 	}
@@ -265,14 +263,14 @@ func (c *careerPage) detail() (head, line string) {
 	switch {
 	case pk >= 0:
 		e := c.route[pk]
-		head = strings.ToUpper(careerASCII(e.Pack.Name)) + "  " + strings.ToUpper(e.State.word())
+		head = strings.ToUpper(careerDrawable(e.Pack.Name)) + "  " + strings.ToUpper(e.State.word())
 		switch e.State {
 		case packHeld:
 			line = e.contents()
 		default:
-			line = fmt.Sprintf("bank %s bounty in all (%s to go). %s", bountyWords(e.Pack.Price), bountyWords(e.Left), e.contents())
+			line = fmt.Sprintf("bank %s bounty in all (%s to go). %s", money(e.Pack.Price), money(e.Left), e.contents())
 		}
-		return head, careerASCII(line)
+		return head, careerDrawable(line)
 	case ft >= 0:
 		e := c.grid[ft]
 		head = strings.ToUpper(e.name())
@@ -323,10 +321,10 @@ func (c *careerPage) draw() {
 	next, haveNext := careerNextPack(c.route)
 	nextName, nextSub, nextTone := "all held", "nothing left to bank for", toneYours
 	if haveNext {
-		nextName, nextSub, nextTone = careerASCII(next.Pack.Name), bountyWords(next.Left)+" bounty to go", toneOffer
+		nextName, nextSub, nextTone = careerDrawable(next.Pack.Name), money(next.Left)+" bounty to go", toneOffer
 	}
-	c.tile(pageMargin, tw, "BOUNTY BANKED", bountyWords(c.s.career.Banked), "kept from every pursuit", tonePlain)
-	c.tile(pageMargin+tw+careerGap, tw, "EARNINGS", bountyWords(c.s.career.Earnings), "what the shop spends", tonePlain)
+	c.tile(pageMargin, tw, "BOUNTY BANKED", money(c.s.career.Banked), "kept from every pursuit", tonePlain)
+	c.tile(pageMargin+tw+careerGap, tw, "EARNINGS", money(c.s.career.Earnings), "what the shop spends", tonePlain)
 	c.tile(pageMargin+2*(tw+careerGap), tw, "NEXT PACK", nextName, nextSub, nextTone)
 
 	top := int32(careerTilesY + careerTileH + 22)
@@ -389,7 +387,7 @@ func (c *careerPage) drawRoute(x, y, w, h int32) {
 		if e.State == packLocked {
 			ink = signGrey
 		}
-		faceRoute.draw(strings.ToUpper(careerASCII(e.Pack.Name)), tx, ry+3, ink)
+		faceRoute.draw(strings.ToUpper(careerDrawable(e.Pack.Name)), tx, ry+3, ink)
 		st := e.status()
 		faceSmall.draw(st, x+w-12-faceSmall.width(st), ry+8, col)
 		sub := careerClip(faceSmall, e.contents(), w-44-12)

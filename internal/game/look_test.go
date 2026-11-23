@@ -80,7 +80,7 @@ func TestScatterIsRepeatableAndInRange(t *testing.T) {
 }
 
 func TestMoneyIsGroupedInThousands(t *testing.T) {
-	for v, want := range map[int]string{0: "£0", 950: "£950", 1250: "£1,250", 1234567: "£1,234,567"} {
+	for v, want := range map[int]string{0: "£0", 950: "£950", 1250: "£1,250", 1234567: "£1,234,567", -100: "-£100", -1250: "-£1,250"} {
 		if got := money(v); got != want {
 			t.Errorf("money(%d) = %q, want %q", v, got, want)
 		}

@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	rl "github.com/gen2brain/raylib-go/raylib"
-
 	"github.com/danielriddell21/autobahn/internal/autopilot"
 	"github.com/danielriddell21/autobahn/internal/city"
 	"github.com/danielriddell21/autobahn/internal/custom"
@@ -253,7 +251,7 @@ func TestPlayCards(t *testing.T) {
 	if city0.Locked || city0.Note != "base game" || city0.Season != "autumn" || !city0.Chosen {
 		t.Errorf("the city card is %+v", city0)
 	}
-	if !sea.Locked || sea.Note != "1,200 / 3,000 bounty" || sea.Progress != 0.4 || sea.Season != "summer" {
+	if !sea.Locked || sea.Note != "£1,200 / £3,000 bounty" || sea.Progress != 0.4 || sea.Season != "summer" {
 		t.Errorf("the seatown card is %+v", sea)
 	}
 	if !cust.Custom || cust.Note2 != "banks nothing" || cust.Locked {
@@ -598,23 +596,11 @@ func TestPlayChallengeCards(t *testing.T) {
 	}
 }
 
-func TestPlayNumber(t *testing.T) {
-	for v, want := range map[int]string{0: "0", 999: "999", 1000: "1,000", 1234567: "1,234,567", -1800: "-1,800"} {
-		if got := playNumber(v); got != want {
-			t.Errorf("playNumber(%d) = %q, want %q", v, got, want)
-		}
-	}
-}
-
 // TestPlayDraws draws the page in every mode and state, at the default size
 // and a small one, which catches a layout the model cannot satisfy.
 func TestPlayDraws(t *testing.T) {
-	requireDisplay(t)
 	inTempConfig(t)
-
-	rl.SetTraceLogLevel(rl.LogError)
-	rl.InitWindow(1280, 720, "autobahn test")
-	defer rl.CloseWindow()
+	openTestWindow(t, 1280, 720)
 
 	o := DefaultOptions()
 	o.Mute = true

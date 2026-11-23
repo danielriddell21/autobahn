@@ -56,7 +56,7 @@ func TestPackRouteIsInPriceOrderWithOneNext(t *testing.T) {
 	if !ok || n.Pack.ID != pack.Country || n.Left != pack.Of(pack.Country).Price-4000 {
 		t.Errorf("next pack = %+v, %v", n.Pack.Name, ok)
 	}
-	if n.status() != bountyWords(5000)+" to go" {
+	if n.status() != money(5000)+" to go" {
 		t.Errorf("status %q", n.status())
 	}
 }
@@ -130,7 +130,18 @@ func TestAchievementProgressIsShownWhereThereIsSome(t *testing.T) {
 	}
 }
 
-func TestCareerRowsAreAsciiAndEndWithBack(t *testing.T) {
+// TestCareerDrawableKeepsTheFontsGlyphs: the filter keeps everything the menu
+// face has, the pound sign and the dashes included, and drops the rest.
+func TestCareerDrawableKeepsTheFontsGlyphs(t *testing.T) {
+	if got := careerDrawable(menuGlyphs); got != menuGlyphs {
+		t.Errorf("the filter dropped some of the font's own glyphs: %q", got)
+	}
+	if got, want := careerDrawable("£1,500 – café\t\x01✓"), "£1,500 – caf"; got != want {
+		t.Errorf("careerDrawable = %q, want %q", got, want)
+	}
+}
+
+func TestCareerRowsUseOnlyMenuGlyphsAndEndWithBack(t *testing.T) {
 	_, pg := careerShell(t, 4000)
 	n := len(packRoute(pack.Access{})) + len(feats.List()) + 1
 	if pg.List.Len() != n {
@@ -139,8 +150,8 @@ func TestCareerRowsAreAsciiAndEndWithBack(t *testing.T) {
 	for _, v := range pg.List.Views() {
 		for _, s := range []string{v.Label, v.Value, v.Desc} {
 			for _, r := range s {
-				if r > 126 {
-					t.Errorf("row %s has non-ASCII %q", v.Key, s)
+				if !strings.ContainsRune(menuGlyphs, r) {
+					t.Errorf("row %s has %q, which the menu font lacks, in %q", v.Key, r, s)
 				}
 			}
 		}
@@ -188,8 +199,8 @@ func TestDetailSaysWhatTheSelectionNeeds(t *testing.T) {
 	c.list.Select(careerPackKey + "2") // village green
 	head, line := c.detail()
 	if !strings.Contains(head, "VILLAGE GREEN") || !strings.Contains(head, "NEXT") ||
-		!strings.Contains(line, "9,000") || !strings.Contains(line, "5,000 to go") {
-		t.Errorf("detail = %q / %q", head, line)
+		!strings.HasPrefix(line, "bank "+money(9000)+" bounty in all ("+money(5000)+" to go). ") {
+		t.Errorf("detail = %q / %q: the pound signs must survive the glyph filter", head, line)
 	}
 	c.list.Select(careerFeatKey + "first-mile")
 	head, line = c.detail()

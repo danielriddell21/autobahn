@@ -313,7 +313,7 @@ func (p *playPage) mapLock(m city.Map) string {
 	}
 	pk := pack.ForMap(m)
 	return fmt.Sprintf("%s is in the %s pack: bank %s more bounty to open it",
-		playMapTitle(m), pk.Name, playNumber(pk.Price-a.Banked))
+		playMapTitle(m), pk.Name, money(pk.Price-a.Banked))
 }
 
 // carLock is why the car or paint in the settings cannot be driven, or "".
@@ -461,7 +461,7 @@ func playTyped() (chars []rune, backspace bool) {
 	for c := rl.GetCharPressed(); c != 0; c = rl.GetCharPressed() {
 		chars = append(chars, c)
 	}
-	return chars, rl.IsKeyPressed(rl.KeyBackspace) || rl.IsKeyPressedRepeat(rl.KeyBackspace)
+	return chars, keyPressed(rl.KeyBackspace) || rl.IsKeyPressedRepeat(rl.KeyBackspace)
 }
 
 // hintsPlayTyping is the bar while the address field is selected.
@@ -549,7 +549,7 @@ func (p *playPage) cards() []playCard {
 		}
 		switch {
 		case c.Locked:
-			c.Note = playNumber(max(a.Banked, 0)) + " / " + playNumber(pk.Price) + " bounty"
+			c.Note = money(max(a.Banked, 0)) + " / " + money(pk.Price) + " bounty"
 			c.Progress = a.Progress(pk.ID)
 		case pk.ID == pack.Base:
 			c.Note = "base game"
@@ -607,19 +607,6 @@ func (p *playPage) chalCards() []playChalCard {
 func playMapTitle(m city.Map) string {
 	n := m.Name()
 	return strings.ToUpper(n[:1]) + n[1:]
-}
-
-// playNumber writes a whole number with commas, in ASCII for the default font.
-func playNumber(v int) string {
-	sign := ""
-	if v < 0 {
-		sign, v = "-", -v
-	}
-	s := fmt.Sprint(v)
-	for i := len(s) - 3; i > 0; i -= 3 {
-		s = s[:i] + "," + s[i:]
-	}
-	return sign + s
 }
 
 // playJoin puts a summary's parts on one line.

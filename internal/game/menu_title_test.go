@@ -1,7 +1,9 @@
 package game
 
 import (
+	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/danielriddell21/autobahn/internal/city"
@@ -79,9 +81,12 @@ func TestTitleCards(t *testing.T) {
 	if c := sh.titleCardFor("garage"); c.Head == "" || len(c.Lines) == 0 {
 		t.Errorf("garage card %+v", c)
 	}
+	sh.career.Banked = 2500
 	c = sh.titleCardFor("career")
-	if len(c.Lines) != 2 || c.Lines[0] != "Bounty banked: 0" {
-		t.Errorf("career card %+v", c)
+	p, _ := nextPack(sh.access())
+	want := []string{"Bounty banked: £2,500", "Next: " + p.Name + " at " + money(p.Price)}
+	if !reflect.DeepEqual(c.Lines, want) || !strings.Contains(c.Lines[1], "£") {
+		t.Errorf("career card %q, want %q", c.Lines, want)
 	}
 }
 

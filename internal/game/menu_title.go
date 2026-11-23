@@ -169,10 +169,10 @@ func (s *Shell) titleCardFor(key string) titleCard {
 	case titleCareer:
 		c := titleCard{
 			Head:  "CAREER",
-			Lines: []string{fmt.Sprintf("Bounty banked: %d", s.career.Banked)},
+			Lines: []string{"Bounty banked: " + money(s.career.Banked)},
 		}
 		if p, ok := nextPack(s.access()); ok {
-			c.Lines = append(c.Lines, fmt.Sprintf("Next: %s at %d", p.Name, p.Price))
+			c.Lines = append(c.Lines, fmt.Sprintf("Next: %s at %s", p.Name, money(p.Price)))
 		} else {
 			c.Lines = append(c.Lines, "Every pack is held.")
 		}
