@@ -275,8 +275,8 @@ like parked cars. There are no people: crowd and fireworks are sound only.
 that add to it. A map or a car no pack lists belongs to the base game, so
 nothing is locked by accident. A pack unlocks when the bounty banked over a
 player's career reaches its price, and only a pursuit the player drove all of
-counts: `bountyMeter` marks one the autopilot touched. The menus never offer
-what is locked; `-unlock-all` and the tools bypass it.
+counts: `bountyMeter` marks one the autopilot touched. The menus show what is
+locked and never start it; `-unlock-all` and the tools bypass it.
 
 Bounty only opens the shop; earnings buy from it. `internal/shop` prices every
 player car and paint and decides what a player may drive, wear and buy. A car
@@ -342,6 +342,33 @@ jobs and `jobEntries` filters them by `Game.access()`, which is `Options.Access`
 jobs are never offered. With a job under way the menu offers only cancelling it.
 A new pack's jobs go in `jobsOf`; the key is ignored in co-op, and job pay is
 still thrown away where `banks()` is false.
+
+## Menus
+
+Every menu screen is a page of the registry in `internal/game/menupages.go`:
+one `menu_*.go` file per page registers itself in one line,
+`registerPage(id, builder, hints...)`, and is reached with `s.openPage(id)`.
+Esc goes back along the trail (`backPage`); `goTitle` is where every drive,
+failed start and lobby error ends. Rows are `menurow.go`'s kinds, drawn in the
+Signpost look of `signpost.go`, and what a page shows is worked out apart from
+how it is drawn, so the tests need no window. `docs/menus.md` is the design.
+
+* The menu drive (`menu_drive.go`) is the autopilot driving the chosen map
+  behind the pages. It is a `Game` kept in `Shell.drive`, never `Shell.game`,
+  and stepped by `stepAttract`, so it never passes through `Shell.collect` and
+  banks nothing. Settings turns it off.
+* Esc is the back key on every page and the pause key on a drive, which is why
+  raylib's exit key is turned off in `WithWindow`: left on, Esc would close
+  the window before either saw it. In a networked game Esc opens the leave
+  dialog instead of the pause page, and the game runs on under it
+  (`Shell.stepBehindPage`, `Game.advanceHandsOff`): a game somebody else is in
+  cannot be paused, or the other player would freeze or time out.
+* Locked maps, cars, packs and paints are shown greyed, with a padlock and how
+  far there is to go, never hidden; a locked thing never starts, and the row
+  says why.
+* Row text is ASCII: the built-in raylib font has nothing else.
+* What a page remembers goes in `Settings`, `omitempty` and cleaned in
+  `clamp`, so an older file reads as the defaults (`PlayMode`, `Challenge`).
 
 ## eval is a gate, not a report
 

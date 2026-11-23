@@ -21,11 +21,23 @@ colour-coded detection boxes it has to read back out of the pixels.
 | `Tab` | hand the car to the autopilot, or take it back |
 | `C` | camera |
 | `T` | skip ahead to the next time of day |
+| `Esc` | pause; with someone else in the game, ask before leaving it |
 | `H` | the rest |
 
 ![The autopilot driving the city](docs/media/drive.gif)
 
 *The autopilot at the wheel. The panel in the corner is the image it is reading.*
+
+## Menus
+
+The game opens on a title page with four ways on: **Play** starts a free
+drive, a challenge against the autopilot's ghost, or a two-player game, and
+the custom map lives under free drive; **Garage** chooses, paints and buys the
+car; **Career** has the bounty and earnings banked, the packs and the
+achievements; **Settings** has the rest. The arrow keys move and change,
+Enter selects and Esc goes back. Behind the menus the autopilot drives the map
+you have chosen; it banks nothing, and Settings turns it off. Maps, cars and
+paints you do not hold yet are shown greyed, with how far there is to go.
 
 ## Maps and packs
 

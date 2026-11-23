@@ -1,8 +1,8 @@
 # Menus
 
 The design for autobahn's menus, as locked in the interactive prototype
-(`Prototype — locked` on the menu canvas). This is the brief the build works
-from. Where it and the prototype disagree, the rules here win; the prototype's
+(`Prototype — locked` on the menu canvas), and as built. This was the brief the
+build worked from; where what was built differs, it says so. Where it and the prototype disagree, the rules here win; the prototype's
 numbers for anything the game already knows (cars, prices, ghosts) are copied
 from the code and may drift.
 
@@ -31,7 +31,10 @@ are part of the game.
   a custom map, a challenge) says so where it is chosen and on the drive.
 * **Type is a bundled TTF.** Overpass (SIL OFL), embedded with `go:embed` and
   loaded once with `rl.LoadFontFromMemory`, in regular, bold and extra bold.
-  The default raylib face stays for the HUD.
+  The default raylib face stays for the HUD. *Not built yet:* the files are not
+  in the repository (see "Still to decide"), so the menus use the built-in
+  face, through `typeFace` in `signpost.go`, which is the one place the font
+  changes. Until then every row's text is ASCII.
 
 ## Behind the menus: the menu drive
 
@@ -49,7 +52,9 @@ map chosen under Play behind every menu screen except the garage and pause.
   to clear by three quarters of the way across. While the drive is on, the
   title screen's card drops its picture and sits small at the bottom right.
 * Off, every screen stands on the plain backdrop (`menuBackdrop`) and the
-  title card shows the map's picture.
+  title card shows the map's picture. The picture is the custom map page's
+  plan of the map (`drawPlanPicture`): a patch of it built by the generator,
+  so it is the real place.
 * It is drawn through the scene shader like any drive, so the vision rules
   in CLAUDE.md hold for it unchanged. The menus are drawn after it, in 2D.
 
@@ -82,6 +87,12 @@ The list on the left, grouped:
 
 The card on the right follows the selection: the chosen map for Play, the car
 for Garage, bounty and the next pack for Career. Esc opens the quit dialog.
+
+The mode last chosen under Play is stored (`Settings.PlayMode`, with the
+challenge in `Settings.Challenge`), so the Play row says "free drive, city",
+"challenge, <its name>", "multiplayer, host chase" or "multiplayer, join
+<address>", and Play opens where it was left. Whether multiplayer hosts or
+joins, and the address, last only as long as the game is open.
 
 Removed from the title: the map row (it is in Play), Host and Join a chase
 (Play › Multiplayer), Challenges (Play › Challenge), Custom map (Play › Free
@@ -122,7 +133,9 @@ cannot when it cannot, and the big start button.
   chosen is lit and the other dimmed.
 * Host: the game (Chase, Co-op: two cars, Co-op: one car, which is
   `hostMode`), the map (the same five, locked ones greyed), the car.
-  **Start hosting**.
+  **Start hosting**. A custom map is hosted like any other: the joiner is sent
+  its share code in the snapshot, as it always was, and builds the same
+  world. It banks nothing, and the summary says so.
 * Join: the host's address in a text field, port 7777 assumed. **Connect**,
   disabled while the field is empty.
 
@@ -162,7 +175,10 @@ A card over the dimmed menu drive.
   waiting until they arrive.
 * The mode and map, and **Cancel** (esc).
 
-The game starts when the session is peered, as it does now.
+The game starts when the session is peered, as it does now. The lobby opens
+only once hosting or joining has started; if it cannot start, or the session
+fails while waiting, the game goes back to the title with the reason. Cancel
+goes back to Play.
 
 ### Garage
 
@@ -171,8 +187,8 @@ garage, the car on the existing turntable (`showroom`), and fades in from
 black.
 
 * The stage, top left: the car large, a tag (DRIVING, YOURS, FOR SALE,
-  LOCKED), its place in the line-up, its name and pack, and four bars: top
-  speed, acceleration, grip and weight. They come from `sim.PlayerBodyOf`,
+  LOCKED), its place in the line-up, the line saying how it drives, its name
+  and pack, and four bars: top speed, acceleration, grip and weight. They come from `sim.PlayerBodyOf`,
   and a tick marks the car being driven now so any other can be compared.
 * The panel, right: paint as a grid of swatches (unowned ones faded); below
   it, buying. A car or paint not owned shows **Buy … · price**, greyed when
@@ -207,7 +223,14 @@ Over the paused scene, dimmed.
   does to it; in a challenge, you against the ghost; or why nothing banks.
 
 In a networked game esc still leaves rather than pausing, but through the
-leave dialog, not at once.
+leave dialog, not at once. The game runs on under the dialog, so the other
+player's neither freezes nor times out: the shell steps it without drawing
+(`Game.advanceHandsOff`) while the dialog has the keys, and draws it behind
+the dialog. Nothing is pressed meanwhile, so a car driven by hand coasts and
+an autopilot drives on.
+
+The pause page notes the top speed with `Game.notePeakSpeed` after every step
+of the drive.
 
 ### Career
 
@@ -272,6 +295,11 @@ In stages, each one a commit that passes `just ci`:
 8. The custom map screen and its plan.
 9. The lobby card.
 10. The menu drive, and the garage leaving it for its own place.
+11. Integration: the shell opens on the title page, every way back ends there,
+    and the old screens are gone. The page ids are the whole list of screens
+    now, with the drive (`screenPlaying`) the only screen that is not a page.
+
+Built as planned, except the font (below).
 
 The menus stay display-free where they can: what a screen shows is worked
 out apart from how it is drawn, as `customScreen` already is, so the tests
@@ -280,11 +308,14 @@ need no window.
 ## Still to decide
 
 * Where the Overpass files come from. The build machine could not fetch
-  them; they need adding to the repository with their licence.
-* What the menu drive costs. A whole world behind the menus, with the
-  autopilot's camera rendering, may be too much for some machines; the
-  setting is the escape, but the default may want to be measured first.
-* Mouse support. The prototype is fully clickable; the game is keyboard
-  only today. Whether the menus should take the mouse is open.
-* Whether the garage is a 3D room or the existing turntable on a garage
-  backdrop.
+  them; they need adding to the repository with their licence. Until then the
+  menus use the built-in face.
+
+Settled:
+
+* What the menu drive costs. Measured (#50): perception is most of it, and at
+  five looks a second it is about two milliseconds a frame, with light traffic
+  and no police. It stays on by default; Settings turns it off.
+* Mouse support. The menus are keyboard only, as the game is.
+* The garage is the existing turntable on a garage backdrop, drawn by the
+  page itself on the plain backdrop, faded in from black.
