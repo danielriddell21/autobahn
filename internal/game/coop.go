@@ -71,7 +71,7 @@ func (g *Game) teamAssisted() bool {
 }
 
 // stepCoop runs one frame of a co-op game: the host simulates and publishes,
-// the joiner sends controls and draws what comes back.
+// the joiner sends controls and adopts what comes back. drawFrame draws it.
 func (g *Game) stepCoop(dt float32) {
 	g.speedSum += g.world.Player.Speed()
 	g.peakWanted = max(g.peakWanted, g.world.Wanted.Level)
@@ -95,16 +95,6 @@ func (g *Game) stepCoop(dt float32) {
 	g.watchPursuit(dt)
 	g.updateCameras(dt)
 	g.updateAudio()
-
-	rl.BeginDrawing()
-	g.sky(g.opts.Width, g.opts.Height)
-	g.drawWorld(g.cam, g.camMode != CameraBonnet)
-	if g.showHUD {
-		g.drawHUD()
-		g.drawCoopHUD()
-	}
-	rl.EndDrawing()
-	g.capture()
 }
 
 // ownControls is what this player's own hands, or autopilot, ask of their car.
@@ -167,6 +157,9 @@ func (g *Game) seatInput(dt float32) Input {
 		return inputOf(c, indicatorOfCommand(g.lastCmd), true)
 	}
 	in := Input{Indicator: int8(g.myIndicator)}
+	if g.handsOff {
+		return in // nothing pressed: see advanceHandsOff
+	}
 	if rl.IsKeyDown(rl.KeyW) || rl.IsKeyDown(rl.KeyUp) {
 		in.Throttle = 1
 	}

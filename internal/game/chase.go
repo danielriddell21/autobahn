@@ -100,6 +100,9 @@ func (g *Game) chaserControls() sim.Controls {
 	// Reads the police unit's keys. The joining player drives with
 	// the same layout the runner uses, because they are at their own keyboard.
 	var c sim.Controls
+	if g.handsOff {
+		return c // nothing pressed: see advanceHandsOff
+	}
 	if rl.IsKeyDown(rl.KeyW) || rl.IsKeyDown(rl.KeyUp) {
 		c.Throttle = 1
 	}

@@ -254,6 +254,8 @@ type Game struct {
 	showPanel  bool
 	showLabels bool
 	showHelp   bool
+	// handsOff says the keyboard is the menus' this frame; see advanceHandsOff.
+	handsOff bool
 
 	// net is the two-player session. It is always present and starts offline,
 	// so nothing here has to check for nil before asking about it.
@@ -333,7 +335,7 @@ func (g *Game) Summary() Summary {
 	return s
 }
 
-// chaseReady makes sure a chase has a police car in it. The settings screen
+// chaseReady makes sure a chase has a police car in it. The settings page
 // allows a world with no police at all, which is fine for driving and useless
 // for a chase: nothing crashes, the joining player simply has nothing to
 // control. Raising the count is friendlier than refusing the session.
@@ -588,6 +590,16 @@ func (g *Game) Chasing() bool { return g.opts.Chase || (g.Networked() && !g.mode
 // Step advances the game by one frame: perception, control, simulation, then
 // rendering. dt is the frame duration in seconds.
 func (g *Game) Step(dt float32) {
+	g.advance(dt)
+	rl.BeginDrawing()
+	g.drawFrame()
+	rl.EndDrawing()
+	g.capture()
+}
+
+// advance is Step without the drawing: everything a frame does to the world,
+// the network session and the sound.
+func (g *Game) advance(dt float32) {
 	g.frame++
 	g.lastDT = dt
 	if g.Coop() {
@@ -633,15 +645,44 @@ func (g *Game) Step(dt float32) {
 	g.watchPursuit(dt)
 	g.updateCameras(dt)
 	g.updateAudio()
+}
 
-	rl.BeginDrawing()
+// advanceHandsOff is advance with the keyboard taken away, for a networked
+// game that runs on under the leave dialog: a game somebody else is in cannot
+// be paused, so it is stepped while the dialog has the keys. Nothing is read
+// from the keys and nothing is pressed, so a car driven by hand coasts; an
+// autopilot drives on.
+func (g *Game) advanceHandsOff(dt float32) {
+	g.handsOff = true
+	defer func() { g.handsOff = false }()
+	g.advance(dt)
+}
+
+// drawFrame draws the scene as it stands, with the overlay the kind of game
+// calls for. It is the drawing half of Step, and what a page over the game
+// draws behind it, without advancing anything.
+func (g *Game) drawFrame() {
 	g.sky(g.opts.Width, g.opts.Height)
-	g.drawWorld(g.cam, g.camMode != CameraBonnet)
-	if g.showHUD {
-		g.drawHUD()
+	switch {
+	case g.Coop():
+		g.drawWorld(g.cam, g.camMode != CameraBonnet)
+		if g.showHUD {
+			g.drawHUD()
+			g.drawCoopHUD()
+		}
+	case g.Chasing():
+		g.drawWorld(g.cam, true)
+		if g.showHUD {
+			g.drawSpeedoFor(g.chaseSubject())
+			g.drawChaseHUD()
+			g.drawMinimap(int32(g.opts.Width)-156, int32(g.opts.Height)-156, 144)
+		}
+	default:
+		g.drawWorld(g.cam, g.camMode != CameraBonnet)
+		if g.showHUD {
+			g.drawHUD()
+		}
 	}
-	rl.EndDrawing()
-	g.capture()
 }
 
 func (g *Game) capture() {
@@ -807,7 +848,8 @@ func (g *Game) updateAudio() {
 
 func (g *Game) stepChase(dt float32) {
 	// Runs one frame of a two-player chase. The host simulates and
-	// publishes; the joining player sends controls and draws what comes back.
+	// publishes; the joining player sends controls and adopts what comes
+	// back. drawFrame draws it.
 	g.handleInput()
 	g.notices.Tick()
 	if g.blinkT += dt; g.blinkT > 0.36 {
@@ -826,20 +868,12 @@ func (g *Game) stepChase(dt float32) {
 	g.updateEffects(dt)
 	g.chaseCamera(dt)
 	g.updateAudio()
-
-	rl.BeginDrawing()
-	g.sky(g.opts.Width, g.opts.Height)
-	g.drawWorld(g.cam, true)
-	if g.showHUD {
-		g.drawSpeedoFor(g.chaseSubject())
-		g.drawChaseHUD()
-		g.drawMinimap(int32(g.opts.Width)-156, int32(g.opts.Height)-156, 144)
-	}
-	rl.EndDrawing()
-	g.capture()
 }
 
 func (g *Game) handleInput() {
+	if g.handsOff {
+		return // the menus have the keys: see advanceHandsOff
+	}
 	if g.jobMenu != nil {
 		g.stepJobMenu()
 		return
@@ -873,6 +907,9 @@ func (g *Game) handleInput() {
 
 func (g *Game) manualControls() sim.Controls {
 	var c sim.Controls
+	if g.handsOff {
+		return c
+	}
 	if rl.IsKeyDown(rl.KeyW) || rl.IsKeyDown(rl.KeyUp) {
 		c.Throttle = 1
 	}
@@ -1080,11 +1117,11 @@ func WithWindow(opts Options, fn func(*Game) error) error {
 
 // Run opens a window and plays until the player quits.
 //
-// An ordinary run opens on the title screen, where the drive, the two-player
-// chase and the settings are chosen. A run that was told what to do on the
-// command line — a fixed frame count, a recording, a screenshot, a session to
-// host or join — goes straight to the wheel instead, because a menu waiting
-// for a keypress is no use to a script or a media build.
+// An ordinary run opens on the menus' title page, where the drive, the
+// two-player games and the settings are chosen. A run that was told what to
+// do on the command line — a fixed frame count, a recording, a screenshot, a
+// session to host or join — goes straight to the wheel instead, because a
+// menu waiting for a keypress is no use to a script or a media build.
 func Run(opts Options) error {
 	if opts.headless() {
 		// There is no menu to keep a run like this to what the player holds,
@@ -1117,8 +1154,7 @@ func shell(g *Game) error {
 
 	// The game the window was opened with is discarded: the shell builds its
 	// own from the player's stored settings once they choose to drive. Only
-	// the network session carries over, so a -host or -join on the command
-	// line still lands in the lobby.
+	// the network session carries over: Play hosts and joins through it.
 	sh := NewShell(g.opts)
 	sh.net = g.net
 	defer sh.Close()
