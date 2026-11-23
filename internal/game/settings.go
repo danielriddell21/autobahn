@@ -58,6 +58,10 @@ type Settings struct {
 	// Weather is the sky a new session is driven under: drifting, or held at one
 	// kind.
 	Weather weather.Setting `json:"weather"`
+	// NoMenuDrive turns off the autopilot driving behind the menus. It is
+	// stored inverted so a settings file written before the setting existed
+	// reads as the default, which is on; see [Settings.MenuDrive].
+	NoMenuDrive bool `json:"noMenuDrive,omitempty"`
 	// Custom is the share code of the custom map last edited, or empty. The
 	// named ones are kept apart, in customs.json.
 	Custom string `json:"custom,omitempty"`
@@ -65,6 +69,13 @@ type Settings struct {
 	// of the co-op games.
 	HostMode NetMode `json:"hostMode,omitempty"`
 }
+
+// MenuDrive reports whether the autopilot drives behind the menus. On unless
+// the player has turned it off.
+func (s Settings) MenuDrive() bool { return !s.NoMenuDrive }
+
+// SetMenuDrive turns the menu drive on or off.
+func (s *Settings) SetMenuDrive(on bool) { s.NoMenuDrive = !on }
 
 // DefaultSettings returns the settings a first run starts with.
 func DefaultSettings() Settings {
