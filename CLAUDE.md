@@ -26,6 +26,11 @@ bare `go` commands. A bare `go test ./...` will fail to link on Linux.
 Linking also needs the X11 and xkbcommon development headers
 (`libxkbcommon-dev`, `libx11-dev`, `libgl1-mesa-dev` on Debian).
 
+Some tests draw (the menus, the menu drive, the Esc loop) and skip without a
+display. `just test` runs them under `xvfb-run` when `DISPLAY` is unset and
+`xvfb-run` is installed (`xvfb` on Debian), so `just ci` covers them; a bare `go test`
+does not.
+
 ## The autopilot boundary
 
 The autopilot must not be able to read simulation state. It depends on

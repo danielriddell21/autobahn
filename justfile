@@ -28,7 +28,16 @@ drive *ARGS:
 # run the tests
 [group('test')]
 test:
-    {{go}} test -tags "{{tags}}" ./...
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # The display tests (the menus, the menu drive, the Esc loop) need a GL
+    # context and skip without one. Give them a virtual display where there is
+    # none, so `just ci` runs them too.
+    if [ -z "${DISPLAY:-}" ] && command -v xvfb-run >/dev/null 2>&1; then
+        xvfb-run -a {{go}} test -tags "{{tags}}" ./...
+    else
+        {{go}} test -tags "{{tags}}" ./...
+    fi
 
 # run the tests with the race detector
 [group('test')]
