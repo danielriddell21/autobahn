@@ -2,6 +2,7 @@ package game
 
 import (
 	"errors"
+	gonet "net"
 	"testing"
 
 	"github.com/danielriddell21/crucible/menu"
@@ -169,5 +170,43 @@ func TestLobbyWaitsWhenNothingHappens(t *testing.T) {
 	}
 	if link.left || sh.notice != "" || !sh.onPage() {
 		t.Error("an idle lobby changed state")
+	}
+}
+
+func TestShareableAddrReplacesTheWildcard(t *testing.T) {
+	ips := []gonet.IP{
+		gonet.ParseIP("127.0.0.1"),
+		gonet.ParseIP("169.254.3.4"),
+		gonet.ParseIP("fe80::1"),
+		gonet.ParseIP("203.0.113.9"),
+		gonet.ParseIP("192.168.1.20"),
+	}
+	cases := []struct {
+		name, listen string
+		ips          []gonet.IP
+		want         string
+	}{
+		{"wildcard takes the private address", "0.0.0.0:7777", ips, "192.168.1.20:7777"},
+		{"empty host is a wildcard too", ":7777", ips, "192.168.1.20:7777"},
+		{"ipv6 wildcard", "[::]:7777", ips, "192.168.1.20:7777"},
+		{"a public address when nothing is private", "0.0.0.0:7777", ips[:4], "203.0.113.9:7777"},
+		{"nothing usable falls back to the listen address", "0.0.0.0:7777", ips[:3], "0.0.0.0:7777"},
+		{"no addresses at all", "0.0.0.0:7777", nil, "0.0.0.0:7777"},
+		{"a specific address is kept", "10.0.0.2:7777", ips, "10.0.0.2:7777"},
+		{"a name is kept", "game.local:7777", ips, "game.local:7777"},
+		{"no port is kept", "0.0.0.0", ips, "0.0.0.0"},
+	}
+	for _, c := range cases {
+		if got := shareableAddr(c.listen, c.ips); got != c.want {
+			t.Errorf("%s: shareableAddr(%q) = %q, want %q", c.name, c.listen, got, c.want)
+		}
+	}
+}
+
+func TestLanIPsListsThisMachine(t *testing.T) {
+	for _, ip := range lanIPs() {
+		if ip == nil {
+			t.Fatal("nil address listed")
+		}
 	}
 }

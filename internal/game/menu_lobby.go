@@ -2,6 +2,7 @@ package game
 
 import (
 	"math"
+	gonet "net"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 
@@ -55,9 +56,58 @@ func lobbyAddrLabel(hosting bool) string {
 // the one being reached for a joiner.
 func lobbyAddress(hosting bool, hostAddr, reaching string) string {
 	if hosting {
-		return hostAddr
+		return shareableAddr(hostAddr, lanIPs())
 	}
 	return reaching
+}
+
+// lanIPs is this machine's own unicast IPv4 addresses, as the lobby offers
+// them. A machine with none gives an empty list.
+func lanIPs() []gonet.IP {
+	addrs, err := gonet.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	var ips []gonet.IP
+	for _, a := range addrs {
+		if n, ok := a.(*gonet.IPNet); ok {
+			ips = append(ips, n.IP)
+		}
+	}
+	return ips
+}
+
+// shareableAddr is the address a second machine could connect to. A host
+// listens on every interface (0.0.0.0:7777), which is not somewhere anyone can
+// connect to, so an unspecified listen address is replaced by the machine's
+// own LAN address on the same port: a private address first, then any other
+// that is not loopback or link-local. With none to offer, or an address that
+// is already specific, it is returned as it was.
+func shareableAddr(listen string, ips []gonet.IP) string {
+	host, port, err := gonet.SplitHostPort(listen)
+	if err != nil {
+		return listen
+	}
+	if ip := gonet.ParseIP(host); host != "" && (ip == nil || !ip.IsUnspecified()) {
+		return listen
+	}
+	var other gonet.IP
+	for _, ip := range ips {
+		v4 := ip.To4()
+		if v4 == nil || v4.IsLoopback() || v4.IsLinkLocalUnicast() || v4.IsUnspecified() {
+			continue
+		}
+		if v4.IsPrivate() {
+			return gonet.JoinHostPort(v4.String(), port)
+		}
+		if other == nil {
+			other = v4
+		}
+	}
+	if other != nil {
+		return gonet.JoinHostPort(other.String(), port)
+	}
+	return listen
 }
 
 // lobbyNote says the mode and map for a host, who chooses them, and says that
@@ -192,7 +242,7 @@ func buildLobby(s *Shell) *menuPage {
 		switch key {
 		case "copy":
 			acts = append(acts, actionRow("copy", "Copy", func() {
-				lobbyCopy(s.net.Addr())
+				lobbyCopy(shareableAddr(s.net.Addr(), lanIPs()))
 				copied = true
 			}))
 		case "cancel":

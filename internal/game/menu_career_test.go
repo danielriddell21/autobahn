@@ -1,6 +1,7 @@
 package game
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -236,5 +237,32 @@ func TestCareerRebuildsWhenShownAgain(t *testing.T) {
 	r, _ := pg.List.Row(careerPackKey + "1")
 	if r.Note() != "held" {
 		t.Errorf("coast after banking 3,000 says %q", r.Note())
+	}
+}
+
+func TestCareerHeadingsCountTheAchievementsEarned(t *testing.T) {
+	var f feats.Feats
+	grid := featGrid(f)
+	if got, want := featsHeading(grid), fmt.Sprintf("ACHIEVEMENTS  0 of %d", len(feats.List())); got != want {
+		t.Errorf("heading %q, want %q", got, want)
+	}
+	f.Unlocked = append(f.Unlocked, feats.List()[0].ID)
+	if got := featsHeading(featGrid(f)); !strings.Contains(got, "1 of") {
+		t.Errorf("heading %q after one earned", got)
+	}
+	if packsHeading != "PACKS" {
+		t.Errorf("packs heading %q", packsHeading)
+	}
+}
+
+func TestCareerTilesSayHowEachIsEarned(t *testing.T) {
+	for _, e := range featGrid(feats.Feats{}) {
+		got := e.tileNote()
+		switch {
+		case !e.Shown && got != "hidden":
+			t.Errorf("%s: unseen tile says %q, want hidden", e.Feat.ID, got)
+		case e.Shown && got != careerDrawable(e.Feat.Note):
+			t.Errorf("%s: tile says %q, want its note", e.Feat.ID, got)
+		}
 	}
 }

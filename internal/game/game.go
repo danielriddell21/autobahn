@@ -1169,7 +1169,23 @@ func Run(opts Options) error {
 		}
 		return WithWindow(opts, run)
 	}
+	opts.Width, opts.Height = menuWindowSize(opts.Width, opts.Height)
 	return WithWindow(opts, shell)
+}
+
+// The smallest window the menus open in. Every page is laid out in fixed
+// pixels and was checked at 1280x720; in anything smaller they overlap and
+// clip (issue 66). A run played through the menus is therefore never opened
+// smaller, and -width and -height can only make it larger. A run told what to
+// do (headless) has no menus and keeps whatever size it asked for.
+const (
+	minMenuWidth  = 1280
+	minMenuHeight = 720
+)
+
+// menuWindowSize is the window a menu run opens in for the size asked for.
+func menuWindowSize(w, h int) (int, int) {
+	return max(w, minMenuWidth), max(h, minMenuHeight)
 }
 
 // headless reports whether the run was told what to do rather than being

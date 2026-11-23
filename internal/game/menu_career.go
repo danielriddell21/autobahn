@@ -173,6 +173,30 @@ func (e featEntry) note() string {
 	return careerDrawable(e.Feat.Note)
 }
 
+// packsHeading and featsHeading are the two headings over the route and the
+// grid. The achievements say how many have been earned out of how many there
+// are.
+const packsHeading = "PACKS"
+
+func featsHeading(grid []featEntry) string {
+	n := 0
+	for _, e := range grid {
+		if e.Earned {
+			n++
+		}
+	}
+	return fmt.Sprintf("ACHIEVEMENTS  %d of %d", n, len(grid))
+}
+
+// tileNote is the line under a tile's name: how it is earned, or a question
+// mark's worth of mystery for one the player may not see yet.
+func (e featEntry) tileNote() string {
+	if !e.Shown {
+		return "hidden"
+	}
+	return careerDrawable(e.Feat.Note)
+}
+
 // featGrid is every achievement, in the list's order.
 func featGrid(f feats.Feats) []featEntry {
 	out := make([]featEntry, 0, len(feats.List()))
@@ -301,10 +325,12 @@ func newCareerPage(s *Shell) *menuPage {
 
 // Layout, in pixels.
 const (
-	careerTilesY = 140
-	careerTileH  = 76
-	careerGap    = 16
-	careerDetail = 58
+	careerTilesY  = 140
+	careerTileH   = 76
+	careerGap     = 16
+	careerDetail  = 52
+	careerHeadH   = 20 // the heading over the route and over the grid
+	careerTileGap = 6  // between achievement tiles
 )
 
 // draw lays the page out.
@@ -327,11 +353,15 @@ func (c *careerPage) draw() {
 	c.tile(pageMargin+tw+careerGap, tw, "EARNINGS", money(c.s.career.Earnings), "what the shop spends", tonePlain)
 	c.tile(pageMargin+2*(tw+careerGap), tw, "NEXT PACK", nextName, nextSub, nextTone)
 
-	top := int32(careerTilesY + careerTileH + 22)
+	top := int32(careerTilesY + careerTileH + 12)
 	foot := h - pageFoot - careerDetail - 10
 	leftW := inner * 46 / 100
+	gx := pageMargin + leftW + careerGap*2
+	faceChip.draw(packsHeading, pageMargin, top, signDim)
+	faceChip.draw(featsHeading(c.grid), gx, top, signDim)
+	top += careerHeadH
 	c.drawRoute(pageMargin, top, leftW, foot-top)
-	c.drawGrid(pageMargin+leftW+careerGap*2, top, inner-leftW-careerGap*2, foot-top)
+	c.drawGrid(gx, top, inner-leftW-careerGap*2, foot-top)
 
 	head, line := c.detail()
 	dr := rect(pageMargin, foot+8, inner, careerDetail)
@@ -404,13 +434,15 @@ func (c *careerPage) drawGrid(x, y, w, h int32) {
 		return
 	}
 	cols := max(w/170, 1)
-	tw := (w - (cols-1)*8) / cols
+	tw := (w - (cols-1)*careerTileGap) / cols
 	rows := (int32(len(c.grid)) + cols - 1) / cols
-	th := min(max((h-(rows-1)*8)/rows, 44), 64)
+	// Room for a name and a line under it, and clear of the detail panel
+	// below: the last row stops a little short of h.
+	th := min(max((h-4-(rows-1)*careerTileGap)/rows, 42), 64)
 	_, sel := c.selection()
 	for i, e := range c.grid {
-		tx := x + int32(i)%cols*(tw+8)
-		ty := y + int32(i)/cols*(th+8)
+		tx := x + int32(i)%cols*(tw+careerTileGap)
+		ty := y + int32(i)/cols*(th+careerTileGap)
 		r := rect(tx, ty, tw, th)
 		face, edge := signCard, signRule
 		ink := signGrey
@@ -426,13 +458,20 @@ func (c *careerPage) drawGrid(x, y, w, h int32) {
 			ring(r, 6, 2, signBlue)
 		}
 		name := e.name()
+		room, nx := tw-16, tx+8
 		if e.Earned {
-			name = "[x] " + name
+			// The menu face has no tick, so it is drawn.
+			drawTick(nx, ty+4+faceBody.height()/2, signGreen)
+			room -= tickW + 6
+			nx += tickW + 6
 		}
-		faceBody.draw(careerClip(faceBody, name, tw-16), tx+8, ty+6, ink)
 		if p := e.progress(); p != "" && !e.Earned {
-			faceSmall.draw(p, tx+8, ty+6+faceBody.height()+4, signAmber)
+			pw := faceSmall.width(p)
+			faceSmall.draw(p, tx+tw-8-pw, ty+4+(faceBody.height()-faceSmall.height())/2, signAmber)
+			room -= pw + 8
 		}
+		faceBody.draw(careerClip(faceBody, name, room), nx, ty+4, ink)
+		faceSmall.draw(careerClip(faceSmall, e.tileNote(), tw-16), tx+8, ty+4+faceBody.height(), signDim)
 	}
 }
 
@@ -445,4 +484,13 @@ func careerClip(f typeFace, s string, w int32) string {
 		s = s[:len(s)-1]
 	}
 	return s + ".."
+}
+
+// tickW is the width of drawTick.
+const tickW = 12
+
+// drawTick draws a check mark, tickW wide, centred on y at x.
+func drawTick(x, y int32, col rl.Color) {
+	rl.DrawLineEx(rl.NewVector2(float32(x), float32(y)), rl.NewVector2(float32(x+4), float32(y+4)), 2, col)
+	rl.DrawLineEx(rl.NewVector2(float32(x+4), float32(y+4)), rl.NewVector2(float32(x+tickW), float32(y-4)), 2, col)
 }

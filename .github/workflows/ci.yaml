@@ -20,7 +20,10 @@ jobs:
       # Twice, rather than once with both flags. Under the race detector
       # coverage counts atomically, and the two together took the traffic
       # tests from a minute to more than the ten the package is allowed.
-      test-command: go test -tags x11 -race ./... && go test -tags x11 -coverprofile=coverage.txt ./...
+      # The coverage run is under a virtual display: the menu draw tests need a
+      # GL context and skip without one, which left every page's drawing code
+      # uncovered.
+      test-command: go test -tags x11 -race ./... && xvfb-run -a go test -tags x11 -coverprofile=coverage.txt ./...
       build-command: go build -tags x11 ./...
       # gremlins runs `go test` itself and cannot be given a build tag, so
       # mutation testing cannot compile the raylib packages.
