@@ -29,12 +29,18 @@ are part of the game.
   part of a name.
 * **What banks is always said.** Anything that will not bank (the autopilot,
   a custom map, a challenge) says so where it is chosen and on the drive.
-* **Type is a bundled TTF.** Overpass (SIL OFL), embedded with `go:embed` and
-  loaded once with `rl.LoadFontFromMemory`, in regular, bold and extra bold.
-  The default raylib face stays for the HUD. *Not built yet:* the files are not
-  in the repository (see "Still to decide"), so the menus use the built-in
-  face, through `typeFace` in `signpost.go`, which is the one place the font
-  changes. Until then every row's text is ASCII.
+* **Type is a bundled TTF.** Overpass (SIL OFL, `internal/game/fonts/OFL.txt`),
+  embedded with `go:embed` and loaded with `rl.LoadFontFromMemory`, in regular,
+  bold and extra bold (`typeFace`'s `weightRegular`, `weightBold` and
+  `weightHeavy`). Each weight and pixel size is rasterised once, on first use,
+  at exactly that size, so the type is crisp at one to one. The default raylib
+  face stays for the in-drive HUD, and is the fallback when there is no window
+  or a font will not load. `typeFace` in `signpost.go` and `menufont.go` are the
+  only places the font is known. Available characters: ASCII, the pound sign,
+  middle dot, single angle quotes, multiplication and minus signs, bullet,
+  ellipsis, en and em dashes, curly quotes, the degree sign and the four
+  arrows. Anything else would draw as a box, so add it to `menuGlyphs` (and
+  check the font has it: a test does).
 
 ## Behind the menus: the menu drive
 
@@ -299,7 +305,7 @@ In stages, each one a commit that passes `just ci`:
     and the old screens are gone. The page ids are the whole list of screens
     now, with the drive (`screenPlaying`) the only screen that is not a page.
 
-Built as planned, except the font (below).
+Built as planned.
 
 The menus stay display-free where they can: what a screen shows is worked
 out apart from how it is drawn, as `customScreen` already is, so the tests
@@ -307,11 +313,7 @@ need no window.
 
 ## Still to decide
 
-* Where the Overpass files come from. The build machine could not fetch
-  them; they need adding to the repository with their licence. Until then the
-  menus use the built-in face.
-
-Settled:
+Nothing open. Settled:
 
 * What the menu drive costs. Measured (#50): perception is most of it, and at
   five looks a second it is about two milliseconds a frame, with light traffic

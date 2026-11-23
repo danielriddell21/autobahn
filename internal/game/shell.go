@@ -120,6 +120,7 @@ func (s *Shell) Close() {
 	}
 	s.closeMenuDrive() // menu_drive.go
 	s.showroom.unload()
+	unloadMenuFonts() // menufont.go
 	s.net.Leave()
 }
 

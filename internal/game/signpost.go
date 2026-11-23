@@ -54,8 +54,9 @@ func toneInk(t tone) rl.Color {
 	}
 }
 
-// fontWeight is how heavy a face is. The default raylib face has one weight;
-// the bundled font the menus are to use has three.
+// fontWeight is how heavy a face is. The built-in raylib face has one weight;
+// the bundled Overpass the menus use (menufont.go) has three: regular, bold
+// and extra bold.
 type fontWeight int
 
 const (
@@ -84,11 +85,11 @@ var (
 
 // draw puts s with its top-left corner at x, y.
 func (f typeFace) draw(s string, x, y int32, col rl.Color) {
-	rl.DrawText(s, x, y, f.size, col)
+	f.drawText(s, x, y, col)
 }
 
 // width is how wide s is in this face.
-func (f typeFace) width(s string) int32 { return rl.MeasureText(s, f.size) }
+func (f typeFace) width(s string) int32 { return f.measureText(s) }
 
 // height is the height of a line in this face.
 func (f typeFace) height() int32 { return f.size }

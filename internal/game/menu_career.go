@@ -342,12 +342,19 @@ func (c *careerPage) draw() {
 	faceSmall.draw(careerClip(faceSmall, line, inner-32), pageMargin+16, foot+8+8+faceRow.height()+6, signDim)
 }
 
+// faceFigure is the big figure in a tile: smaller than a title, which Overpass
+// sets taller than the built-in face and would run into the line under it.
+var faceFigure = typeFace{28, weightHeavy}
+
+// faceRoute is the pack name down the route.
+var faceRoute = typeFace{18, weightBold}
+
 // tile draws one of the three tiles across the top.
 func (c *careerPage) tile(x, w int32, label, big, sub string, t tone) {
 	drawCard(rect(x, careerTilesY, w, careerTileH), false)
 	faceChip.draw(label, x+16, careerTilesY+10, signDim)
-	faceTitle.draw(careerClip(faceTitle, big, w-32), x+16, careerTilesY+10+faceChip.height()+4, toneInk(t))
-	faceSmall.draw(careerClip(faceSmall, sub, w-32), x+16, careerTilesY+careerTileH-faceSmall.height()-6, signDim)
+	faceFigure.draw(careerClip(faceFigure, big, w-32), x+16, careerTilesY+10+faceChip.height()+2, toneInk(t))
+	faceSmall.draw(careerClip(faceSmall, sub, w-32), x+16, careerTilesY+careerTileH-faceSmall.height()-4, signDim)
 }
 
 // drawRoute draws the packs one under another with a line down the dots.
@@ -382,13 +389,13 @@ func (c *careerPage) drawRoute(x, y, w, h int32) {
 		if e.State == packLocked {
 			ink = signGrey
 		}
-		faceRow.draw(strings.ToUpper(careerASCII(e.Pack.Name)), tx, ry+4, ink)
+		faceRoute.draw(strings.ToUpper(careerASCII(e.Pack.Name)), tx, ry+3, ink)
 		st := e.status()
 		faceSmall.draw(st, x+w-12-faceSmall.width(st), ry+8, col)
 		sub := careerClip(faceSmall, e.contents(), w-44-12)
-		faceSmall.draw(sub, tx, ry+4+faceRow.height()+2, signDim)
+		faceSmall.draw(sub, tx, ry+3+faceRoute.height(), signDim)
 		if e.State != packHeld {
-			drawBar(tx, ry+rowH-9, w-44-12, e.Progress, col)
+			drawBar(tx, ry+rowH-8, w-44-12, e.Progress, col)
 		}
 	}
 }

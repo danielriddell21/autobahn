@@ -78,7 +78,7 @@ just ci               # lint + test + build + the boundary check + the autopilot
 
 Without `just`, Linux needs `-tags x11`: `go run -tags x11 ./cmd/autobahn`.
 
-Everything is generated in code, with no asset files, and a map is not a
+Everything but the menu typeface is generated in code, and a map is not a
 fixed size: it is built outward as you drive. The engine underneath is
 [crucible](https://github.com/danielriddell21/crucible).
 
@@ -87,3 +87,10 @@ fixed size: it is built outward as you drive. The engine underneath is
 Full documentation lives in the [autobahn wiki](https://github.com/danielriddell21/autobahn/wiki) —
 the city and its rules, the camera-only autopilot, pursuit mode, the synthesised
 sound, and how the media above is generated.
+
+## Credits
+
+The menus are set in [Overpass](https://github.com/RedHatOfficial/Overpass)
+(regular, bold and extra bold), copyright 2021 The Overpass Project Authors,
+used under the SIL Open Font License 1.1. The licence is in
+[internal/game/fonts/OFL.txt](internal/game/fonts/OFL.txt).

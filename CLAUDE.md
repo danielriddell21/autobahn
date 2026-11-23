@@ -366,7 +366,14 @@ how it is drawn, so the tests need no window. `docs/menus.md` is the design.
 * Locked maps, cars, packs and paints are shown greyed, with a padlock and how
   far there is to go, never hidden; a locked thing never starts, and the row
   says why.
-* Row text is ASCII: the built-in raylib font has nothing else.
+* Menu type is the bundled Overpass (`internal/game/fonts`, SIL OFL; regular,
+  bold and extra bold), loaded on first draw by `menufont.go` and reached only
+  through `typeFace`. The glyph set is ASCII plus the pound sign, middle dot,
+  single angle quotes, multiplication and minus signs, bullet, ellipsis, en and
+  em dashes, curly quotes, degree sign and the four arrows (`menuGlyphs`); a
+  character outside it draws as a box. The built-in raylib face is kept for the
+  in-drive HUD, and is what the menus fall back to with no window (headless
+  tests) or if a font will not load.
 * What a page remembers goes in `Settings`, `omitempty` and cleaned in
   `clamp`, so an older file reads as the defaults (`PlayMode`, `Challenge`).
 
