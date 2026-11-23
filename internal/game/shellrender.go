@@ -35,6 +35,12 @@ func (s *Shell) drawScreen(dt float32) {
 	rl.BeginDrawing()
 	defer rl.EndDrawing()
 
+	if s.onPage() {
+		// A screen from the registry draws its own backdrop and hints
+		// (signpost.go); everything below is for the screens before it.
+		s.drawPage(dt)
+		return
+	}
 	if s.screen == screenPaused && s.game != nil {
 		s.game.drawFrozen(dt)
 		rl.DrawRectangle(0, 0, int32(s.opts.Width), int32(s.opts.Height), menuVeil)

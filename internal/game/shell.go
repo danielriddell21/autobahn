@@ -86,6 +86,10 @@ type Shell struct {
 	customEd   *customScreen
 	customNote string
 
+	// pager is the page from the screen registry that is showing, if one is,
+	// and what esc goes back through; see menupages.go.
+	pager pager
+
 	joinAddr string // the address being typed on screenJoin
 	notice   string // the last thing that went wrong, shown under the title
 	quit     bool
@@ -257,10 +261,14 @@ func (s *Shell) stepPlaying(dt float32) {
 }
 
 func (s *Shell) stepMenu(dt float32) {
-	switch s.screen {
-	case screenJoin:
+	switch {
+	case s.onPage():
+		// A screen from the registry (menupages.go) reads its own keys. The
+		// cases after it are the screens that came before the registry.
+		s.stepPage(pollNav())
+	case s.screen == screenJoin:
 		s.editAddress()
-	case screenLobby:
+	case s.screen == screenLobby:
 		s.watchLobby()
 	default:
 		s.menu.Update(pollMenu())
