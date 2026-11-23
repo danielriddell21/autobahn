@@ -343,6 +343,7 @@ func (s *Shell) drawLobbyCard(list *rowList, hosting bool, copied *bool) {
 				label = "Copied"
 			}
 		}
+		hitRow(rect(bx, by, bw, lobbyBtnH), v.Key)
 		drawButton(rect(bx, by, bw, lobbyBtnH), label, v.Selected, false, tonePlain)
 		bx += bw + 12
 	}

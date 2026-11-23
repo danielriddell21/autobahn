@@ -75,7 +75,7 @@ func (p *playPage) drawHeader(b playBox, mode rowView) {
 	faceTitle.draw("PLAY", b.left, pageTop, signInk)
 	x := b.left + faceTitle.width("PLAY") + 24
 	y := pageTop + (faceTitle.height()-playSwitch)/2
-	x += playSegments(x, y, playSwitch, faceRow, playModeNames, int(p.mode), nil, mode.Selected, true) + 20
+	x += playSegments(mode.Key, x, y, playSwitch, faceRow, playModeNames, int(p.mode), nil, mode.Selected, true) + 20
 	lede := playLedes[p.mode]
 	if lw := faceSmall.width(lede); x+lw <= b.right {
 		faceSmall.draw(lede, b.right-lw, pageTop+(faceTitle.height()-faceSmall.height())/2, signDim)
@@ -102,7 +102,9 @@ func (p *playPage) drawFree(b playBox, vs map[string]rowView) {
 	cards := p.cards()
 	cw := (b.width() - playGap*int32(len(cards)-1)) / int32(len(cards))
 	for i, c := range cards {
-		drawPlayMapCard(rect(b.left+int32(i)*(cw+playGap), y, cw, cardH), c, i, vs["map"].Selected)
+		at := rect(b.left+int32(i)*(cw+playGap), y, cw, cardH)
+		hitChoice(at, "map", i)
+		drawPlayMapCard(at, c, i, vs["map"].Selected)
 	}
 	y += cardH + 16
 
@@ -170,6 +172,7 @@ func drawPlayMapCard(r rl.Rectangle, c playCard, i int, lit bool) {
 // cell is ringed with the accent.
 func drawPlayCell(r rl.Rectangle, v rowView, note string) {
 	x, y, w := int32(r.X), int32(r.Y), int32(r.Width)
+	hitRow(r, v.Key)
 	rounded(r, 8, signCard)
 	if v.Selected {
 		ring(r, 8, 2, signBlue)
@@ -186,6 +189,7 @@ func drawPlayCell(r rl.Rectangle, v rowView, note string) {
 	cy, inner := y+32, w-28
 	switch {
 	case v.Kind == rowOptions && optionsWidth(v.Options) <= inner:
+		hitOptions(x+14, cy, v.Options, v.Key)
 		drawOptions(x+14, cy, v.Options, v.Choice, v.Selected, off)
 	case v.Kind == rowOptions:
 		// Too many to show side by side: the one chosen, with the way to step.
@@ -219,6 +223,7 @@ func (p *playPage) drawChallenges(b playBox, vs map[string]rowView) {
 	cw := (b.width() - playGap*(cols-1)) / cols
 	for i, c := range cards {
 		at := rect(b.left+int32(i%cols)*(cw+playGap), b.top+int32(i/cols)*(cardH+playGap), cw, cardH)
+		hitChoice(at, "chal", i)
 		drawPlayChalCard(at, c, vs["chal"].Selected)
 	}
 	y := b.top + rows*(cardH+playGap)
@@ -273,6 +278,8 @@ func (p *playPage) drawMulti(b playBox, vs map[string]rowView) {
 	role := vs["role"].Selected
 	host := rect(b.left, b.top, pw, ph)
 	join := rect(b.left+pw+16, b.top, pw, ph)
+	hitChoice(host, "role", 0)
+	hitChoice(join, "role", 1)
 	p.drawPanel(host, "Host a game", "it runs on this machine, on your map", !p.s.joining, role)
 	p.drawPanel(join, "Join a game", "you get the host's map, mode and weather", p.s.joining, role)
 	if p.s.joining {
@@ -330,7 +337,7 @@ func (p *playPage) drawHostMap(r rl.Rectangle, v rowView) {
 		locked[i] = c.Locked
 	}
 	// The cell is ringed already, so the choices are not ringed again.
-	playSegments(x+14, y+32, 24, faceSmall, v.Options, v.Choice, locked, v.Selected, false)
+	playSegments(v.Key, x+14, y+32, 24, faceSmall, v.Options, v.Choice, locked, v.Selected, false)
 }
 
 // drawJoin draws the join panel's address field and car.
@@ -374,12 +381,14 @@ func (p *playPage) drawBar(b playBox, vs map[string]rowView) {
 	ring(r, 12, 1, signRule)
 
 	backW := faceRow.width("‹ Back") + 32
+	hitRow(rect(b.left+10, b.bar+14, backW, 44), "back")
 	drawButton(rect(b.left+10, b.bar+14, backW, 44), "‹ Back", vs["back"].Selected, false, tonePlain)
 
 	goV := vs["go"]
 	label := goV.Label + "  ›"
 	goW := max(240, faceRow.width(label)+48)
 	goX := b.right - 8 - goW
+	hitRow(rect(goX, b.bar+8, goW, playBarH-16), "go")
 	drawButton(rect(goX, b.bar+8, goW, playBarH-16), label, goV.Selected, goV.Disabled != "", tonePlain)
 
 	x := b.left + 10 + backW + 18
@@ -400,7 +409,7 @@ func (p *playPage) drawBar(b playBox, vs map[string]rowView) {
 // and returns how wide it is: the accent while lit, grey for any locked. A
 // control standing alone is ringed with the accent while lit; one inside a
 // cell leaves that to the cell.
-func playSegments(x, y, h int32, f typeFace, opts []string, choice int, locked []bool, lit, alone bool) int32 {
+func playSegments(key string, x, y, h int32, f typeFace, opts []string, choice int, locked []bool, lit, alone bool) int32 {
 	const pad, inset = 14, 4
 	w := int32(inset)
 	for _, o := range opts {
@@ -428,6 +437,9 @@ func playSegments(x, y, h int32, f typeFace, opts []string, choice int, locked [
 			rounded(rect(at, y, sw, h), 7, fill)
 		}
 		f.draw(o, at+pad, y+(h-f.height())/2, ink)
+		if key != "" {
+			hitChoice(rect(at, y, sw, h), key, i)
+		}
 		at += sw
 	}
 	return w

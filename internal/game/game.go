@@ -1169,6 +1169,10 @@ func Run(opts Options) error {
 		}
 		return WithWindow(opts, run)
 	}
+	// The size the player chose in Settings, unless the command line named one.
+	if set := LoadSettings(); !opts.Given["width"] && !opts.Given["height"] && set.WindowW > 0 {
+		opts.Width, opts.Height = set.WindowW, set.WindowH
+	}
 	opts.Width, opts.Height = menuWindowSize(opts.Width, opts.Height)
 	return WithWindow(opts, shell)
 }
@@ -1207,6 +1211,7 @@ func shell(g *Game) error {
 	// own from the player's stored settings once they choose to drive. Only
 	// the network session carries over: Play hosts and joins through it.
 	sh := NewShell(g.opts)
+	sh.applyDisplay() // full screen and VSync, from Settings
 	sh.net = g.net
 	defer sh.Close()
 	g.Close()

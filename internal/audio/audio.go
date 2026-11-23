@@ -33,6 +33,7 @@ const (
 // ones running.
 type Kit struct {
 	live   bool
+	owns   bool // this kit opened the audio device, so it closes it
 	muted  bool
 	engine rl.Sound
 	siren  rl.Sound
@@ -49,9 +50,15 @@ func Open(muted bool) *Kit {
 	if muted {
 		return k
 	}
-	rl.InitAudioDevice()
+	// The menus may already have the device open: a drive shares it, and
+	// leaves it to them to close.
 	if !rl.IsAudioDeviceReady() {
-		return k
+		rl.InitAudioDevice()
+		if !rl.IsAudioDeviceReady() {
+			return k
+		}
+		k.owns = true
+		deviceGen++
 	}
 	k.live = true
 
@@ -76,8 +83,11 @@ func (k *Kit) Close() {
 	for _, s := range []rl.Sound{k.engine, k.siren, k.skid, k.thud, k.horn} {
 		rl.UnloadSound(s)
 	}
-	rl.CloseAudioDevice()
-	k.live = false
+	if k.owns {
+		rl.CloseAudioDevice()
+		deviceGen++
+	}
+	k.live, k.owns = false, false
 }
 
 // Engine holds the engine note, raising its pitch with road speed and its

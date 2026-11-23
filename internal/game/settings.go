@@ -62,6 +62,17 @@ type Settings struct {
 	// stored inverted so a settings file written before the setting existed
 	// reads as the default, which is on; see [Settings.MenuDrive].
 	NoMenuDrive bool `json:"noMenuDrive,omitempty"`
+	// NoMenuSounds silences the menus' ticks and chimes, stored inverted like
+	// NoMenuDrive so an older file reads as the default, which is on.
+	NoMenuSounds bool `json:"noMenuSounds,omitempty"`
+	// Fullscreen fills the screen without taking it over (a borderless
+	// window). WindowW and WindowH are the size of the window when it is not
+	// full screen, or 0 for the default. VSync holds the frame rate to the
+	// screen's.
+	Fullscreen bool `json:"fullscreen,omitempty"`
+	WindowW    int  `json:"windowW,omitempty"`
+	WindowH    int  `json:"windowH,omitempty"`
+	VSync      bool `json:"vsync,omitempty"`
 	// Custom is the share code of the custom map last edited, or empty. The
 	// named ones are kept apart, in customs.json.
 	Custom string `json:"custom,omitempty"`
@@ -81,6 +92,12 @@ func (s Settings) MenuDrive() bool { return !s.NoMenuDrive }
 
 // SetMenuDrive turns the menu drive on or off.
 func (s *Settings) SetMenuDrive(on bool) { s.NoMenuDrive = !on }
+
+// MenuSounds reports whether the menus make their sounds. On unless turned off.
+func (s Settings) MenuSounds() bool { return !s.NoMenuSounds }
+
+// SetMenuSounds turns the menus' sounds on or off.
+func (s *Settings) SetMenuSounds(on bool) { s.NoMenuSounds = !on }
 
 // DefaultSettings returns the settings a first run starts with.
 func DefaultSettings() Settings {
@@ -120,6 +137,7 @@ func (s *Settings) clamp() {
 	if s.Weather > weather.Drift {
 		s.Weather = weather.Drift
 	}
+	s.WindowW, s.WindowH = clampWindow(s.WindowW, s.WindowH)
 	if !sim.IsPlayerBody(s.Car) {
 		s.Car = sim.HotHatch
 	}

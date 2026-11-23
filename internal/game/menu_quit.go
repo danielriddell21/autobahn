@@ -50,7 +50,9 @@ func drawDialog(s *Shell, pg *menuPage) {
 	drawWrapped(pg.Lede, cx+24, cy+64, cw-48)
 	bw := (cw - 48 - 12) / 2
 	for i, v := range pg.List.Views() {
-		drawButton(rect(cx+24+int32(i)*(bw+12), cy+ch-24-44, bw, 44), v.Label, v.Selected, false, v.Tone)
+		b := rect(cx+24+int32(i)*(bw+12), cy+ch-24-44, bw, 44)
+		hitRow(b, v.Key)
+		drawButton(b, v.Label, v.Selected, false, v.Tone)
 	}
 }
 

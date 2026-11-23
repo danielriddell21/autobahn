@@ -9,6 +9,7 @@ import (
 	"github.com/danielriddell21/crucible/menu"
 	"github.com/danielriddell21/crucible/netplay"
 
+	"github.com/danielriddell21/autobahn/internal/audio"
 	"github.com/danielriddell21/autobahn/internal/city"
 	"github.com/danielriddell21/autobahn/internal/custom"
 	"github.com/danielriddell21/autobahn/internal/job"
@@ -52,6 +53,8 @@ type Shell struct {
 	drive menuDrive
 	// showroom is the garage's turntable.
 	showroom showroom
+	// ui makes the menus' sounds.
+	ui *audio.UI
 	// titlePlan is the picture of the map on the title page's card.
 	titlePlan planCache
 
@@ -101,6 +104,8 @@ func NewShell(opts Options) *Shell {
 		}
 	}
 	s.settings.keepTo(s.holdings())
+	s.ui = audio.OpenUI(opts.Mute)
+	menuCue = s.cue
 	s.goTitle()
 	return s
 }
@@ -115,6 +120,8 @@ func (s *Shell) goTitle() {
 
 // Close releases whatever the shell is holding.
 func (s *Shell) Close() {
+	menuCue = nil
+	s.ui.Close()
 	s.closeGame()
 	s.closeMenuDrive() // menu_drive.go
 	s.showroom.unload()
@@ -133,6 +140,7 @@ func (s *Shell) Step(dt float32) bool {
 	if s.quit || rl.WindowShouldClose() {
 		return false
 	}
+	s.followWindow()
 	if s.screen == screenPlaying {
 		s.stepPlaying(dt)
 	} else {
@@ -274,7 +282,7 @@ func (s *Shell) escapeDrive() bool {
 // drive (resume, Stay, a start) leaves the drive unstepped this frame, and
 // Step draws it as it stands.
 func (s *Shell) stepMenu(dt float32) {
-	s.stepPage(pollNav())
+	s.stepPage(s.mouseNav(pollNav()))
 	if s.quit || s.screen == screenPlaying {
 		return
 	}
@@ -552,3 +560,24 @@ func (s *Shell) closeGame() {
 
 // text wraps a fixed string as a label, for the rows that do not change.
 func text(s string) func() string { return func() string { return s } }
+
+// menuCue is where the menus' lists send the cue a key press earned. It is the
+// open shell's cue, and nil with none, so a list under test makes no sound.
+var menuCue func(audio.Cue)
+
+// playCue sends a cue to the shell, if there is one listening.
+func playCue(c audio.Cue) {
+	if menuCue != nil {
+		menuCue(c)
+	}
+}
+
+// cue plays one of the menus' sounds, unless the player has silenced them or
+// everything.
+func (s *Shell) cue(c audio.Cue) {
+	if s.settings.Muted || !s.settings.MenuSounds() {
+		return
+	}
+	rl.SetMasterVolume(masterVolume(s.settings))
+	s.ui.Play(c)
+}

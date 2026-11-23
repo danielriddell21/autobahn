@@ -340,6 +340,7 @@ func (c *careerPage) draw() {
 	inner := w - 2*pageMargin
 
 	backR := rect(w-pageMargin-120, pageTop+2, 120, 40)
+	hitRow(backR, careerBackKey)
 	drawButton(backR, "Back", c.list.Sel() == c.list.Len()-1, false, tonePlain)
 
 	// Tiles.
@@ -397,6 +398,7 @@ func (c *careerPage) drawRoute(x, y, w, h int32) {
 		ry := y + int32(i)*rowH
 		sel := i == pk
 		r := rect(x, ry, w, rowH-4)
+		hitRow(r, careerPackKey+fmt.Sprint(int(e.Pack.ID)))
 		if sel {
 			rounded(r, 6, signLift)
 			rl.DrawRectangle(x, ry+6, 3, rowH-16, signBlue)
@@ -444,6 +446,7 @@ func (c *careerPage) drawGrid(x, y, w, h int32) {
 		tx := x + int32(i)%cols*(tw+careerTileGap)
 		ty := y + int32(i)/cols*(th+careerTileGap)
 		r := rect(tx, ty, tw, th)
+		hitRow(r, careerFeatKey+e.Feat.ID)
 		face, edge := signCard, signRule
 		ink := signGrey
 		switch {

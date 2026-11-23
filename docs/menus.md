@@ -17,8 +17,9 @@ are part of the game.
   (`menuSelected`, #68ACE8) for what is selected. Green (#7BD389) means
   yours or done, amber (#F0B070) means for sale, next, or a warning, and grey
   means locked. Every screen uses those meanings and no others.
-* **Keyboard first.** ↑↓ moves between rows, ←→ changes the row, enter
-  selects, esc goes back one screen. Every screen keeps one selection and
+* **Keyboard first, mouse too.** ↑↓ moves between rows, ←→ changes the row,
+  enter selects, esc goes back one screen. The mouse does the same (see "Mouse
+  and sound"). Every screen keeps one selection and
   draws it with the accent: a filled row, an outlined card or a ringed
   control. The bottom bar says which keys do what, as it does now.
 * **Locked is shown, never hidden.** Maps, cars, packs and paints the player
@@ -272,6 +273,10 @@ a line saying what it does and a real control.
 | View      | Viewpoint    | options | `Camera`           |
 |           | AI camera    | switch  | `ShowPanel`        |
 |           | Box labels   | switch  | `ShowLabels`       |
+| Sound     | Menu sounds  | switch  | `NoMenuSounds` (inverted) |
+| Display   | Full screen  | switch  | `Fullscreen`       |
+|           | Window size  | options | `WindowW`, `WindowH` |
+|           | VSync        | switch  | `VSync`            |
 | World     | Traffic      | bar     | `Traffic`          |
 |           | Police       | bar     | `Police`           |
 |           | Day length   | options | `DayLength`        |
@@ -290,6 +295,30 @@ A dialog over the dimmed screen behind it, with **Stay** (selected) and
 * Quit: "Your career is saved", with the bounty and earnings.
 * Leave, in multiplayer: "There is no pausing with someone else in it.
   Leaving ends the game for both of you."
+
+## Mouse and sound
+
+**The mouse** reads the same intents the keys do (`pointer.go`). A page says
+where each thing that can be chosen is as it draws (`hitRow`, `hitChoice`,
+`hitDo`), and the next step turns the mouse into the `navInput` the keys make,
+so every page takes it without knowing. Moving over a box selects its row, a
+left click is enter (on a bar or a stepper, ← or → by the half clicked), a box
+that is one choice of an options row (a card, a pill) picks that choice, the
+wheel is ↑↓ and a right click is esc. A new page gets this by drawing its rows
+with `drawRowView`, or by registering its own boxes.
+
+**Sound.** The menus tick as the selection moves, chime when something is
+chosen, fall when going back and thud when a locked row refuses (`audio.UI`).
+They come from the key handling in `rowList.Update`, so the mouse and the keys
+sound alike. The set opens the audio device itself when no drive has, and a
+drive that closes it from under it makes it load them again. Settings › Sound
+turns them off; muting turns off everything.
+
+**Display.** Full screen is a borderless window, the window size is a few
+presets that fit the screen and never go under 1280 by 720, and VSync holds the
+frame rate to the screen's. They are applied to the open window as soon as they
+change (`Shell.applyDisplay`), and on start. A size on the command line wins
+over the stored one.
 
 ## Building it
 
@@ -327,6 +356,6 @@ Nothing open. Settled:
 * What the menu drive costs. Measured (#50): perception is most of it, and at
   five looks a second it is about two milliseconds a frame, with light traffic
   and no police. It stays on by default; Settings turns it off.
-* Mouse support. The menus are keyboard only, as the game is.
+* Mouse support. Added later: see "Mouse and sound".
 * The garage is the existing turntable on a garage backdrop, drawn by the
   page itself on the plain backdrop, faded in from black.

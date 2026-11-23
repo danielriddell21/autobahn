@@ -334,6 +334,7 @@ func drawRowList(l *rowList, x, y, w, h int32) {
 // says why when it is selected.
 func drawRowView(r rl.Rectangle, v rowView) {
 	x, y, w, h := int32(r.X), int32(r.Y), int32(r.Width), int32(r.Height)
+	hitRow(r, v.Key)
 	if v.Selected {
 		rounded(r, 6, signLift)
 		rl.DrawRectangle(x, y+6, 3, h-12, signBlue)
@@ -373,6 +374,7 @@ func drawRowControl(v rowView, right, mid int32) {
 	case rowSwitch:
 		drawSwitch(right-switchW, mid-switchH/2, v.On, v.Selected && !off, off)
 	case rowOptions:
+		hitOptions(right-optionsWidth(v.Options), mid-12, v.Options, v.Key)
 		drawOptions(right-optionsWidth(v.Options), mid-12, v.Options, v.Choice, v.Selected, off)
 	case rowBar:
 		drawBarControl(v, right, mid, value)
@@ -410,6 +412,7 @@ func drawBarControl(v rowView, right, mid int32, ink rl.Color) {
 func (s *Shell) drawPage(dt float32) {
 	pg := s.pager.cur
 	w, h := int32(s.opts.Width), int32(s.opts.Height)
+	resetHits()
 	if pg.OverGame && s.game != nil {
 		// The drive's own HUD would show through the veil and lie under the
 		// page's words, so it is left off the picture behind a page.

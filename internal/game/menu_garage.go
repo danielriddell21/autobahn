@@ -790,6 +790,11 @@ func (g *garagePage) drawPaint(r garageRects, lit bool) {
 			col = rl.ColorAlpha(col, 0.38)
 		}
 		rl.DrawCircle(cx, cy, float32(r.swatch)/2, col)
+		hitDo(rect(cx-r.swatch/2, cy-r.swatch/2, r.swatch, r.swatch), rowPaint, func() {
+			g.paint = i
+			g.wear()
+			g.sync()
+		})
 		if i == g.paint {
 			ringCol := signInk
 			if lit {
@@ -814,6 +819,7 @@ func (g *garagePage) drawBuy(r garageRects, sel string) {
 		if v.Key != rowBuyCar && v.Key != rowBuyPaint {
 			continue
 		}
+		hitRow(rect(x+18, by, w-36, 40), v.Key)
 		drawBuyButton(rect(x+18, by, w-36, 40), v)
 		by += 48
 	}
@@ -825,6 +831,7 @@ func (g *garagePage) drawBuy(r garageRects, sel string) {
 		faceSmall.draw(line, x+18, by+2, signDim)
 		by += faceSmall.height() + 4
 	}
+	hitRow(rect(x+18, doneY, w-36, 44), rowDone)
 	drawButton(rect(x+18, doneY, w-36, 44), "Done", sel == rowDone, false, tonePlain)
 }
 
@@ -861,6 +868,10 @@ func (g *garagePage) drawFilter(r garageRects, lit bool) {
 	for i, name := range garageFilters {
 		w := faceSmall.width(name) + 26
 		pill := rect(x, y, w, 26)
+		hitDo(pill, rowFilter, func() {
+			g.setFilter(i)
+			g.sync()
+		})
 		ink := signDim
 		if i == g.filter {
 			rounded(pill, 13, signInk)
@@ -897,6 +908,11 @@ func (g *garagePage) drawStrip(r garageRects, lit bool) {
 		k := cars[i]
 		x := r.stripX + int32(i-first)*(r.cardW+garageCardGap)
 		card := rect(x, r.stripY, r.cardW, r.cardH)
+		hitDo(card, rowCar, func() {
+			g.view = k
+			g.drive()
+			g.sync()
+		})
 		on := k == g.view
 		st := g.standingOf(k)
 		rounded(card, 8, signCard)

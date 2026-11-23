@@ -18,12 +18,13 @@ import (
 var _ = registerPage(pageSettings, newSettingsPage, hintsAdjust...)
 
 // settingsSections are the sections, in order.
-var settingsSections = []string{"Menus", "Sound", "View", "World", "Autopilot"}
+var settingsSections = []string{"Menus", "Sound", "Display", "View", "World", "Autopilot"}
 
 // Section indices, matching settingsSections.
 const (
 	secMenus = iota
 	secSound
+	secDisplay
 	secView
 	secWorld
 	secAutopilot
@@ -32,7 +33,8 @@ const (
 // settingsKeySection says which section each setting's row key belongs to.
 var settingsKeySection = map[string]int{
 	"menudrive": secMenus,
-	"volume":    secSound, "sound": secSound,
+	"volume":    secSound, "sound": secSound, "menusounds": secSound,
+	"fullscreen": secDisplay, "windowsize": secDisplay, "vsync": secDisplay,
 	"viewpoint": secView, "aicamera": secView, "boxlabels": secView,
 	"traffic": secWorld, "police": secWorld, "daylength": secWorld,
 	"jobsauto": secAutopilot,
@@ -46,6 +48,7 @@ func settingsRows(s *Shell, leave func()) []menuRow {
 	set := &s.settings
 	pct := func() string { return fmt.Sprintf("%d%%", int(set.Volume*100+0.5)) }
 	span := func(v, lo, hi int) float64 { return float64(v-lo) / float64(hi-lo) }
+	sizes := s.sizeChoices()
 	var cams, days []string
 	for m := CameraMode(0); m < numCameraModes; m++ {
 		cams = append(cams, m.String())
@@ -63,6 +66,30 @@ func settingsRows(s *Shell, leave func()) []menuRow {
 		switchRow("sound", "Sound",
 			func() bool { return !set.Muted }, func(on bool) { set.Muted = !on }).
 			describe("Off silences everything and remembers the volume."),
+		switchRow("menusounds", "Menu sounds",
+			set.MenuSounds, set.SetMenuSounds).
+			describe("A tick as the selection moves, and a chime when something is chosen."),
+		switchRow("fullscreen", "Full screen",
+			func() bool { return set.Fullscreen }, func(on bool) { set.Fullscreen = on; s.applyDisplay() }).
+			describe("Fills the screen as a borderless window."),
+		optionsRow("windowsize", "Window size", sizeWordsOf(sizes),
+			func() int { return sizeIndex(sizes, set.windowSize()) },
+			func(i int) {
+				if i >= 0 && i < len(sizes) {
+					set.WindowW, set.WindowH = sizes[i][0], sizes[i][1]
+					s.applyDisplay()
+				}
+			}).
+			describe("The size of the window when it is not full screen.").
+			disabledBy(func() string {
+				if set.Fullscreen {
+					return "turn full screen off to change the window"
+				}
+				return ""
+			}),
+		switchRow("vsync", "VSync",
+			func() bool { return set.VSync }, func(on bool) { set.VSync = on; s.applyDisplay() }).
+			describe("Holds the frame rate to the screen's, which stops tearing."),
 		optionsRow("viewpoint", "Viewpoint", cams,
 			func() int { return int(set.Camera) }, func(i int) { set.Camera = CameraMode(i) }).
 			describe("Where the camera sits at the start of a drive."),
@@ -135,6 +162,8 @@ func drawSettingsPage(pg *menuPage, w int32) {
 	y := int32(pageListTop)
 	for i, name := range settingsSections {
 		r := rect(pageMargin, y, colW, pageRowH-4)
+		first := settingsFirstRow(i)
+		hitDo(r, first, func() {})
 		if i == cur && !onBack {
 			rounded(r, 6, signLift)
 			rl.DrawRectangle(pageMargin, y+6, 3, pageRowH-16, signBlue)
@@ -147,6 +176,7 @@ func drawSettingsPage(pg *menuPage, w int32) {
 		y += pageRowH
 	}
 	y += 12
+	hitRow(rect(pageMargin, y, colW, pageRowH-4), settingsBackKey)
 	drawButton(rect(pageMargin, y, colW, pageRowH-4), "Back", onBack, false, tonePlain)
 
 	// The section's rows, drawn with the page's own selection.
@@ -167,4 +197,37 @@ func drawSettingsPage(pg *menuPage, w int32) {
 		drawRowView(rect(x, y, rw, rowH-4), v)
 		y += rowH
 	}
+}
+
+// settingsFirstRow is the key of the first row in section i, which clicking
+// the section's name selects.
+func settingsFirstRow(i int) string {
+	first := ""
+	for key, sec := range settingsKeySection {
+		if sec != i {
+			continue
+		}
+		// Rows are in the order settingsRows makes them; the map has none, so
+		// the earliest is found by that order.
+		if first == "" || settingsRowOrder(key) < settingsRowOrder(first) {
+			first = key
+		}
+	}
+	return first
+}
+
+// settingsRowOrder is where a row key comes in the page.
+func settingsRowOrder(key string) int {
+	for i, k := range settingsOrder {
+		if k == key {
+			return i
+		}
+	}
+	return len(settingsOrder)
+}
+
+// settingsOrder is the settings' row keys in the order they are listed.
+var settingsOrder = []string{
+	"menudrive", "volume", "sound", "menusounds", "fullscreen", "windowsize", "vsync",
+	"viewpoint", "aicamera", "boxlabels", "traffic", "police", "daylength", "jobsauto",
 }

@@ -35,7 +35,8 @@ drive, a challenge against the autopilot's ghost, or a two-player game, and
 the custom map lives under free drive; **Garage** chooses, paints and buys the
 car; **Career** has the bounty and earnings banked, the packs and the
 achievements; **Settings** has the rest. The arrow keys move and change,
-Enter selects and Esc goes back. Behind the menus the autopilot drives the map
+Enter selects and Esc goes back; the mouse works too, and Settings has the
+display (full screen, window size, VSync) and the menu sounds. Behind the menus the autopilot drives the map
 you have chosen; it banks nothing, and Settings turns it off. Maps, cars and
 paints you do not hold yet are shown greyed, with how far there is to go.
 

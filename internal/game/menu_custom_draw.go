@@ -310,6 +310,7 @@ func (p *customPage) drawCard(r, drive rl.Rectangle) {
 	_, selected := p.list.Selected()
 	on := selected && p.list.SelectedKey() == ckDrive
 	_, locked := p.driveBlocked()
+	hitRow(drive, ckDrive)
 	drawButton(drive, "Drive this map", on, locked, tonePlain)
 }
 

@@ -2,6 +2,8 @@ package game
 
 import (
 	"github.com/danielriddell21/crucible/menu"
+
+	"github.com/danielriddell21/autobahn/internal/audio"
 )
 
 // The menu model the Signpost screens are built on (docs/menus.md, "Building
@@ -315,15 +317,27 @@ func (l *rowList) Update(in menu.Input) menu.Sound {
 	}
 	if in.Up || in.Down {
 		l.Refused = ""
-		return l.m.Update(menu.Input{Up: in.Up, Down: in.Down})
+		return cueFor(l.m.Update(menu.Input{Up: in.Up, Down: in.Down}))
 	}
 	r := l.rows[l.m.Sel]
 	asked := in.Select || (r.Adjust != nil && (in.Left || in.Right))
 	if why := r.why(); why != "" && asked {
 		l.Refused = why
+		playCue(audio.CueDeny)
 		return menu.SoundNone
 	}
-	return l.m.Update(in)
+	return cueFor(l.m.Update(in))
+}
+
+// cueFor plays the sound a menu update earned, and hands it back.
+func cueFor(s menu.Sound) menu.Sound {
+	switch s {
+	case menu.SoundMove:
+		playCue(audio.CueMove)
+	case menu.SoundSelect:
+		playCue(audio.CueSelect)
+	}
+	return s
 }
 
 // Views works every row out as it stands, the selected one marked.

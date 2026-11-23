@@ -7,6 +7,8 @@ import (
 
 	"github.com/danielriddell21/crucible/keymap"
 	"github.com/danielriddell21/crucible/menu"
+
+	"github.com/danielriddell21/autobahn/internal/audio"
 )
 
 // The screen registry. Each menu screen is a page: one file that registers
@@ -275,6 +277,7 @@ func (s *Shell) stepPage(in navInput) {
 		return
 	}
 	if in.Back {
+		playCue(audio.CueBack)
 		pg.Back()
 		return
 	}
