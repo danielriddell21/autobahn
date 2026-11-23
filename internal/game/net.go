@@ -41,7 +41,7 @@ const (
 	numNetModes
 )
 
-// String names the mode, as the title screen shows it.
+// String names the mode, as the menus show it.
 func (m NetMode) String() string {
 	switch m {
 	case ModeCoopCars:
@@ -70,11 +70,6 @@ func ParseNetMode(name string) (NetMode, bool) {
 		return ModeCoopCar, true
 	}
 	return ModeChase, false
-}
-
-// cycleNetMode steps through the modes, wrapping at both ends.
-func cycleNetMode(m NetMode, dir int) NetMode {
-	return NetMode((int(m) + dir + int(numNetModes)) % int(numNetModes))
 }
 
 // Pose is one vehicle as the wire sees it: where it is, which way it points,

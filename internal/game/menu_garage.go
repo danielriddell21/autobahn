@@ -22,7 +22,7 @@ import (
 // with its tag, its place in the line-up and four bars; paint and buying are
 // on the right; every player car runs along the bottom as a card.
 //
-// It is the old garage and the old shop in one place and changes none of
+// It is the garage and the shop in one place and changes none of
 // their rules: what is owned, what is for sale once its pack is held and what
 // is never sold all come from internal/shop, and a purchase goes through
 // Career.BuyCar and Career.BuyPaint as it always did.
@@ -205,6 +205,9 @@ func (g *garagePage) page() *menuPage {
 		Draw:  g.draw,
 		Back:  g.leave,
 		Shown: g.sync,
+		// The garage is a room of its own, which would only hide the menu
+		// drive: it stands on the plain backdrop and draws its own.
+		Backdrop: backdropPlain,
 	}
 }
 
@@ -712,6 +715,7 @@ func (g *garagePage) drawStage(r garageRects, dt float32) {
 	}
 	place := g.place()
 	faceSmall.draw(place, x+w-16-faceSmall.width(place), y+17, signDim)
+	faceSmall.draw(garageFit(faceSmall, carBlurb(g.view), w-32), x+16, y+44, signDim)
 
 	// The name, the pack and where it stands.
 	ny := y + 8 + prevH + 6

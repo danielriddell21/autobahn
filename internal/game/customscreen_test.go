@@ -8,12 +8,8 @@ import (
 	"github.com/danielriddell21/autobahn/internal/pack"
 )
 
-func TestCustomScreenRowsAndAdjust(t *testing.T) {
+func TestCustomScreenAdjust(t *testing.T) {
 	c := &customScreen{spec: custom.FromMap(city.MapCity, 3), access: pack.Access{}, presets: custom.Presets{}}
-	rows := c.Rows()
-	if len(rows) != customNumRows {
-		t.Fatalf("%d rows, want %d", len(rows), customNumRows)
-	}
 	c.row = customRowFirstSlider + custom.Wind
 	before := c.spec.Step[custom.Wind]
 	c.Adjust(1)

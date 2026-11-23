@@ -1,7 +1,6 @@
 package game
 
 import (
-	"slices"
 	"strings"
 	"testing"
 
@@ -183,22 +182,6 @@ func TestTheSnapshotCarriesTheCustomMap(t *testing.T) {
 	}
 	if bareGame(Options{}).snapshot().Custom != "" || customOf("") != nil {
 		t.Error("a preset claims a custom map")
-	}
-}
-
-func TestNewShellTitleRows(t *testing.T) {
-	inTempConfig(t)
-	o := DefaultOptions()
-	o.Mute = true
-	sh := NewShell(o)
-	var rows []string
-	for _, it := range sh.menu.Items {
-		rows = append(rows, it.Label())
-	}
-	for _, want := range []string{"Challenges", "Custom map", "Achievements"} {
-		if !slices.Contains(rows, want) {
-			t.Errorf("the title has no %q row: %v", want, rows)
-		}
 	}
 }
 

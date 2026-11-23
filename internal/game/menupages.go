@@ -9,26 +9,25 @@ import (
 	"github.com/danielriddell21/crucible/menu"
 )
 
-// The screen registry. Each Signpost screen is one file that registers itself
-// in one line,
+// The screen registry. Each menu screen is a page: one file that registers
+// itself in one line,
 //
 //	var _ = registerPage(pagePlay, newPlayPage, hintsAdjust...)
 //
 // and is then reached with s.openPage(pagePlay) from anywhere. Nothing in
-// shell.go's switches needs editing for a new screen: stepMenu and drawScreen
-// hand any page id to stepPage and drawPage before they look at the screens
-// that came before the registry.
+// shell.go needs editing for a new page: stepMenu and drawScreen hand whatever
+// page is showing to stepPage and drawPage.
 //
-// Every id below has a screen from the start. One no file has registered yet
-// is a stub, its title and a Back row, so screens can link to each other before
-// they are built. A file that registers an id replaces its stub.
+// Every id below has a screen from the start. One no file has registered is a
+// stub, its title and a Back row, so a page can link to one before it is built.
+// A file that registers an id replaces its stub.
 
-// The ids of the Signpost screens. They carry on from the screens in shell.go,
-// which they sit beside until the old ones are taken out; nothing may be added
-// to that list after screenCustom, or the two would overlap.
+// The ids of the pages. The only screen that is not one is screenPlaying, the
+// drive itself (shell.go).
 const (
-	// pageTitle is the front page: Play, Garage, Career, Settings, Quit.
-	pageTitle screen = screenCustom + 1 + iota
+	// pageTitle is the front page: Play, Garage, Career, Settings, Quit. It is
+	// the zero screen.
+	pageTitle screen = iota
 	// pagePlay starts a drive: free drive, a challenge or multiplayer.
 	pagePlay
 	// pageGarage chooses, paints and buys the car.
@@ -67,15 +66,6 @@ var pageTitles = map[screen]string{
 
 // isPage reports whether id is one of the registry's screens.
 func isPage(id screen) bool { return id >= pageTitle && id < pageEnd }
-
-// allPages is every page id, in order.
-func allPages() []screen {
-	out := make([]screen, 0, pageEnd-pageTitle)
-	for id := pageTitle; id < pageEnd; id++ {
-		out = append(out, id)
-	}
-	return out
-}
 
 // navInput is a frame's keys on a page: crucible's menu intent, read by
 // pollMenu with the family's bindings, and esc, which goes back.
@@ -123,7 +113,7 @@ type menuPage struct {
 	// List is the rows. A page may have none, if Step reads the keys itself.
 	List *rowList
 	// OverGame draws the page over the paused drive, dimmed, when there is
-	// one, as the pause menu is; otherwise it stands on the menu backdrop.
+	// one, as the pause page is; otherwise it stands on its Backdrop.
 	OverGame bool
 	// Backdrop is what the page stands on when it is not over a game. The zero
 	// value is the menu drive, while it is on; a page that draws a whole scene
@@ -216,7 +206,7 @@ type pager struct {
 }
 
 // pageFrame is a screen to go back to: a page, kept as it was so it comes
-// back with its selection, or one of the screens before the registry (pg nil).
+// back with its selection, or the drive (pg nil).
 type pageFrame struct {
 	id screen
 	pg *menuPage
@@ -225,51 +215,48 @@ type pageFrame struct {
 // onPage reports whether the shell is showing a page from the registry.
 func (s *Shell) onPage() bool { return isPage(s.screen) && s.pager.cur != nil }
 
+// buildPage makes the page id afresh, with esc going back unless the page
+// says otherwise.
+func (s *Shell) buildPage(id screen) *menuPage {
+	e, _ := pageFor(id)
+	pg := e.build(s)
+	if pg.Back == nil {
+		pg.Back = s.backPage
+	}
+	return pg
+}
+
 // openPage shows the page id, building it afresh; esc on it comes back to
-// what was showing. Opened from a screen that predates the registry, the
-// trail starts again from that screen, so it cannot grow without end while
-// the old and new screens live side by side.
+// what was showing. Opened from the drive, the trail starts again with the
+// drive, which is where esc goes back to.
 func (s *Shell) openPage(id screen) {
 	if s.onPage() {
 		s.pager.stack = append(s.pager.stack, pageFrame{s.screen, s.pager.cur})
 	} else {
 		s.pager.stack = []pageFrame{{id: s.screen}}
 	}
-	e, _ := pageFor(id)
-	pg := e.build(s)
-	if pg.Back == nil {
-		pg.Back = s.backPage
-	}
-	s.showPage(id, pg)
+	s.showPage(id, s.buildPage(id))
 }
 
-// backPage goes back one screen. With nothing to go back to it goes to the
-// title screen.
+// backPage goes back one screen: to the page before, as it was, or to the
+// drive the trail started from. With nothing to go back to, or a drive that
+// has gone, it goes to the title page.
 func (s *Shell) backPage() {
 	n := len(s.pager.stack)
 	if n == 0 {
-		s.pager.cur = nil
-		s.showTitle()
+		s.goTitle()
 		return
 	}
 	f := s.pager.stack[n-1]
 	s.pager.stack = s.pager.stack[:n-1]
-	if f.pg != nil {
-		s.showPage(f.id, f.pg)
-		return
-	}
-	// One of the screens that came before the registry. Those that build a
-	// menu are rebuilt, as their own Back rows do; a drive is resumed.
-	s.pager.cur, s.pager.stack = nil, nil
 	switch {
-	case f.id == screenTitle:
-		s.showTitle()
-	case f.id == screenPaused && s.game != nil:
-		s.showPause()
+	case f.pg != nil:
+		s.showPage(f.id, f.pg)
 	case f.id == screenPlaying && s.game != nil:
+		s.pager = pager{}
 		s.resume()
 	default:
-		s.screen = f.id
+		s.goTitle()
 	}
 }
 

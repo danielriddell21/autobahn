@@ -10,10 +10,8 @@ import (
 )
 
 // The lobby card (docs/menus.md, "Lobby"): a card over the dimmed menu
-// backdrop that waits for the other player. It is the Signpost form of the
-// old screenLobby, and it does what watchLobby does, frame by frame, with the
-// same keys and the same outcomes. watchLobby itself is left as it was until
-// the old screens are taken out.
+// backdrop that waits for the other player. hostChase and joinChase open it
+// once the session is up; lobbyStep watches the session every frame.
 
 // lobbyLink is the part of a netplay session the lobby reads and leaves. The
 // shell passes its own session; tests pass a fake that can fail on demand.
@@ -116,24 +114,22 @@ func lobbyActions(hosting bool) []string {
 	return []string{"cancel"}
 }
 
-// lobbyStep applies a frame's keys to the lobby, as watchLobby does: esc
-// leaves the session and goes back; a network error that is not a peer leaves
-// it with the error as the notice; a peer starts the game, unless the two
-// builds disagree. It reports whether it used the keys.
+// lobbyStep applies a frame's keys to the lobby: esc leaves the session and
+// goes back; a network error that is not a peer leaves it for the title page,
+// with the error as the notice; a peer starts the game, unless the two builds
+// disagree. It reports whether it used the keys.
 func (s *Shell) lobbyStep(link lobbyLink, in navInput) bool {
 	if in.Back {
 		s.lobbyCancel(link)
 		return true
 	}
 	if err := link.Err(); err != nil && !link.Peered() {
-		s.notice = err.Error()
-		s.lobbyCancel(link)
+		s.lobbyFail(link, err)
 		return true
 	}
 	if link.Peered() {
 		if err := s.protoErr(); err != nil {
-			s.notice = err.Error()
-			s.lobbyCancel(link)
+			s.lobbyFail(link, err)
 			return true
 		}
 		// The host's own car is the autopilot's only in a chase; in co-op both
@@ -148,12 +144,24 @@ func (s *Shell) lobbyStep(link lobbyLink, in navInput) bool {
 	return false
 }
 
-// lobbyCancel ends the session and goes back one screen, to the title screen
-// when the lobby was reached from there.
+// lobbyCancel ends the session and goes back one screen, to the page the
+// lobby was opened from.
 func (s *Shell) lobbyCancel(link lobbyLink) {
 	link.Leave()
 	s.backPage()
 }
+
+// lobbyFail ends the session and goes to the title page, where the notice
+// says why.
+func (s *Shell) lobbyFail(link lobbyLink, err error) {
+	s.notice = err.Error()
+	link.Leave()
+	s.goTitle()
+}
+
+// hostingLobby reports whether this end of the lobby is the host: it is the
+// end with an address to give out.
+func (s *Shell) hostingLobby() bool { return s.net.Addr() != "" }
 
 // lobbyCopy puts the host's address on the clipboard.
 func lobbyCopy(addr string) {
@@ -170,7 +178,7 @@ var hintsLobby = []keymap.Binding{
 }
 
 // buildLobby makes the lobby page as it stands when it is opened: whether this
-// is a host is taken from the session then, as the old screen took it.
+// is a host is taken from the session then.
 func buildLobby(s *Shell) *menuPage {
 	hosting := s.hostingLobby()
 	copied := false

@@ -25,7 +25,7 @@ func garageFor(t *testing.T, earnings, banked int) (*Shell, *garagePage) {
 // can look inside the page the registry would have built.
 func showGarage(sh *Shell) *garagePage {
 	g := newGaragePage(sh)
-	sh.pager.stack = []pageFrame{{id: screenTitle}}
+	sh.pager.stack = append(sh.pager.stack, pageFrame{sh.screen, sh.pager.cur})
 	sh.showPage(pageGarage, g.page())
 	return g
 }
@@ -486,7 +486,7 @@ func TestDoneAndEscGoBackAndSave(t *testing.T) {
 		t.Fatalf("the car driven is the %s", sh.settings.Car.Name())
 	}
 	press(sh, navInput{Back: true})
-	if sh.screen != screenTitle || sh.onPage() {
+	if sh.screen != pageTitle || !sh.onPage() {
 		t.Errorf("esc left the garage for screen %d", sh.screen)
 	}
 	if LoadSettings().Car != sim.Van {
@@ -502,7 +502,7 @@ func TestDoneAndEscGoBackAndSave(t *testing.T) {
 		press(sh, navInput{Input: keyDown})
 	}
 	press(sh, navInput{Input: keyEnter})
-	if sh.screen != screenTitle {
+	if sh.screen != pageTitle {
 		t.Errorf("Done left the garage for screen %d", sh.screen)
 	}
 }

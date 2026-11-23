@@ -273,9 +273,9 @@ func (p *playPage) drawMulti(b playBox, vs map[string]rowView) {
 	role := vs["role"].Selected
 	host := rect(b.left, b.top, pw, ph)
 	join := rect(b.left+pw+16, b.top, pw, ph)
-	p.drawPanel(host, "Host a game", "it runs on this machine, on your map", !p.joining, role)
-	p.drawPanel(join, "Join a game", "you get the host's map, mode and weather", p.joining, role)
-	if p.joining {
+	p.drawPanel(host, "Host a game", "it runs on this machine, on your map", !p.s.joining, role)
+	p.drawPanel(join, "Join a game", "you get the host's map, mode and weather", p.s.joining, role)
+	if p.s.joining {
 		p.drawJoin(join, vs)
 		return
 	}
@@ -327,8 +327,7 @@ func (p *playPage) drawHostMap(r rl.Rectangle, v rowView) {
 	cards := p.cards()
 	locked := make([]bool, len(cards))
 	for i, c := range cards {
-		// Hosting a custom map is for the command line, so it is greyed too.
-		locked[i] = c.Locked || c.Custom
+		locked[i] = c.Locked
 	}
 	// The cell is ringed already, so the choices are not ringed again.
 	playSegments(x+14, y+32, 24, faceSmall, v.Options, v.Choice, locked, v.Selected, false)

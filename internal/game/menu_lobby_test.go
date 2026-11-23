@@ -119,8 +119,8 @@ func TestLobbyCancelLeavesTheSession(t *testing.T) {
 	if sh.net.Role() != netplay.Offline {
 		t.Errorf("cancel left the session as %v, want offline", sh.net.Role())
 	}
-	if sh.onPage() || sh.screen != screenTitle {
-		t.Errorf("cancel went to screen %v, want the title", sh.screen)
+	if sh.screen != pageTitle {
+		t.Errorf("cancel went to screen %v, want back to the title", sh.screen)
 	}
 }
 
@@ -133,7 +133,7 @@ func TestLobbyEnterOnCancelLeavesTheSession(t *testing.T) {
 	// A host has Copy first; Cancel is the one to the right.
 	sh.stepPage(navInput{Input: menu.Input{Right: true}})
 	sh.stepPage(navInput{Input: menu.Input{Select: true}})
-	if sh.net.Role() != netplay.Offline || sh.screen != screenTitle {
+	if sh.net.Role() != netplay.Offline || sh.screen != pageTitle {
 		t.Errorf("enter on Cancel: role %v, screen %v", sh.net.Role(), sh.screen)
 	}
 }
@@ -152,7 +152,7 @@ func TestLobbyErrorLeavesWithANotice(t *testing.T) {
 	if sh.notice != "the host went away" {
 		t.Errorf("notice %q", sh.notice)
 	}
-	if sh.onPage() || sh.screen != screenTitle {
+	if !sh.onPage() || sh.screen != pageTitle {
 		t.Errorf("error went to screen %v, want the title", sh.screen)
 	}
 }

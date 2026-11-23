@@ -47,18 +47,6 @@ func TestChallengeRetry(t *testing.T) {
 	}
 }
 
-func TestChallengeMenu(t *testing.T) {
-	var started scenario.Scenario
-	m := challengeMenu(scenario.Bests{}, func(s scenario.Scenario) { started = s }, func() {})
-	if len(m.Items) != len(scenario.All())+1 {
-		t.Fatalf("%d rows", len(m.Items))
-	}
-	m.Items[1].Action()
-	if started.ID != scenario.All()[1].ID {
-		t.Fatalf("started %q", started.ID)
-	}
-}
-
 func TestChallengeVerdict(t *testing.T) {
 	title, note := verdict(scenario.Outcome{Passed: true, Medal: scenario.Silver, Score: 5, Ghost: 6})
 	if title != "CHALLENGE: SILVER" || !strings.Contains(note, "5 against") {

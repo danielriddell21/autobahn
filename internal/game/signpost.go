@@ -32,8 +32,8 @@ var (
 	// signCard is the face of a card or a control; signTrack the groove a bar
 	// or a switch runs in; signRule an outline; signLift the fill behind the
 	// selected row.
-	signCard  = cardFace
-	signTrack = cardTrack
+	signCard  = rl.NewColor(20, 23, 28, 255)
+	signTrack = rl.NewColor(34, 38, 46, 255)
 	signRule  = menuRule
 	signLift  = rl.NewColor(26, 40, 56, 255)
 )
@@ -123,6 +123,13 @@ func roundness(r rl.Rectangle, radius float32) float32 {
 		return 0
 	}
 	return min(2*radius/short, 1)
+}
+
+// padlock draws a small closed lock with its top-left corner at x, y.
+func padlock(x, y int32, col rl.Color) {
+	rl.DrawRectangleLines(x+4, y, 10, 12, col)
+	rl.DrawRectangleLines(x+5, y+1, 8, 10, col)
+	rl.DrawRectangle(x, y+9, 18, 14, col)
 }
 
 // drawCard draws a card: the face, outlined, and ringed with the accent when
@@ -400,7 +407,7 @@ func (s *Shell) drawPage(dt float32) {
 	pg := s.pager.cur
 	w, h := int32(s.opts.Width), int32(s.opts.Height)
 	if pg.OverGame && s.game != nil {
-		s.game.drawFrozen(dt)
+		s.game.drawFrame()
 		rl.DrawRectangle(0, 0, w, h, menuVeil)
 	} else if !s.drawMenuDrive() { // the autopilot behind the menus: menu_drive.go
 		rl.ClearBackground(menuBackdrop)

@@ -358,3 +358,11 @@ func rowWindow(n, sel, fit int) (first, last int) {
 	first = min(max(sel-fit/2, 0), n-fit)
 	return first, first + fit
 }
+
+// onOff words a switch for a row's value.
+func onOff(b bool) string {
+	if b {
+		return "on"
+	}
+	return "off"
+}

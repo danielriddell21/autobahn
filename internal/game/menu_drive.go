@@ -143,7 +143,7 @@ func (s *Shell) menuDriveAllowed() bool {
 }
 
 // menuDriveBehind reports whether the page showing wants the drive behind it.
-// A page over a game never does, and nor does one before the registry.
+// A page over a game never does.
 func (s *Shell) menuDriveBehind() bool {
 	if !s.onPage() {
 		return false

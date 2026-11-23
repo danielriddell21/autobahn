@@ -83,11 +83,8 @@ func TestSkipGlidesToTheNextTimeOfDay(t *testing.T) {
 	}
 }
 
-func TestDayLengthsHaveNamesAndWrap(t *testing.T) {
+func TestDayLengthsHaveNames(t *testing.T) {
 	if DayFixed.Minutes() != 0 || DayFixed.String() != "fixed" || DayMedium.String() != "12 min" {
 		t.Error("day lengths are misnamed")
-	}
-	if cycleDayLength(DayFixed, -1) != DayLong || cycleDayLength(DayLong, 1) != DayFixed {
-		t.Error("day lengths should wrap")
 	}
 }

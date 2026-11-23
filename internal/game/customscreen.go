@@ -2,11 +2,6 @@ package game
 
 import (
 	"fmt"
-	"strings"
-
-	rl "github.com/gen2brain/raylib-go/raylib"
-
-	"github.com/danielriddell21/crucible/menu"
 
 	"github.com/danielriddell21/autobahn/internal/city"
 	"github.com/danielriddell21/autobahn/internal/custom"
@@ -16,22 +11,16 @@ import (
 	"github.com/danielriddell21/crucible/store"
 )
 
-// The custom map screen's state and rules, with no drawing in it: the menu that
-// shows it asks for its rows and sends it a press. It works on a [custom.Spec]
+// The custom map's state and rules, with no drawing in it: the custom map page
+// (menu_custom.go) shows it and sends it each press. It works on a [custom.Spec]
 // and keeps what the player has named in customs.json beside the settings.
-
-// customRow is one line of the screen.
-type customRow struct {
-	Label string
-	Value string
-}
 
 // customScreen is the editor.
 type customScreen struct {
 	spec    custom.Spec
 	presets custom.Presets
 	access  pack.Access
-	// Which row is selected; rows are laid out by rows.
+	// row is the row a press is for, one of the customRow constants.
 	row int
 }
 
@@ -44,7 +33,6 @@ const (
 	customRowCoast       = customRowFirstSlider + custom.NumSliders
 	customRowWeather     = customRowCoast + 1
 	customRowUnsupported = customRowWeather + 1
-	customNumRows        = customRowUnsupported + 1
 )
 
 // customPresetsPath is where the named custom maps live.
@@ -103,29 +91,6 @@ func (c *customScreen) sliderText(i int) string {
 	return fmt.Sprintf("%g%s", sl.Value(step), sl.Unit)
 }
 
-// Rows returns the screen's lines as they are drawn.
-func (c *customScreen) Rows() []customRow {
-	rows := make([]customRow, 0, customNumRows)
-	rows = append(rows,
-		customRow{"Starts from", c.spec.Base.Name()},
-		customRow{"Seed", fmt.Sprint(c.spec.Seed)})
-	for i, sl := range custom.Sliders {
-		rows = append(rows, customRow{sl.Name, c.sliderText(i)})
-	}
-	rows = append(rows,
-		customRow{"Coast", onOff(c.spec.Coast)},
-		customRow{"Weather", c.spec.Weather.String()},
-		customRow{"Allow unsupported", onOff(c.spec.Unsupported)})
-	return rows
-}
-
-func onOff(b bool) string {
-	if b {
-		return "on"
-	}
-	return "off"
-}
-
 // Adjust moves the selected row one press either way, dir being 1 or -1.
 func (c *customScreen) Adjust(dir int) {
 	switch r := c.row; {
@@ -162,11 +127,6 @@ func (c *customScreen) nextMap(dir int) city.Map {
 		}
 	}
 	return c.spec.Base
-}
-
-// Move selects another row.
-func (c *customScreen) Move(dir int) {
-	c.row = (c.row + dir + customNumRows) % customNumRows
 }
 
 // Flagged is whether the map as it stands is unsupported, which the HUD tags.
@@ -221,72 +181,4 @@ func nextPresetName(p custom.Presets) string {
 			return name
 		}
 	}
-}
-
-// customStatus words whether the map as it stands is one the game vouches for.
-func (c *customScreen) customStatus() string {
-	switch {
-	case c.Flagged():
-		return "UNSUPPORTED: outside what has been measured; nothing is banked"
-	default:
-		return "nothing is banked on a custom map"
-	}
-}
-
-// showCustom opens the custom map editor, a menu with a row for each of the
-// editor's lines and the actions below them.
-func (s *Shell) showCustom() {
-	s.screen, s.customNote = screenCustom, ""
-	cs := newCustomScreen(s.settings, s.access())
-	s.customEd = cs
-	m := &menu.Menu{
-		Title:    "CUSTOM MAP",
-		Subtitle: []string{"left and right adjust a row, enter on Play drives it"},
-	}
-	for i := range customNumRows {
-		move := func() { cs.row = i }
-		m.Items = append(m.Items, menu.Item{
-			Label: func() string {
-				r := cs.Rows()[i]
-				return fmt.Sprintf("%-20s %s", r.Label, r.Value)
-			},
-			Adjust: func(d int) { move(); cs.Adjust(d) },
-			Action: func() { move(); cs.Adjust(1) },
-		})
-	}
-	note := func(err error) {
-		s.customNote = ""
-		if err != nil {
-			s.customNote = err.Error()
-		}
-	}
-	m.Items = append(m.Items,
-		menu.Item{Label: func() string { return "Share code  " + cs.Code() }, Action: func() {}},
-		menu.Item{Label: text("Copy the code"), Action: func() { rl.SetClipboardText(cs.Code()); note(nil) }},
-		menu.Item{Label: text("Paste a code"), Action: func() { note(cs.Paste(strings.TrimSpace(rl.GetClipboardText()))) }},
-		menu.Item{Label: text("Save it by name"), Action: func() { note(cs.Save(nextPresetName(cs.presets))) }},
-		menu.Item{Label: func() string {
-			if s.customNote != "" {
-				return s.customNote
-			}
-			return cs.customStatus()
-		}, Action: func() {}},
-		menu.Item{Label: text("Play"), Action: func() {
-			if err := cs.Playable(); err != nil {
-				note(err)
-				return
-			}
-			cs.Remember(&s.settings)
-			s.customPlay = true
-			s.startGame(false)
-		}},
-		menu.Item{Label: text("Back"), Action: func() {
-			cs.Remember(&s.settings)
-			if err := s.settings.Save(); err != nil {
-				s.notice = err.Error()
-			}
-			s.showTitle()
-		}},
-	)
-	s.menu = m
 }

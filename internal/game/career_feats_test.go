@@ -115,27 +115,7 @@ func TestFeatFeedTakesDeltas(t *testing.T) {
 	}
 }
 
-func TestFeatRowsHideSecretsUntilEarned(t *testing.T) {
-	has := func(f feats.Feats, s string) bool {
-		for _, r := range featRows(f) {
-			if strings.Contains(r, s) {
-				return true
-			}
-		}
-		return false
-	}
-	if has(feats.Feats{}, "grand tour") || !has(feats.Feats{Unlocked: []string{"all-maps"}}, "grand tour") {
-		t.Error("hidden achievement shown too early or never")
-	}
-	if !has(feats.Feats{}, "first mile") {
-		t.Error("ordinary achievement missing")
-	}
-}
-
-func TestFeatSubtitleAndPack(t *testing.T) {
-	if got := featSubtitle(feats.Feats{}); !strings.Contains(got, "0 of") || !strings.Contains(got, "hidden") {
-		t.Errorf("subtitle = %q", got)
-	}
+func TestFeatPackOfTheCity(t *testing.T) {
 	if featPack(city.MapCity) != int(pack.Base) {
 		t.Error("the city is in the base game")
 	}

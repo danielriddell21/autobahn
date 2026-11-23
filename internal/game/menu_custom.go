@@ -18,7 +18,7 @@ import (
 
 // The custom map page (docs/menus.md, "Custom map"): a new face on
 // [customScreen], which keeps all the rules. Every press here goes through
-// customScreen.Adjust and its siblings, so what the old screen does and what
+// customScreen.Adjust and its siblings, so what the rules say and what
 // this one does cannot differ; this file decides which rows there are, how
 // they are grouped and how they read, and menu_custom_plan.go and
 // menu_custom_draw.go the plan beside them.
@@ -149,8 +149,7 @@ func (p *customPage) done() {
 	p.s.backPage()
 }
 
-// drive starts a drive on the map as it stands, by the way the old Play row
-// did, or says why it cannot.
+// drive starts a drive on the map as it stands, or says why it cannot.
 func (p *customPage) drive() {
 	if err := p.cs.Playable(); err != nil {
 		p.note = err.Error()

@@ -93,7 +93,7 @@ func settingsRows(s *Shell, leave func()) []menuRow {
 }
 
 // leaveSettingsPage saves the settings, pushes the live ones to the game and
-// goes back, as the old screen did.
+// goes back.
 func (s *Shell) leaveSettingsPage() {
 	if err := s.settings.Save(); err != nil {
 		s.notice = err.Error()

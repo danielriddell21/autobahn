@@ -15,13 +15,12 @@ import (
 // drawn over the frozen, dimmed scene (OverGame), and what it says is worked
 // out from the Game by plain functions below, so tests need no window.
 //
-// How to open it, for whoever links it from stepPlaying (#61): when escape is
-// pressed on a game that is not [Game.Networked], call s.openPage(pagePause)
-// in place of s.showPause(). In a networked game escape leaves through the
-// leave dialog (pageLeave) and this page is never offered: [pauseOffered] says
-// so, and a builder run anyway makes a page with nothing to resume. Call
-// [Game.notePeakSpeed] after each [Game.Step] while playing, or the top-speed
-// tile has nothing to show.
+// The shell opens it when esc is pressed on a game that is not
+// [Game.Networked] (Shell.escapeDrive). In a networked game esc leaves through
+// the leave dialog (pageLeave) and this page is never offered: [pauseOffered]
+// says so, and a builder run anyway makes a page with nothing to resume. The
+// shell calls [Game.notePeakSpeed] after each step of the game, which is what
+// the top-speed tile shows.
 
 var _ = registerPage(pagePause, newPausePage, hintsAdjust...)
 
@@ -221,7 +220,7 @@ func (s *Shell) pauseFoot() string {
 }
 
 // leavePause is what every way off the page does first: the quick settings
-// are written once, as the settings screen writes them when it closes.
+// are written once, as the settings page writes them when it closes.
 func (s *Shell) leavePause() {
 	if err := s.settings.Save(); err != nil {
 		s.notice = err.Error()

@@ -1,7 +1,6 @@
 package game
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/danielriddell21/autobahn/internal/city"
@@ -139,20 +138,5 @@ func TestASessionIsLockedOnlyByWhatThePlayerLacks(t *testing.T) {
 				t.Errorf("%s in the %s for a new player: locked = %v, want %v", m.Name(), k.Name(), err != nil, !base)
 			}
 		}
-	}
-}
-
-func TestACardSaysWhatIsHeldAndWhatIsOwed(t *testing.T) {
-	coast := pack.Of(pack.Coast)
-	held := cardFor(coast, pack.Access{Banked: coast.Price})
-	if !held.held || held.bounty != "" || held.progress != 1 || held.title != coast.Name {
-		t.Errorf("a held pack reads %+v", held)
-	}
-	owed := cardFor(coast, pack.Access{Banked: 1500})
-	if owed.held || !strings.Contains(owed.bounty, money(1500)) || !strings.Contains(owed.bounty, money(coast.Price)) {
-		t.Errorf("a locked pack reads %+v, want what is banked and what it costs", owed)
-	}
-	if owed.progress <= 0 || owed.progress >= 1 {
-		t.Errorf("progress toward a pack part paid for = %v", owed.progress)
 	}
 }

@@ -116,7 +116,7 @@ func TestPlayIsRegisteredAndOpens(t *testing.T) {
 	}
 	// esc goes back to where it was opened from.
 	playPress(sh, navInput{Back: true})
-	if sh.screen != screenTitle {
+	if sh.screen != pageTitle {
 		t.Errorf("esc went to %v", sh.screen)
 	}
 }
@@ -352,17 +352,76 @@ func TestPlayStartsThroughTheShell(t *testing.T) {
 		t.Errorf("challenges %v, custom %v", got.challenges, sh.customPlay)
 	}
 
-	choose(t, sh, p, "mode", 1)
+	choose(t, sh, p, "mode", 1) // multiplayer, still on the custom map
+	start()
+	if got.hosts != 1 || !sh.customPlay {
+		t.Errorf("hosted %d times, custom %v: want the custom map hosted", got.hosts, sh.customPlay)
+	}
 	choose(t, sh, p, "map", 1) // the city, from custom
 	start()
-	if got.hosts != 1 {
-		t.Errorf("hosted %d times", got.hosts)
+	if got.hosts != 2 || sh.customPlay {
+		t.Errorf("hosted %d times, custom %v: want the city hosted", got.hosts, sh.customPlay)
 	}
+	choose(t, sh, p, "map", -1)
 	choose(t, sh, p, "role", 1)
 	sh.joinAddr = "10.0.0.2"
 	start()
-	if got.joins != 1 {
-		t.Errorf("joined %d times", got.joins)
+	if got.joins != 1 || sh.customPlay {
+		t.Errorf("joined %d times, custom %v: a joiner builds the host's world", got.joins, sh.customPlay)
+	}
+}
+
+func TestPlayRemembersTheMode(t *testing.T) {
+	sh := testShell(t)
+	p, _ := openPlay(t, sh)
+	if p.mode != playFree {
+		t.Fatalf("a first run opens on %v, want free drive", p.mode)
+	}
+	choose(t, sh, p, "mode", 1)
+	choose(t, sh, p, "chal", 2)
+	p.list.Select("back")
+	playPress(sh, navInput{Input: keyEnter})
+	if sh.screen != pageTitle {
+		t.Fatalf("Back went to %v", sh.screen)
+	}
+	stored := LoadSettings()
+	want := p.scenarios[2]
+	if stored.PlayMode != playChallenge || stored.Challenge != want.ID {
+		t.Errorf("stored mode %v, challenge %q; want a challenge, %q", stored.PlayMode, stored.Challenge, want.ID)
+	}
+	r, _ := sh.pager.cur.List.Row(titlePlay)
+	if got := r.view(false).Value; got != "challenge, "+want.Name {
+		t.Errorf("the title's Play row says %q", got)
+	}
+
+	// The page opens again where it was left.
+	p, _ = openPlay(t, sh)
+	if p.mode != playChallenge || p.chal != 2 {
+		t.Errorf("reopened on mode %v, challenge %d", p.mode, p.chal)
+	}
+	choose(t, sh, p, "mode", 1)
+	r, _ = sh.pager.stack[0].pg.List.Row(titlePlay)
+	if got := r.view(false).Value; got != "multiplayer, host chase" {
+		t.Errorf("hosting: the title's Play row says %q", got)
+	}
+	choose(t, sh, p, "role", 1)
+	sh.joinAddr = "10.0.0.2"
+	if got := r.view(false).Value; got != "multiplayer, join 10.0.0.2" {
+		t.Errorf("joining: the title's Play row says %q", got)
+	}
+}
+
+func TestPlayModeIsSanitised(t *testing.T) {
+	s := DefaultSettings()
+	s.PlayMode, s.Challenge = 7, "no-such-challenge"
+	s.clamp()
+	if s.PlayMode != playFree || s.Challenge != "" {
+		t.Errorf("clamp left mode %v, challenge %q", s.PlayMode, s.Challenge)
+	}
+	s.PlayMode, s.Challenge = playMulti, scenario.All()[1].ID
+	s.clamp()
+	if s.PlayMode != playMulti || s.Challenge != scenario.All()[1].ID {
+		t.Errorf("clamp spoilt mode %v, challenge %q", s.PlayMode, s.Challenge)
 	}
 }
 
@@ -371,11 +430,13 @@ func TestPlayHostAndJoinValidation(t *testing.T) {
 	p, got := openPlay(t, sh)
 	choose(t, sh, p, "mode", 2)
 
-	// A custom map is not hosted from the menus: the shell's hosting takes
-	// the settings' map only.
+	// A custom map can be hosted: it goes to the joiner as its share code.
 	choose(t, sh, p, "map", -1)
-	if why := goRow(t, p).Disabled; !strings.Contains(why, "-custom") {
-		t.Errorf("hosting a custom map: %q", why)
+	if why := goRow(t, p).Disabled; why != "" {
+		t.Errorf("hosting a custom map is refused: %q", why)
+	}
+	if got := p.summary(); !strings.Contains(got, "banks nothing") {
+		t.Errorf("hosting a custom map does not say it banks nothing: %q", got)
 	}
 	choose(t, sh, p, "map", 1)
 	if why := goRow(t, p).Disabled; why != "" {
@@ -495,7 +556,7 @@ func TestPlayBackSavesTheChoices(t *testing.T) {
 	choose(t, sh, p, "time", 1)
 	p.list.Select("back")
 	playPress(sh, navInput{Input: keyEnter})
-	if sh.screen != screenTitle {
+	if sh.screen != pageTitle {
 		t.Errorf("Back went to %v", sh.screen)
 	}
 	got := LoadSettings()

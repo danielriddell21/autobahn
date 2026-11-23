@@ -33,7 +33,7 @@ func (t TimeOfDay) hour() float32 {
 // still.
 type DayLength int
 
-// The day lengths the settings screen offers.
+// The day lengths the settings page offers.
 const (
 	DayFixed DayLength = iota
 	DayShort
@@ -62,11 +62,6 @@ func (d DayLength) String() string {
 		return "fixed"
 	}
 	return strconv.Itoa(int(d.Minutes())) + " min"
-}
-
-// cycleDayLength steps through the day lengths, wrapping at both ends.
-func cycleDayLength(d DayLength, dir int) DayLength {
-	return DayLength((int(d) + dir + int(numDayLengths)) % int(numDayLengths))
 }
 
 // skipSeconds is how long T takes to glide to the next time of day.

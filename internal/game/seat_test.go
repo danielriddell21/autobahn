@@ -144,18 +144,13 @@ func TestAnInputIsSmallOnTheWire(t *testing.T) {
 	}
 }
 
-func TestTheModesCycleAndName(t *testing.T) {
+func TestTheModesAreNamed(t *testing.T) {
 	seen := map[string]bool{}
-	m := ModeChase
-	for range numNetModes {
+	for m := range numNetModes {
 		seen[m.String()] = true
-		m = cycleNetMode(m, 1)
 	}
-	if m != ModeChase || len(seen) != int(numNetModes) {
-		t.Errorf("stepping forward through the modes ended at %v having named %v", m, seen)
-	}
-	if cycleNetMode(ModeChase, -1) != ModeCoopCar {
-		t.Error("stepping back from the first mode did not wrap")
+	if len(seen) != int(numNetModes) {
+		t.Errorf("the modes are named %v, want a name each", seen)
 	}
 	if ModeChase.Coop() || !ModeCoopCars.Coop() || !ModeCoopCar.Coop() || ModeCoopCars.SharedCar() || !ModeCoopCar.SharedCar() {
 		t.Error("the modes disagree about who is on a team and who shares a car")

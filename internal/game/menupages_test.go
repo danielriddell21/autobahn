@@ -20,6 +20,15 @@ func testShell(t *testing.T) *Shell {
 	return sh
 }
 
+// allPages is every page id, in order.
+func allPages() []screen {
+	out := make([]screen, 0, pageEnd-pageTitle)
+	for id := pageTitle; id < pageEnd; id++ {
+		out = append(out, id)
+	}
+	return out
+}
+
 // stubsOnly empties the registry until the test ends, so every page is its
 // stub and the registry's own rules can be tested whatever pages are built.
 func stubsOnly(t *testing.T) {
@@ -39,7 +48,7 @@ func registerForTest(t *testing.T, id screen, build pageBuilder, hints ...keymap
 }
 
 func TestEveryPageIDHasAScreen(t *testing.T) {
-	if isPage(screenTitle) || isPage(screenCustom) || isPage(pageEnd) {
+	if isPage(screenPlaying) || isPage(pageEnd) || !isPage(pageTitle) {
 		t.Fatal("isPage takes in ids that are not pages")
 	}
 	sh := testShell(t)
@@ -106,7 +115,7 @@ func TestRegisteringBadlyPanics(t *testing.T) {
 		f()
 	}
 	panics("registering twice", func() { registerPage(id, build) })
-	panics("registering an old screen", func() { registerPage(screenTitle, build) })
+	panics("registering the drive", func() { registerPage(screenPlaying, build) })
 	panics("registering past the end", func() { registerPage(pageEnd, build) })
 	panics("registering no builder", func() { registerPage(pageGarage, nil) })
 	if _, ok := pages[pageGarage]; ok {
@@ -152,10 +161,10 @@ func TestPagesGoBackTheWayTheyCame(t *testing.T) {
 		t.Errorf("esc from the garage gave %v", sh.screen)
 	}
 
-	// The stub's Back row is the same as esc: back to the old title screen,
-	// rebuilt, with no page showing.
+	// The stub's Back row is the same as esc: back to the title page it was
+	// opened from.
 	sh.stepPage(navInput{Input: keyEnter})
-	if sh.screen != screenTitle || sh.onPage() || sh.menu.Title != "AUTOBAHN" {
+	if sh.screen != pageTitle || !sh.onPage() || len(sh.pager.stack) != 0 {
 		t.Errorf("back from play gave %v (on a page: %v)", sh.screen, sh.onPage())
 	}
 
@@ -163,26 +172,35 @@ func TestPagesGoBackTheWayTheyCame(t *testing.T) {
 	sh.openPage(pageCareer)
 	sh.pager.stack = nil
 	sh.backPage()
-	if sh.screen != screenTitle || sh.onPage() {
+	if sh.screen != pageTitle || !sh.onPage() {
 		t.Errorf("back from a page with nothing behind it gave %v", sh.screen)
 	}
 }
 
-func TestOpeningAPageFromAnOldScreenStartsTheTrailAgain(t *testing.T) {
+func TestOpeningAPageFromTheDriveStartsTheTrailAgain(t *testing.T) {
 	stubsOnly(t)
 	sh := testShell(t)
 	sh.openPage(pagePlay)
 	sh.openPage(pageGarage)
-	// A page hands over to one of the screens before the registry, and that
-	// opens another page.
-	sh.showSettings(screenTitle)
-	sh.openPage(pageCareer)
-	if len(sh.pager.stack) != 1 || sh.pager.stack[0].id != screenSettings {
-		t.Fatalf("the trail is %v, want the settings screen alone", sh.pager.stack)
+	// A drive starts, and a page is opened over it.
+	sh.game = bareGame(Options{})
+	sh.pager, sh.screen = pager{}, screenPlaying
+	sh.openPage(pagePause)
+	sh.openPage(pageSettings)
+	if len(sh.pager.stack) != 2 || sh.pager.stack[0].id != screenPlaying {
+		t.Fatalf("the trail is %v, want the drive and the pause page", sh.pager.stack)
 	}
 	sh.stepPage(navInput{Back: true})
-	if sh.screen != screenSettings || sh.onPage() {
-		t.Errorf("back went to %v", sh.screen)
+	sh.stepPage(navInput{Back: true})
+	if sh.screen != screenPlaying || sh.onPage() || len(sh.pager.stack) != 0 {
+		t.Errorf("back went to %v, trail %v", sh.screen, sh.pager.stack)
+	}
+	// A trail back to a drive that has gone ends on the title.
+	sh.openPage(pagePause)
+	sh.game = nil
+	sh.stepPage(navInput{Back: true})
+	if sh.screen != pageTitle || !sh.onPage() {
+		t.Errorf("back to no drive went to %v", sh.screen)
 	}
 }
 

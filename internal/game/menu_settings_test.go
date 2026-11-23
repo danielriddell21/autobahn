@@ -45,7 +45,7 @@ func TestSettingsPageStoresEachSetting(t *testing.T) {
 		t.Error("volume did not drop")
 	}
 	settingsPress(t, pg, "viewpoint", 1)
-	if set.Camera != cycleCamera(CameraChase, 1) {
+	if set.Camera != CameraChase+1 {
 		t.Errorf("camera = %v", set.Camera)
 	}
 	settingsPress(t, pg, "aicamera", -1)
@@ -62,7 +62,7 @@ func TestSettingsPageStoresEachSetting(t *testing.T) {
 		t.Errorf("police = %d", set.Police)
 	}
 	settingsPress(t, pg, "daylength", 1)
-	if set.DayLength != cycleDayLength(DayMedium, 1) {
+	if set.DayLength != DayMedium+1 {
 		t.Errorf("day length = %v", set.DayLength)
 	}
 	settingsPress(t, pg, "jobsauto", 1)

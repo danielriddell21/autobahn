@@ -20,7 +20,7 @@ const settingsFile = "settings.json"
 // appName is the directory the settings live in.
 const appName = "autobahn"
 
-// Settings is what the settings screen adjusts and the store remembers between
+// Settings is what the menus adjust and the store remembers between
 // sessions. It is deliberately small: the things a player changes once and
 // expects to stay changed, not every flag the command line offers.
 type Settings struct {
@@ -51,7 +51,7 @@ type Settings struct {
 	// Map is the place a new session is driven in.
 	Map city.Map `json:"map"`
 	// UnlockAll offers every pack without it being earned. There is no row
-	// for it on the settings screen: it is for whoever opens the file.
+	// for it on the settings page: it is for whoever opens the file.
 	UnlockAll bool `json:"unlockAll"`
 	// AutopilotJobs lets a job continue, unpaid, while the autopilot drives.
 	AutopilotJobs bool `json:"autopilotJobs"`
@@ -65,9 +65,14 @@ type Settings struct {
 	// Custom is the share code of the custom map last edited, or empty. The
 	// named ones are kept apart, in customs.json.
 	Custom string `json:"custom,omitempty"`
-	// HostMode is what the host row on the title screen starts: a chase or one
-	// of the co-op games.
+	// HostMode is what hosting from the Play page starts: a chase or one of
+	// the co-op games.
 	HostMode NetMode `json:"hostMode,omitempty"`
+	// PlayMode is the way of starting a drive the Play page was last left on:
+	// free drive (the zero value), a challenge or multiplayer. Challenge is the
+	// ID of the challenge it last chose, or empty.
+	PlayMode  playMode `json:"playMode,omitempty"`
+	Challenge string   `json:"challenge,omitempty"`
 }
 
 // MenuDrive reports whether the autopilot drives behind the menus. On unless
@@ -86,7 +91,7 @@ func DefaultSettings() Settings {
 	}
 }
 
-// The ranges the settings screen adjusts within, and how far one press moves.
+// The ranges the settings page adjusts within, and how far one press moves.
 const (
 	trafficStep, trafficMin, trafficMax = 10, 0, 200
 	policeStep, policeMin, policeMax    = 1, 0, 40
@@ -134,6 +139,12 @@ func (s *Settings) clampStored() {
 	}
 	if _, err := custom.Decode(s.Custom); err != nil {
 		s.Custom = ""
+	}
+	if s.PlayMode < 0 || s.PlayMode >= numPlayModes {
+		s.PlayMode = playFree
+	}
+	if _, ok := scenarioByID(s.Challenge); !ok {
+		s.Challenge = ""
 	}
 }
 
@@ -207,7 +218,7 @@ func (s Settings) applyTo(o Options) Options {
 // It is what a two-player chase uses. Both machines have to build the same
 // city with the same traffic in it — the snapshot names cars by their index,
 // so an extra car at one end points every pose at the wrong vehicle — and
-// neither player can see the other's settings screen. The world size therefore
+// neither player can see the other's settings. The world size therefore
 // comes from the shared defaults or from a command line the two players agreed
 // on, never from a preference one of them set alone.
 func (s Settings) applyViewTo(o Options) Options {

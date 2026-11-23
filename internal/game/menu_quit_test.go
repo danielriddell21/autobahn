@@ -36,6 +36,7 @@ func TestQuitDialog(t *testing.T) {
 
 func TestLeaveDialog(t *testing.T) {
 	sh := testShell(t)
+	sh.game = bareGame(Options{})
 	sh.screen = screenPlaying
 	sh.openPage(pageLeave)
 	pg := sh.pager.cur
@@ -54,8 +55,9 @@ func TestLeaveDialog(t *testing.T) {
 	if r.Label != "Leave" {
 		t.Errorf("label %q", r.Label)
 	}
+	sh.game = nil // a bare game has nothing on the GPU to close
 	r.Activate()
-	if sh.screen != screenTitle || sh.game != nil || sh.onPage() {
+	if sh.screen != pageTitle || sh.game != nil || !sh.onPage() {
 		t.Errorf("Leave: screen %d, game %v", sh.screen, sh.game)
 	}
 	if sh.quit {

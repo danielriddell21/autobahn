@@ -157,11 +157,29 @@ func (p *customPage) drawRows(r rl.Rectangle) {
 
 // drawPlan draws the plan of the map, tinted for its season.
 func (p *customPage) drawPlan(r rl.Rectangle) {
-	ink := planInkFor(p.cs.spec.Season())
-	rounded(r, 12, ink.Ground)
-	pl := p.plan
-	if pl == nil {
+	v, ok := drawPlanPicture(r, p.plan, p.cs.spec.Season(), p.cache.Stale(p.cs.spec))
+	if !ok {
 		return
+	}
+	x, y := int32(r.X)+14, int32(r.Y)+12
+	planChip(x, y, fmt.Sprintf("PLAN  -  %.1f KM ACROSS", v.across()), signInk)
+	season := p.cs.spec.Season().Name()
+	sw := faceChip.width(strings.ToUpper(season)) + 16
+	planChip(int32(r.X+r.Width)-14-sw, y, season, signInk)
+	if p.cs.Flagged() {
+		planChip(x, int32(r.Y+r.Height)-32, "UNSUPPORTED  -  past what the gate has measured", signAmber)
+	}
+}
+
+// drawPlanPicture draws a plan into r, tinted for its season: the ground in
+// the season given until there is a plan, then the plan, dimmed while stale.
+// It returns the view the plan was drawn with, and false before there is one.
+// The custom map page and the title page's card both draw with it.
+func drawPlanPicture(r rl.Rectangle, pl *customPlan, season city.Season, stale bool) (planView, bool) {
+	ink := planInkFor(season)
+	rounded(r, 12, ink.Ground)
+	if pl == nil {
+		return planView{}, false
 	}
 	v := newPlanView(pl, r)
 	rl.BeginScissorMode(int32(r.X), int32(r.Y), int32(r.Width), int32(r.Height))
@@ -194,19 +212,11 @@ func (p *customPage) drawPlan(r rl.Rectangle) {
 		rl.DrawCircleV(at, rad, planMain)
 		rl.DrawCircleV(at, rad*0.55, ink.Open)
 	}
-	if p.cache.Stale(p.cs.spec) {
+	if stale {
 		rl.DrawRectangleRec(r, rl.ColorAlpha(ink.Ground, 0.35))
 	}
 	rl.EndScissorMode()
-
-	x, y := int32(r.X)+14, int32(r.Y)+12
-	planChip(x, y, fmt.Sprintf("PLAN  -  %.1f KM ACROSS", v.across()), signInk)
-	season := p.cs.spec.Season().Name()
-	sw := faceChip.width(strings.ToUpper(season)) + 16
-	planChip(int32(r.X+r.Width)-14-sw, y, season, signInk)
-	if p.cs.Flagged() {
-		planChip(x, int32(r.Y+r.Height)-32, "UNSUPPORTED  -  past what the gate has measured", signAmber)
-	}
+	return v, true
 }
 
 // planChip draws a tag on the plan, on a dark pill so it reads over any map.

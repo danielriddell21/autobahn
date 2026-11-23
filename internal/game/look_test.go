@@ -7,19 +7,13 @@ import (
 	"github.com/danielriddell21/autobahn/internal/sim"
 )
 
-func TestTimesOfDayHaveNamesAndWrap(t *testing.T) {
+func TestTimesOfDayHaveNames(t *testing.T) {
 	names := map[string]bool{}
 	for tod := TimeDay; tod < NumTimes; tod++ {
 		if tod.String() == "" || names[tod.String()] {
 			t.Errorf("time %d is called %q, which is empty or already taken", tod, tod.String())
 		}
 		names[tod.String()] = true
-	}
-	if got := cycleTime(TimeDawn, 1); got != TimeDay {
-		t.Errorf("the time after dawn is %v, want day", got)
-	}
-	if got := cycleTime(TimeDay, -1); got != TimeDawn {
-		t.Errorf("the time before day is %v, want dawn", got)
 	}
 }
 

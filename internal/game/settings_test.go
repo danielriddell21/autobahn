@@ -121,15 +121,6 @@ func TestCameraModeNames(t *testing.T) {
 	}
 }
 
-func TestCycleCameraWraps(t *testing.T) {
-	if got := cycleCamera(CameraChase, -1); got != numCameraModes-1 {
-		t.Errorf("stepping back from the first = %v, want the last", got)
-	}
-	if got := cycleCamera(numCameraModes-1, 1); got != CameraChase {
-		t.Errorf("stepping past the last = %v, want the first", got)
-	}
-}
-
 func TestMasterVolume(t *testing.T) {
 	if got := masterVolume(Settings{Volume: 0.5}); got != 0.5 {
 		t.Errorf("volume = %v, want 0.5", got)

@@ -33,23 +33,6 @@ func TestCycleBodyStepsOffACarThatIsNotOffered(t *testing.T) {
 	}
 }
 
-func TestCycleMapVisitsEveryMapAndWraps(t *testing.T) {
-	// The values stand for maps; cycling does not care whether they exist.
-	offered := []city.Map{4, 7, 9}
-	if got := cycleMap(offered, 9, 1); got != 4 {
-		t.Errorf("past the last map gave %v, want the first", got)
-	}
-	if got := cycleMap(offered, 4, -1); got != 9 {
-		t.Errorf("before the first map gave %v, want the last", got)
-	}
-	if got := cycleMap(offered, 5, 1); got != 4 {
-		t.Errorf("stepping from a map not on offer gave %v, want the first that is", got)
-	}
-	if got := cycleMap(nil, 5, 1); got != 5 {
-		t.Errorf("stepping with nothing on offer moved to %v", got)
-	}
-}
-
 func TestMapNamesParseBack(t *testing.T) {
 	for _, name := range MapNames() {
 		if _, ok := city.ParseMap(name); !ok {

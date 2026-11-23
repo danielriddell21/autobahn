@@ -2,57 +2,34 @@ package game
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 
-	"github.com/danielriddell21/crucible/geom"
 	"github.com/danielriddell21/crucible/menu"
 	"github.com/danielriddell21/crucible/netplay"
 
-	"github.com/danielriddell21/autobahn/internal/autopilot"
 	"github.com/danielriddell21/autobahn/internal/city"
 	"github.com/danielriddell21/autobahn/internal/custom"
 	"github.com/danielriddell21/autobahn/internal/job"
 	"github.com/danielriddell21/autobahn/internal/pack"
 	"github.com/danielriddell21/autobahn/internal/scenario"
+	"github.com/danielriddell21/autobahn/internal/shop"
 	"github.com/danielriddell21/autobahn/internal/sim"
 	"github.com/danielriddell21/autobahn/internal/weather"
 )
 
-// screen is what the window is currently showing.
+// screen is what the window is showing: the drive, or one of the pages of the
+// screen registry (menupages.go). The zero value is the title page.
 type screen int
 
-const (
-	// screenTitle is the front page: play, host, join, settings, quit.
-	screenTitle screen = iota
-	// screenPlaying hands the window to the game.
-	screenPlaying
-	// screenPaused is the in-game menu, over a frozen scene.
-	screenPaused
-	// screenSettings adjusts the stored preferences, reachable from either
-	// the title screen or the pause menu.
-	screenSettings
-	// screenLobby waits for the other player, hosting or joining.
-	screenLobby
-	// screenJoin takes the address to connect to.
-	screenJoin
-	// screenGarage chooses the player's car, from the title screen or the
-	// pause menu.
-	screenGarage
-	// screenPacks lists the packs and how far the player is toward each.
-	screenPacks
-	// screenShop lists what earnings can buy.
-	screenShop
-	// screenChallenges lists the scenarios to drive against the autopilot's ghost.
-	screenChallenges
-	// screenCustom edits the custom map.
-	screenCustom
-)
+// screenPlaying hands the window to the game. It is the one screen that is not
+// a page.
+const screenPlaying screen = -1
 
-// Shell is the menu layer around a session: the title screen a run opens on,
-// the pause menu, the settings screen, and the multiplayer lobby.
+// Shell is the menu layer around a session: the pages of the screen registry
+// (menupages.go, one menu_*.go file each), the drive they start, and the menu
+// drive behind them.
 //
 // It owns the things that outlive a single game. The network session is the
 // important one: a lobby exists precisely so a player can start hosting before
@@ -66,40 +43,40 @@ type Shell struct {
 	career Career
 
 	net *netplay.Session[Snapshot, Input]
-	// hostMode is what the host row on the title screen will start.
+	// hostMode is what hosting from the Play page will start.
 	hostMode NetMode
 	screen   screen
-	prev     screen // where the settings screen returns to
-	menu     *menu.Menu
 	game     *Game
 	// drive is the autopilot driving behind the menus, never s.game, so nothing
 	// it does reaches collect; see menu_drive.go.
 	drive menuDrive
 	// showroom is the garage's turntable.
 	showroom showroom
+	// titlePlan is the picture of the map on the title page's card.
+	titlePlan planCache
 
 	// feedFeats turns the running drive's totals into what the achievements are
 	// fed, and is renewed with each session.
 	feedFeats featFeed
 	// customPlay says the next game is on the custom map in the settings, and
-	// challenge that it is that scenario; both are cleared on the title screen.
+	// challenge that it is that scenario; both are cleared on the title page.
 	customPlay bool
 	challenge  *scenario.Scenario
-	// customEd is the custom map screen's editor, and customNote its last message.
-	customEd   *customScreen
-	customNote string
 
 	// pager is the page from the screen registry that is showing, if one is,
 	// and what esc goes back through; see menupages.go.
 	pager pager
 
-	joinAddr string // the address being typed on screenJoin
-	notice   string // the last thing that went wrong, shown under the title
-	quit     bool
+	joinAddr string // the address typed on the Play page's join panel
+	// joining is whether the Play page's multiplayer joins rather than hosts.
+	// Like the address it lasts the session and is not stored.
+	joining bool
+	notice  string // the last thing that went wrong, shown under the title
+	quit    bool
 }
 
 // NewShell builds the menu layer for a session, loading the player's stored
-// settings.
+// settings. It opens on the title page.
 func NewShell(opts Options) *Shell {
 	set := LoadSettings()
 	career, migrated := readCareer(set)
@@ -124,8 +101,16 @@ func NewShell(opts Options) *Shell {
 		}
 	}
 	s.settings.keepTo(s.holdings())
-	s.showTitle()
+	s.goTitle()
 	return s
+}
+
+// goTitle shows the title page with nothing behind it to go back to. It is
+// where every drive, failed start and lobby ends; the notice, if there is one,
+// stays to be read there.
+func (s *Shell) goTitle() {
+	s.pager = pager{}
+	s.showPage(pageTitle, s.buildPage(pageTitle))
 }
 
 // Close releases whatever the shell is holding.
@@ -201,12 +186,16 @@ func (s *Shell) collect() {
 	before := s.access()
 	unlocked := s.career.Bank(earned)
 	s.saveCareer()
+	var news []pack.Pack
 	for _, p := range unlocked {
 		// A pack the player already had by bypass is not news.
 		if !before.Has(p.ID) {
 			g.Announce(strings.ToUpper(p.Name)+" PACK UNLOCKED", p.Blurb)
+			news = append(news, p)
 		}
 	}
+	// The title's Career row says NEW until the career page has been seen.
+	markNewPacks(news)
 }
 
 // saveCareer writes the career, telling the player when it will not stick.
@@ -240,48 +229,63 @@ func (s *Shell) collectFeats(earned int) {
 // is a score and not a drive.
 func (g *Game) banks() bool { return custom.Banks(g.opts.Custom) && g.chal == nil }
 
+// stepPlaying runs a frame of the drive. Esc leaves the drive for a page: the
+// pause page, or in a networked game the leave dialog, under which the game
+// runs on (stepBehindPage).
 func (s *Shell) stepPlaying(dt float32) {
-	if rl.IsKeyPressed(rl.KeyEscape) {
-		// There is no pausing a game somebody else is in. A host that stops
-		// simulating strands the other player and a joiner that stops sending
-		// hands their car back to the simulation, so escape leaves the chase
-		// rather than pretending to freeze it.
-		if s.game.Networked() {
-			s.endGame()
-			return
-		}
-		// Escape shuts the job menu, if it is open, before it pauses: Step does it.
-		if s.game.jobMenu == nil {
-			s.showPause()
-			return
-		}
+	if rl.IsKeyPressed(rl.KeyEscape) && s.escapeDrive() {
+		return
 	}
 	if s.game.chal != nil && rl.IsKeyPressed(rl.KeyF5) {
 		s.retryChallenge()
 		return
 	}
 	s.game.Step(dt)
+	s.game.notePeakSpeed() // for the pause page's top speed: menu_pause.go
 	s.collect()
 }
 
-func (s *Shell) stepMenu(dt float32) {
+// escapeDrive is esc on the drive, and reports whether it took the window from
+// the game. A game somebody else is in has no pause: a host that stops
+// simulating strands the other player and a joiner that stops sending hands
+// their car back to the simulation, so esc asks whether to leave it instead.
+// Esc shuts the job menu, if it is open, before it pauses; Step does that.
+func (s *Shell) escapeDrive() bool {
 	switch {
-	case s.onPage():
-		// A screen from the registry (menupages.go) reads its own keys. The
-		// cases after it are the screens that came before the registry.
-		s.stepPage(pollNav())
-	case s.screen == screenJoin:
-		s.editAddress()
-	case s.screen == screenLobby:
-		s.watchLobby()
+	case s.game.Networked():
+		s.openPage(pageLeave)
+	case s.game.jobMenu == nil:
+		s.openPage(pagePause)
 	default:
-		s.menu.Update(pollMenu())
+		return false
 	}
+	return true
+}
+
+// stepMenu runs a frame of the page showing: its keys, the game or menu drive
+// behind it, and the drawing.
+func (s *Shell) stepMenu(dt float32) {
+	s.stepPage(pollNav())
 	if s.quit || s.screen == screenPlaying {
 		return
 	}
+	s.stepBehindPage(dt)
 	s.stepMenuDrive(dt) // the autopilot behind the menus: menu_drive.go
 	s.drawScreen(dt)
+}
+
+// stepBehindPage keeps a networked game going while a page is over it, which
+// is only ever the leave dialog. The other player's game must neither freeze
+// nor time out while this one decides, so the world, the session and the sound
+// advance as on the drive, with the keys left to the dialog; the page draws the
+// scene behind itself (drawPage). A single-player game stays paused.
+func (s *Shell) stepBehindPage(dt float32) {
+	if s.game == nil || !s.game.Networked() {
+		return
+	}
+	s.game.advanceHandsOff(dt)
+	s.game.notePeakSpeed()
+	s.collect()
 }
 
 // pollMenu reads the family's conventional menu bindings from raylib. crucible
@@ -305,224 +309,11 @@ func pollMenu() menu.Input {
 	}
 }
 
-func (s *Shell) showTitle() {
-	s.screen = screenTitle
-	s.customPlay, s.challenge = false, nil
-	s.menu = &menu.Menu{
-		Title:    "AUTOBAHN",
-		Subtitle: s.titleSubtitle(),
-		Items: s.withShop([]menu.Item{
-			{Label: text("Drive"), Action: func() { s.startGame(false) }},
-			{Label: text("Autopilot"), Action: func() { s.startGame(true) }},
-			{
-				Label:  func() string { return "Map: " + s.settings.Map.Name() },
-				Adjust: s.chooseMap,
-				Action: func() { s.chooseMap(1) },
-			},
-			{
-				Label:  func() string { return "Host: " + s.hostMode.String() },
-				Adjust: func(d int) { s.hostMode = cycleNetMode(s.hostMode, d) },
-				Action: s.hostChase,
-			},
-			{Label: text("Join a chase"), Action: s.showJoin},
-			{Label: text("Challenges"), Action: s.showChallenges},
-			{Label: text("Custom map"), Action: s.showCustom},
-			{Label: text("Garage"), Action: func() { s.showGarage(screenTitle) }},
-			{Label: text("Packs"), Action: s.showPacks},
-			{Label: text("Achievements"), Action: s.showFeats},
-			{Label: text("Settings"), Action: func() { s.showSettings(screenTitle) }},
-			{Label: text("Quit"), Action: func() { s.quit = true }},
-		}),
-	}
-}
-
-// withShop puts the Shop row after Packs. A player who has bypassed the
-// prices has nothing to buy, so the row is left out.
-func (s *Shell) withShop(items []menu.Item) []menu.Item {
-	if s.access().Bypass {
-		return items
-	}
-	row := menu.Item{Label: text("Shop"), Action: func() { s.showShop(0) }}
-	for i, it := range items {
-		if it.Label() == "Packs" {
-			return slices.Insert(items, i+1, row)
-		}
-	}
-	return items
-}
-
-// chooseMap steps the title screen's map through the ones the player holds.
-func (s *Shell) chooseMap(dir int) {
-	s.settings.Map = cycleMap(s.access().Maps(), s.settings.Map, dir)
-}
-
-// showPacks lists the packs: what each adds, and either that it is held or
-// how much more has to be banked. The screen is drawn as cards; the menu
-// behind it holds only the way back.
-func (s *Shell) showPacks() {
-	s.screen = screenPacks
-	s.menu = &menu.Menu{
-		Title: "PACKS",
-		Items: []menu.Item{{Label: text("Back"), Action: s.showTitle}},
-	}
-}
-
-func (s *Shell) titleSubtitle() []string {
-	sub := []string{"a british driving game with a camera-driven autopilot"}
-	if s.notice != "" {
-		sub = append(sub, s.notice)
-	}
-	return sub
-}
-
-func (s *Shell) showPause() {
-	s.screen = screenPaused
-	s.menu = &menu.Menu{
-		Title: "PAUSED",
-		Items: []menu.Item{
-			{Label: text("Resume"), Action: s.resume},
-			{Label: text("Garage"), Action: func() { s.showGarage(screenPaused) }},
-			{Label: text("Settings"), Action: func() { s.showSettings(screenPaused) }},
-			{Label: text("Restart"), Action: func() { s.startGame(s.game.Autopilot()) }},
-			{Label: text("Abandon the drive"), Action: s.endGame},
-		},
-	}
-}
-
-func (s *Shell) showSettings(from screen) {
-	s.prev, s.screen = from, screenSettings
-	set := &s.settings
-	s.menu = &menu.Menu{
-		Title:    "SETTINGS",
-		Subtitle: []string{"left and right adjust, enter goes back"},
-		Items: []menu.Item{
-			{
-				Label:  func() string { return "Volume        " + menu.Bar(set.Volume) },
-				Adjust: func(d int) { set.Volume = geom.Clamp(set.Volume+float64(d)*volumeStep, 0, 1) },
-			},
-			{
-				Label:  func() string { return "Sound         " + menu.OnOff(!set.Muted) },
-				Adjust: func(int) { set.Muted = !set.Muted },
-				Action: func() { set.Muted = !set.Muted },
-			},
-			{
-				Label:  func() string { return "AI camera     " + menu.OnOff(set.ShowPanel) },
-				Adjust: func(int) { set.ShowPanel = !set.ShowPanel },
-				Action: func() { set.ShowPanel = !set.ShowPanel },
-			},
-			{
-				Label:  func() string { return "Box labels    " + menu.OnOff(set.ShowLabels) },
-				Adjust: func(int) { set.ShowLabels = !set.ShowLabels },
-				Action: func() { set.ShowLabels = !set.ShowLabels },
-			},
-			{
-				Label: func() string { return fmt.Sprintf("Traffic       %d cars", set.Traffic) },
-				Adjust: func(d int) {
-					set.Traffic = geom.Clamp(set.Traffic+d*trafficStep, trafficMin, trafficMax)
-				},
-			},
-			{
-				Label: func() string { return fmt.Sprintf("Police        %d units", set.Police) },
-				Adjust: func(d int) {
-					set.Police = geom.Clamp(set.Police+d*policeStep, policeMin, policeMax)
-				},
-			},
-			{
-				Label:  func() string { return "Viewpoint     " + set.Camera.String() },
-				Adjust: func(d int) { set.Camera = cycleCamera(set.Camera, d) },
-			},
-			{
-				Label: func() string { return "Autopilot     " + set.Mode.String() },
-				Adjust: func(d int) {
-					set.Mode = autopilot.Mode((int(set.Mode) + d + int(autopilot.NumModes)) % int(autopilot.NumModes))
-				},
-			},
-			{
-				Label:  func() string { return "Jobs on auto  " + menu.OnOff(set.AutopilotJobs) },
-				Adjust: func(int) { set.AutopilotJobs = !set.AutopilotJobs },
-				Action: func() { set.AutopilotJobs = !set.AutopilotJobs },
-			},
-			{
-				Label:  func() string { return "Weather       " + set.Weather.String() },
-				Adjust: func(d int) { set.Weather = cycleWeather(set.Weather, d) },
-			},
-			{
-				Label:  func() string { return "Start time    " + set.Time.String() },
-				Adjust: func(d int) { set.Time = cycleTime(set.Time, d) },
-			},
-			{
-				Label:  func() string { return "Day length    " + set.DayLength.String() },
-				Adjust: func(d int) { set.DayLength = cycleDayLength(set.DayLength, d) },
-			},
-			{Label: text("Back"), Action: s.leaveSettings},
-		},
-	}
-}
-
-// showGarage opens the garage, where the player's car is chosen. Changes take
-// effect at once on a game that is running.
-func (s *Shell) showGarage(from screen) {
-	s.prev, s.screen = from, screenGarage
-	set := &s.settings
-	sub := "left and right choose, enter goes back"
-	if from == screenPaused && s.game != nil && s.game.Networked() {
-		sub = "the shape of the car is fixed for this chase"
-	}
-	s.menu = &menu.Menu{
-		Title:    "GARAGE",
-		Subtitle: []string{sub},
-		Items: []menu.Item{
-			{
-				Label:  func() string { return "Car     " + set.Car.Name() },
-				Adjust: func(d int) { set.Car = cycleBody(s.holdings().Drivables(), set.Car, d); s.applyCar() },
-			},
-			{
-				Label:  func() string { return "Paint   " + paintOf(set.Paint).name },
-				Adjust: func(d int) { set.Paint = cyclePaint(s.holdings().Wearables(), set.Paint, d); s.applyCar() },
-			},
-			{Label: text("Back"), Action: s.leaveSettings},
-		},
-	}
-}
-
 // applyCar puts the garage's choice on the car of a game that is running.
 func (s *Shell) applyCar() {
 	if s.game != nil {
 		s.game.SetCar(s.settings.Car, s.settings.Paint)
 	}
-}
-
-// cycleTime steps through the times of day, wrapping at both ends.
-func cycleTime(t TimeOfDay, dir int) TimeOfDay {
-	return TimeOfDay((int(t) + dir + int(NumTimes)) % int(NumTimes))
-}
-
-// cycleWeather steps through the weather settings, drift first, wrapping at
-// both ends.
-func cycleWeather(w weather.Setting, dir int) weather.Setting {
-	all := append([]weather.Setting{weather.Drift}, weather.Held(weather.Clear), weather.Held(weather.Rain),
-		weather.Held(weather.Fog), weather.Held(weather.Storm))
-	i := slices.Index(all, w)
-	return all[(max(i, 0)+dir+len(all))%len(all)]
-}
-
-// cycleCamera steps through the viewpoints, wrapping at both ends.
-func cycleCamera(m CameraMode, dir int) CameraMode {
-	return CameraMode((int(m) + dir + int(numCameraModes)) % int(numCameraModes))
-}
-
-func (s *Shell) leaveSettings() {
-	// Settings are written when the screen closes rather than on every
-	// keypress, so holding a key down does not hammer the disk.
-	if err := s.settings.Save(); err != nil {
-		s.notice = err.Error()
-	}
-	s.applyLive()
-	if s.prev == screenPaused && s.game != nil {
-		s.showPause()
-		return
-	}
-	s.showTitle()
 }
 
 // applyLive pushes the settings a running game can honour without restarting.
@@ -551,34 +342,6 @@ func masterVolume(set Settings) float32 {
 	return float32(set.Volume)
 }
 
-func (s *Shell) showJoin() {
-	s.screen = screenJoin
-	s.notice = ""
-}
-
-// editAddress runs the address entry on screenJoin. It is a plain text field
-// rather than a menu, because there is no list of hosts to choose from.
-func (s *Shell) editAddress() {
-	const maxAddr = 64
-	for {
-		c := rl.GetCharPressed()
-		if c == 0 {
-			break
-		}
-		if len(s.joinAddr) < maxAddr && addressRune(c) {
-			s.joinAddr += string(c)
-		}
-	}
-	switch {
-	case rl.IsKeyPressed(rl.KeyBackspace) && s.joinAddr != "":
-		s.joinAddr = s.joinAddr[:len(s.joinAddr)-1]
-	case rl.IsKeyPressed(rl.KeyEscape):
-		s.showTitle()
-	case rl.IsKeyPressed(rl.KeyEnter) && strings.TrimSpace(s.joinAddr) != "":
-		s.joinChase()
-	}
-}
-
 // addressRune reports whether a typed character can appear in a host and
 // port. Anything else is dropped rather than shown and rejected later.
 func addressRune(c rune) bool {
@@ -592,61 +355,87 @@ func addressRune(c rune) bool {
 	}
 }
 
+// hostChase starts hosting and waits in the lobby for the other player. The
+// lobby opens only once the session is up; a session that cannot start goes
+// back to the title with the reason.
 func (s *Shell) hostChase() {
 	if err := s.net.StartHosting(""); err != nil {
 		s.notice = err.Error()
-		s.showTitle()
+		s.goTitle()
 		return
 	}
-	s.enterLobby()
+	s.notice = ""
+	s.openPage(pageLobby)
 }
 
+// joinChase connects to the address typed on the Play page and waits in the
+// lobby for the host's world, as hostChase does.
 func (s *Shell) joinChase() {
 	if err := s.net.StartJoining(strings.TrimSpace(s.joinAddr)); err != nil {
 		s.notice = err.Error()
-		s.showTitle()
+		s.goTitle()
 		return
 	}
-	s.enterLobby()
+	s.notice = ""
+	s.openPage(pageLobby)
 }
 
-func (s *Shell) enterLobby() {
-	s.screen, s.notice = screenLobby, ""
+// startChallenge begins a scenario as a single-player drive with the autopilot
+// off, on the world challengeConfig builds.
+func (s *Shell) startChallenge(sc scenario.Scenario) {
+	s.challenge = &sc
+	s.startGame(false)
 }
 
-// watchLobby waits for the other player. The moment both ends are connected
-// the chase starts on each of them; until then the only way out is back.
-func (s *Shell) watchLobby() {
-	if rl.IsKeyPressed(rl.KeyEscape) {
-		s.net.Leave()
-		s.showTitle()
-		return
-	}
-	if err := s.net.Err(); err != nil && !s.net.Peered() {
-		s.notice = err.Error()
-		s.net.Leave()
-		s.showTitle()
-		return
-	}
-	if s.net.Peered() {
-		if err := s.protoErr(); err != nil {
-			s.notice = err.Error()
-			s.net.Leave()
-			s.showTitle()
-			return
-		}
-		// The host's own car is the autopilot's only in a chase; in co-op both
-		// players are at their keyboards.
-		s.startGame(s.net.Role() == netplay.Hosting && s.hostMode == ModeChase)
+// retryChallenge rebuilds the world from the same config and clears the run.
+func (s *Shell) retryChallenge() {
+	old := s.game.chal
+	s.startGame(false)
+	if s.game != nil && s.game.chal != nil && old != nil {
+		old.retry()
+		s.game.chal = old
 	}
 }
 
 // startGame builds a session from the current settings and hands the window
-// to it. A game already running is closed first.
+// to it. A game already running is closed first. A session that cannot start
+// goes back to the title with the reason.
 func (s *Shell) startGame(autopilot bool) {
 	if s.game != nil {
 		s.game.Close()
+		s.game = nil
 	}
+	o, err := s.sessionOptions(autopilot)
+	if err != nil {
+		s.net.Leave()
+		s.notice = err.Error()
+		s.goTitle()
+		return
+	}
+	// What the Play page chose is remembered once a drive starts from it.
+	s.settings.HostMode = s.hostMode
+	if err := s.settings.Save(); err != nil {
+		s.notice = err.Error()
+	}
+
+	s.feedFeats = featFeed{}
+	s.closeMenuDrive() // a real drive replaces the one behind the menus: menu_drive.go
+	s.pager = pager{}  // and nothing comes back to the page that started it
+	s.game = New(o)
+	s.game.net = s.net
+	s.game.showLabels = s.settings.ShowLabels
+	if s.game.Networked() {
+		s.game.seat()
+	}
+	rl.SetMasterVolume(masterVolume(s.settings))
+	s.screen = screenPlaying
+}
+
+// sessionOptions is what a drive started now is built from, or why it cannot
+// start: a joiner builds the host's world, a host its own settings' (with the
+// custom map, when Play chose it), and a drive alone its settings' with the
+// custom map or the challenge Play chose.
+func (s *Shell) sessionOptions(autopilot bool) (Options, error) {
 	o := s.opts
 	switch {
 	case s.net.Role() == netplay.Joining:
@@ -654,10 +443,14 @@ func (s *Shell) startGame(autopilot bool) {
 		// the snapshot names the world, and the lobby has already seen one.
 		o = s.joinerOptions(o)
 	case s.net.Online():
-		// The host chooses the world and the mode, and the joiner is told them.
+		// The host chooses the world and the mode, and the joiner is told them:
+		// a custom map goes to it as its share code, in the snapshot.
 		o = s.settings.applyTo(o).chaseReady()
 		if !o.Given["play"] {
 			o.Play = s.hostMode
+		}
+		if s.customPlay {
+			o.Custom = customOf(s.settings.Custom)
 		}
 	default:
 		o = s.settings.applyTo(o)
@@ -671,39 +464,12 @@ func (s *Shell) startGame(autopilot bool) {
 	// attached to it.
 	o.Networked = s.net.Online()
 	if err := o.coopValid(); err != nil {
-		s.net.Leave()
-		s.game = nil
-		s.notice = err.Error()
-		s.showTitle()
-		return
+		return o, err
 	}
 	o.Access = s.access()
-	if err := s.lockedFor(o); err != nil {
-		// Only a command line can ask for what the player does not hold or
-		// own; the menus never offer it.
-		s.net.Leave()
-		s.game = nil
-		s.notice = err.Error()
-		s.showTitle()
-		return
-	}
-	// The map is chosen on the title screen, and starting a drive is the only
-	// way off it that should remember the choice.
-	s.settings.HostMode = s.hostMode
-	if err := s.settings.Save(); err != nil {
-		s.notice = err.Error()
-	}
-
-	s.feedFeats = featFeed{}
-	s.closeMenuDrive() // a real drive replaces the one behind the menus: menu_drive.go
-	s.game = New(o)
-	s.game.net = s.net
-	s.game.showLabels = s.settings.ShowLabels
-	if s.game.Networked() {
-		s.game.seat()
-	}
-	rl.SetMasterVolume(masterVolume(s.settings))
-	s.screen = screenPlaying
+	// Only a command line can ask for what the player does not hold or own;
+	// the menus never offer it.
+	return o, s.lockedFor(o)
 }
 
 // lockedFor is why the session cannot be started with what the player holds, or
@@ -715,6 +481,9 @@ func (s *Shell) lockedFor(o Options) error {
 	}
 	return o.lockedFor(s.holdings())
 }
+
+// holdings is what the player has, in the shop's terms.
+func (s *Shell) holdings() shop.Holdings { return s.career.holdings(s.access()) }
 
 // protoErr is why a joiner cannot play against the host it has reached, or nil.
 // The two builds have to agree on what a snapshot means.
@@ -734,10 +503,16 @@ func (s *Shell) protoErr() error {
 // and mode, in the joiner's own view of it.
 func (s *Shell) joinerOptions(o Options) Options {
 	o = s.settings.applyViewTo(o).chaseReady()
-	snap, ok := s.net.Snapshot()
-	if !ok {
-		return o
+	if snap, ok := s.net.Snapshot(); ok {
+		o = joinerWorld(o, snap)
 	}
+	return o
+}
+
+// joinerWorld puts the world a host's snapshot names into a joiner's options:
+// the place, its size, the weather, the mode and any custom map, and the
+// host's car when the two share one.
+func joinerWorld(o Options, snap Snapshot) Options {
 	o.Seed, o.Map = snap.Seed, city.Map(snap.Map)
 	o.Traffic, o.Police = snap.Traffic, max(snap.Police, 1)
 	o.Weather = weather.Setting(snap.Weather)
@@ -751,7 +526,7 @@ func (s *Shell) joinerOptions(o Options) Options {
 
 func (s *Shell) resume() { s.screen = screenPlaying }
 
-// endGame abandons the drive and returns to the title screen, ending any
+// endGame abandons the drive and returns to the title page, ending any
 // network session with it.
 func (s *Shell) endGame() {
 	if s.game != nil {
@@ -759,8 +534,8 @@ func (s *Shell) endGame() {
 		s.game = nil
 	}
 	s.net.Leave()
-	s.showTitle()
+	s.goTitle()
 }
 
-// text wraps a fixed string as a menu label, for the rows that do not change.
+// text wraps a fixed string as a label, for the rows that do not change.
 func text(s string) func() string { return func() string { return s } }

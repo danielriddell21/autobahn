@@ -25,18 +25,22 @@ import (
 // This file is the model: which rows there are, what the cards say, why a
 // start is refused, and which of the shell's own routes a start takes. Starting
 // goes through startGame, startChallenge, hostChase and joinChase exactly as
-// the old title screen did, so what banks and what is locked is decided where
+// any drive does, so what banks and what is locked is decided where
 // it always was. menu_play_draw.go draws it.
 
 var _ = registerPage(pagePlay, func(s *Shell) *menuPage { return newPlayModel(s).page() }, hintsAdjust...)
 
-// playMode is which of the three ways to start a drive the page shows.
+// playMode is which of the three ways to start a drive the page shows. The
+// settings keep the last one (Settings.PlayMode), so the page and the title's
+// Play row open on it.
 type playMode int
 
 const (
 	playFree playMode = iota
 	playChallenge
 	playMulti
+
+	numPlayModes // not a mode
 )
 
 // playModeNames are the switch's words, in playMode order.
@@ -59,9 +63,9 @@ func playWeathers() []weather.Setting {
 }
 
 // playPage is the Play page's state. What a drive is started with lives in
-// the shell's settings (the map, weather, start time, autopilot style, car)
-// and its hostMode and joinAddr; the page keeps only what is chosen here and
-// nowhere else.
+// the shell's settings (the mode, the challenge, the map, weather, start time,
+// autopilot style, car) and its hostMode, joining and joinAddr; the page keeps
+// only what is chosen here and nowhere else.
 type playPage struct {
 	s    *Shell
 	list *rowList
@@ -73,8 +77,6 @@ type playPage struct {
 	auto bool
 	// chal is the chosen challenge, an index into scenarios.
 	chal int
-	// joining is whether multiplayer joins a game rather than hosting one.
-	joining bool
 
 	scenarios []scenario.Scenario
 	ghosts    map[string]scenario.Ghost
@@ -92,11 +94,13 @@ type playPage struct {
 // playCustomCard is the index of the Custom card, after every preset map.
 var playCustomCard = len(city.Maps())
 
-// newPlayModel makes the page's state, on the map the settings hold and with
-// the start button selected, so enter starts what the summary says.
+// newPlayModel makes the page's state, on the mode, challenge and map the
+// settings hold and with the start button selected, so enter starts what the
+// summary says.
 func newPlayModel(s *Shell) *playPage {
 	p := &playPage{
 		s:              s,
+		mode:           s.settings.PlayMode,
 		card:           max(slices.Index(city.Maps(), s.settings.Map), 0),
 		scenarios:      scenario.All(),
 		ghosts:         scenario.Ghosts(),
@@ -106,9 +110,22 @@ func newPlayModel(s *Shell) *playPage {
 		joinChase:      s.joinChase,
 		typed:          playTyped,
 	}
+	p.chal = max(slices.IndexFunc(p.scenarios, func(sc scenario.Scenario) bool {
+		return sc.ID == s.settings.Challenge
+	}), 0)
 	p.list = newRowList(p.rows()...)
 	p.list.Select("go")
 	return p
+}
+
+// scenarioByID is the challenge with the given ID.
+func scenarioByID(id string) (scenario.Scenario, bool) {
+	for _, sc := range scenario.All() {
+		if sc.ID == id {
+			return sc, true
+		}
+	}
+	return scenario.Scenario{}, false
 }
 
 // page is the registry's view of the page.
@@ -132,7 +149,10 @@ func (p *playPage) refresh() { p.list.SetRows(p.rows()) }
 // are drawn in: the switch, the mode's own rows, then Back and the start button.
 func (p *playPage) rows() []menuRow {
 	rows := []menuRow{optionsRow("mode", "Mode", playModeNames,
-		func() int { return int(p.mode) }, func(i int) { p.mode = playMode(i) })}
+		func() int { return int(p.mode) }, func(i int) {
+			p.mode = playMode(i)
+			p.s.settings.PlayMode = p.mode
+		})}
 	switch p.mode {
 	case playChallenge:
 		rows = append(rows, p.chalRow(), p.carRow())
@@ -182,8 +202,8 @@ func (p *playPage) freeRows() []menuRow {
 // multiRows are multiplayer's: host or join, then that panel's rows.
 func (p *playPage) multiRows() []menuRow {
 	rows := []menuRow{optionsRow("role", "Host or join", []string{"Host a game", "Join a game"},
-		func() int { return playBool(p.joining) }, func(i int) { p.joining = i == 1 })}
-	if p.joining {
+		func() int { return playBool(p.s.joining) }, func(i int) { p.s.joining = i == 1 })}
+	if p.s.joining {
 		addr := actionRow("addr", "Host address", p.start).
 			noted(func() string { return p.s.joinAddr })
 		return append(rows, addr, p.carRow())
@@ -217,7 +237,10 @@ func (p *playPage) chalRow() menuRow {
 	for i, sc := range p.scenarios {
 		names[i] = sc.Name
 	}
-	r := optionsRow("chal", "Challenge", names, func() int { return p.chal }, func(i int) { p.chal = i })
+	r := optionsRow("chal", "Challenge", names, func() int { return p.chal }, func(i int) {
+		p.chal = i
+		p.s.settings.Challenge = p.scenarios[i].ID
+	})
 	r.Activate = func() { p.list.Select("go") }
 	return r
 }
@@ -231,8 +254,8 @@ func (p *playPage) carRow() menuRow {
 }
 
 // pickCard chooses a map card. A preset the player holds becomes the map in
-// the settings, as the title screen's map row made it; a locked one is only
-// looked at, so nothing that drives the settings' map is ever handed one.
+// the settings; a locked one is only looked at, so nothing that drives the
+// settings' map is ever handed one.
 func (p *playPage) pickCard(i int) {
 	p.card = i
 	if maps := city.Maps(); i < len(maps) && p.s.access().HasMap(maps[i]) {
@@ -245,7 +268,7 @@ func (p *playPage) goLabel() string {
 	switch {
 	case p.mode == playChallenge:
 		return "Start the challenge"
-	case p.mode == playMulti && p.joining:
+	case p.mode == playMulti && p.s.joining:
 		return "Connect"
 	case p.mode == playMulti:
 		return "Start hosting"
@@ -265,13 +288,11 @@ func (p *playPage) why() string {
 				return why
 			}
 		}
-	case p.mode == playMulti && p.joining:
+	case p.mode == playMulti && p.s.joining:
 		if strings.TrimSpace(p.s.joinAddr) == "" {
 			return "type the host's address first"
 		}
 		return ""
-	case p.mode == playMulti && p.card == playCustomCard:
-		return "a custom map is hosted with -custom on the command line"
 	case p.card == playCustomCard:
 		if err := p.customSpec().Locked(p.s.access()); err != nil {
 			return "the custom map cannot start: " + err.Error()
@@ -322,8 +343,14 @@ func (p *playPage) start() {
 		s.customPlay = false
 		p.startChallenge(sc)
 	case playMulti:
-		s.customPlay, s.challenge = false, nil
-		if p.joining {
+		// A joiner builds the host's world; a host may host the custom map,
+		// which goes to the joiner as its share code.
+		s.challenge = nil
+		s.customPlay = !s.joining && p.card == playCustomCard
+		if s.customPlay {
+			s.settings.Custom = p.customCode()
+		}
+		if s.joining {
 			p.joinChase()
 			return
 		}
@@ -411,12 +438,12 @@ func (p *playPage) typeAddress() bool {
 	return true
 }
 
-// maxJoinAddr is the longest address the field takes, as on the old screen.
+// maxJoinAddr is the longest address the field takes.
 const maxJoinAddr = 64
 
-// editJoinAddr is the address after a frame's typing, by the old join
-// screen's rules: only what can be in a host and port is taken, up to
-// maxJoinAddr, and backspace takes the last character off.
+// editJoinAddr is the address after a frame's typing: only what can be in a
+// host and port is taken, up to maxJoinAddr, and backspace takes the last
+// character off.
 func editJoinAddr(addr string, chars []rune, backspace bool) string {
 	for _, c := range chars {
 		if len(addr) < maxJoinAddr && addressRune(c) {
@@ -465,11 +492,13 @@ func (p *playPage) summary() string {
 		}
 		return playJoin(sc.Name, playMapTitle(sc.CityMap()),
 			fmt.Sprintf("ghost %d", p.ghosts[sc.ID].Score), "banks nothing")
-	case p.mode == playMulti && p.joining:
+	case p.mode == playMulti && p.s.joining:
 		if addr := strings.TrimSpace(s.joinAddr); addr != "" {
 			return playJoin("joining "+addr, s.settings.Car.Name())
 		}
 		return "joining: no address yet"
+	case p.mode == playMulti && p.card == playCustomCard:
+		return playJoin(s.hostMode.String()+" on "+p.cardTitle(p.card), s.settings.Car.Name(), "banks nothing")
 	case p.mode == playMulti:
 		return playJoin(s.hostMode.String()+" on "+p.cardTitle(p.card), s.settings.Car.Name())
 	}

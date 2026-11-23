@@ -8,12 +8,15 @@ import (
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 
+	"github.com/danielriddell21/autobahn/internal/city"
+	"github.com/danielriddell21/autobahn/internal/custom"
 	"github.com/danielriddell21/autobahn/internal/pack"
+	"github.com/danielriddell21/autobahn/internal/scenario"
 )
 
 // The title page (docs/menus.md, "Title"): a grouped list on the left and a
-// card on the right that follows the selection. It is reached with
-// s.openPage(pageTitle); the integrator links the old showTitle to it.
+// card on the right that follows the selection. The shell opens on it, and
+// every drive, failed start and lobby ends on it (Shell.goTitle).
 
 var _ = registerPage(pageTitle, newTitlePage, hintsChoose...)
 
@@ -85,10 +88,26 @@ func nextPack(a pack.Access) (pack.Pack, bool) {
 	return best, found
 }
 
-// titlePlayNote says what Play will start: the mode and map last chosen.
+// titleChallenge is the challenge the Play page would open on: the one last
+// chosen, or the first.
+func (s *Shell) titleChallenge() scenario.Scenario {
+	if sc, ok := scenarioByID(s.settings.Challenge); ok {
+		return sc
+	}
+	return scenario.All()[0]
+}
+
+// titlePlayNote says what Play will start: the mode last chosen on the Play
+// page, and the map, the challenge, or whether it hosts or joins.
 func (s *Shell) titlePlayNote() string {
-	if s.customPlay {
-		return "free drive, custom map"
+	switch s.settings.PlayMode {
+	case playChallenge:
+		return "challenge, " + s.titleChallenge().Name
+	case playMulti:
+		if s.joining {
+			return strings.TrimSpace("multiplayer, join " + s.joinAddr)
+		}
+		return "multiplayer, host " + strings.ToLower(s.hostMode.String())
 	}
 	return "free drive, " + s.settings.Map.Name()
 }
@@ -132,18 +151,16 @@ type titleCard struct {
 	Head  string   // the card's title
 	Tag   string   // a chip: the season, or ""
 	Lines []string // plain lines under it
+	// Pictured says the card shows a plan of Map, when there is room for one.
+	Pictured bool
+	Map      city.Map
 }
 
 // titleCardFor works out the card for a row key.
 func (s *Shell) titleCardFor(key string) titleCard {
 	switch key {
 	case titlePlay:
-		m := s.settings.Map
-		return titleCard{
-			Head:  strings.ToUpper(m.Name()),
-			Tag:   m.Season().Name(),
-			Lines: []string{"Free drive, challenge or multiplayer."},
-		}
+		return s.titlePlayCard()
 	case titleGarage:
 		return titleCard{
 			Head:  strings.ToUpper(s.settings.Car.Name()),
@@ -169,6 +186,32 @@ func (s *Shell) titleCardFor(key string) titleCard {
 		return titleCard{Head: "QUIT", Lines: []string{"Your career is saved."}}
 	}
 	return titleCard{}
+}
+
+// titlePlayCard is the Play row's card: the map, or the challenge, that Play
+// would start on.
+func (s *Shell) titlePlayCard() titleCard {
+	m := s.settings.Map
+	c := titleCard{
+		Head:     strings.ToUpper(m.Name()),
+		Tag:      m.Season().Name(),
+		Lines:    []string{"Free drive, challenge or multiplayer."},
+		Pictured: true, Map: m,
+	}
+	switch s.settings.PlayMode {
+	case playChallenge:
+		sc := s.titleChallenge()
+		c.Head, c.Map = strings.ToUpper(sc.Name), sc.CityMap()
+		c.Tag = c.Map.Season().Name()
+		c.Lines = []string{playMapTitle(c.Map) + ". " + sc.Brief(), "Beat the autopilot's ghost. Banks nothing."}
+	case playMulti:
+		c.Lines = []string{"Host " + strings.ToLower(s.hostMode.String()) + " on " + playMapTitle(m) + "."}
+		if s.joining {
+			// A joiner drives the host's map, which is not known until it arrives.
+			c = titleCard{Head: "MULTIPLAYER", Lines: []string{"Join a game: you get the host's map, mode and weather."}}
+		}
+	}
+	return c
 }
 
 // newTitlePage builds the title page. Esc opens the quit dialog.
@@ -206,10 +249,52 @@ func (s *Shell) drawTitlePage(pg *menuPage) {
 		}
 		y += 12
 	}
-	cx := int32(pageMargin*2 + pageListW)
-	if w-cx-pageMargin > 200 {
-		s.drawTitleCard(rect(cx, pageListTop, w-cx-pageMargin, min(300, h-pageListTop-pageFoot)), s.titleCardFor(pg.List.SelectedKey()))
+	card := s.titleCardFor(pg.List.SelectedKey())
+	if s.menuDriveOn() {
+		// The drive is the picture: the card drops its own and sits small at
+		// the bottom right, out of the drive's way.
+		cw := min(int32(titleSmallW), w-2*pageMargin)
+		lines := wrapText(card.Lines, cw-40, faceBody)
+		ch := titleCardHeight(card, lines)
+		s.drawTitleCard(rect(w-pageMargin-cw, h-pageFoot-16-ch, cw, ch), card, lines, nil)
+		return
 	}
+	cx := int32(pageMargin*2 + pageListW)
+	if w-cx-pageMargin <= 200 {
+		return
+	}
+	cw := w - cx - pageMargin
+	lines := wrapText(card.Lines, cw-40, faceBody)
+	pic := min(titlePictureH, max(h-pageListTop-pageFoot-titleCardHeight(card, lines)-20, 0))
+	var plan *customPlan
+	if card.Pictured && pic >= 80 {
+		plan = s.titlePlan.Ask(custom.FromMap(card.Map, 1))
+	} else {
+		pic = 0
+	}
+	ch := titleCardHeight(card, lines) + pic
+	s.drawTitleCard(rect(cx, pageListTop, cw, ch), card, lines, &titlePicture{plan: plan, h: pic})
+}
+
+// Title card sizes, in pixels.
+const (
+	titleSmallW   = 340 // the card while the menu drive is behind the page
+	titlePictureH = 220 // the map's picture on the full card, at most
+)
+
+// titlePicture is the plan drawn at the top of the full card, and its height.
+type titlePicture struct {
+	plan *customPlan
+	h    int32
+}
+
+// titleCardHeight is how tall the card's words stand.
+func titleCardHeight(c titleCard, lines []string) int32 {
+	h := 20 + faceRow.height() + 10 + int32(len(lines))*(faceBody.height()+6) + 14
+	if c.Tag != "" {
+		h += 30
+	}
+	return h
 }
 
 // drawTitleRow draws a row, the Career row's NEW as a chip.
@@ -224,17 +309,23 @@ func drawTitleRow(r rl.Rectangle, v rowView) {
 	}
 }
 
-// drawTitleCard draws the card on the right.
-func (s *Shell) drawTitleCard(r rl.Rectangle, c titleCard) {
+// drawTitleCard draws the card on the right, with the map's picture across
+// its top when it has one.
+func (s *Shell) drawTitleCard(r rl.Rectangle, c titleCard, lines []string, pic *titlePicture) {
 	drawCard(r, false)
 	x, y := int32(r.X)+20, int32(r.Y)+20
+	if pic != nil && pic.h > 0 {
+		inset := rl.NewRectangle(r.X+6, r.Y+6, r.Width-12, float32(pic.h)-6)
+		drawPlanPicture(inset, pic.plan, c.Map.Season(), false)
+		y += pic.h
+	}
 	faceRow.draw(c.Head, x, y, signInk)
 	y += faceRow.height() + 10
 	if c.Tag != "" {
 		drawChip(x, y, c.Tag, toneOffer)
 		y += 30
 	}
-	for _, l := range c.Lines {
+	for _, l := range lines {
 		faceBody.draw(l, x, y, signDim)
 		y += faceBody.height() + 6
 	}

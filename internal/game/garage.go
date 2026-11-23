@@ -77,19 +77,6 @@ func cycleBody(all []sim.BodyKind, k sim.BodyKind, dir int) sim.BodyKind {
 	return all[((at+dir)%n+n)%n]
 }
 
-// cycleMap steps through the maps on offer the same way.
-func cycleMap(all []city.Map, m city.Map, dir int) city.Map {
-	n := len(all)
-	if n == 0 {
-		return m
-	}
-	at := slices.Index(all, m)
-	if at < 0 {
-		return all[0]
-	}
-	return all[((at+dir)%n+n)%n]
-}
-
 // SetCar repaints and reshapes the player's car in a running game. A chase
 // against another person keeps the car it started with, because both machines
 // have to agree on its size.
@@ -197,7 +184,7 @@ func turntable(radius float32, sides int, col rl.Color) {
 	rl.End()
 }
 
-// carBlurb is the line under the preview saying how a shape drives.
+// carBlurb is the garage's line saying how a shape drives.
 func carBlurb(k sim.BodyKind) string {
 	if b, ok := blurbs[k]; ok {
 		return b

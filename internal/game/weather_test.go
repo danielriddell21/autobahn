@@ -166,17 +166,13 @@ func TestWeatherSettingDriftsByDefaultAndYieldsToTheFlag(t *testing.T) {
 	}
 }
 
-func TestCycleWeatherVisitsEveryOneAndWraps(t *testing.T) {
+func TestPlayOffersEveryWeatherOnce(t *testing.T) {
+	ws := playWeathers()
 	seen := map[weather.Setting]bool{}
-	w := weather.Drift
-	for range 5 {
+	for _, w := range ws {
 		seen[w] = true
-		w = cycleWeather(w, 1)
 	}
-	if len(seen) != 5 || w != weather.Drift {
-		t.Errorf("a lap of the weather settings visited %d and ended on %v", len(seen), w)
-	}
-	if cycleWeather(weather.Drift, -1) != weather.Held(weather.Storm) {
-		t.Error("stepping back from drift did not wrap")
+	if len(ws) != 5 || len(seen) != 5 || ws[0] != weather.Drift || !seen[weather.Held(weather.Storm)] {
+		t.Errorf("Play offers %v, want drift then every weather held, once each", ws)
 	}
 }
